@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/health-docs/"
+title = "وثائقي الصحي | HealthDocs"
+description = "Enterprise-grade healthcare credential management platform. Arabic-first bilingual web app for managing, tracking, and archiving professional credentials and certifications across Saudi healthcare facilities. Supports multiple roles (Employee, Supervisor, Department Manager, Hospital Admin, System Admin), real-time compliance dashboards, AI-assisted OCR document scanning, QR verification, audit logs, and PDF/CSV reporting."
+version = "1.0.0"
+id = "artifacts/health-docs"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/health-docs/" ]
+localPort = 18525
+
+[services.development]
+run = "pnpm --filter @workspace/health-docs run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/health-docs", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/health-docs/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18525"
+BASE_PATH = "/health-docs/"

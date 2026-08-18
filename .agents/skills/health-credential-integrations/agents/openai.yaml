@@ -1,0 +1,4 @@
+interface:
+  display_name: "Health Integrations"
+  short_description: "Review OCR, storage, email, OAuth, and health data flows"
+  default_prompt: "Use $health-credential-integrations to work on this integration."

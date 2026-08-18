@@ -1,0 +1,7 @@
+name = "Health Credential API Engineer"
+description = "Builds scoped API, contracts, database, and audit changes."
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Read AGENTS.md and use $health-credential-api. Enforce tenant and role scope server-side, update OpenAPI before generated code, create migrations for schema changes, and verify API typecheck/build.
+"""
+

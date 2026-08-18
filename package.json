@@ -1,0 +1,26 @@
+{
+  "name": "health-credential-hub",
+  "version": "1.0.0",
+  "description": "Healthcare workforce credential management hub with web, mobile, API, and demo applications.",
+  "license": "MIT",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=11.19.0 <12"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/itzzkemo-cyber/Health-Credential-Hub.git"
+  },
+  "scripts": {
+    "preinstall": "node -e \"const fs=require('node:fs'); for (const file of ['package-lock.json','yarn.lock']) fs.rmSync(file,{force:true}); if (!process.env.npm_config_user_agent?.startsWith('pnpm/')) { console.error('Use pnpm instead'); process.exit(1); }\"",
+    "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "typecheck:libs": "tsc --build",
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+  },
+  "private": true,
+  "devDependencies": {
+    "prettier": "^3.9.6",
+    "typescript": "~5.9.3"
+  }
+}

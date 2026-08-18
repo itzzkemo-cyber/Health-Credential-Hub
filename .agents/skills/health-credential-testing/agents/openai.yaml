@@ -1,0 +1,4 @@
+interface:
+  display_name: "Health Credential Testing"
+  short_description: "Design and run risk-based tests for the monorepo"
+  default_prompt: "Use $health-credential-testing to verify this change."

@@ -1,0 +1,54 @@
+# Dependencies and package-manager state
+node_modules/
+.pnpm-store/
+
+# Build output and caches
+dist/
+build/
+out/
+out-tsc/
+static-build/
+tmp/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+.cache/
+.local/
+.turbo/
+.vite/
+.metro-cache/
+.expo/
+.expo-shared/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editors and operating systems
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+# Local tooling
+.cursor/
+connect.lock
+

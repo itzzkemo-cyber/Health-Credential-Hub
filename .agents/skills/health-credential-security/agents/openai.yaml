@@ -1,0 +1,4 @@
+interface:
+  display_name: "Health Credential Security"
+  short_description: "Review tenant isolation, privacy, auth, and file security"
+  default_prompt: "Use $health-credential-security to review this change."

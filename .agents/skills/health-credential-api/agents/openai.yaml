@@ -1,0 +1,4 @@
+interface:
+  display_name: "Health Credential API"
+  short_description: "Develop the API, RBAC, database, and contracts"
+  default_prompt: "Use $health-credential-api to implement this API or database change."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Health Credential Frontend"
+  short_description: "Build the web and mobile credential experiences"
+  default_prompt: "Use $health-credential-frontend to implement this UI change safely."

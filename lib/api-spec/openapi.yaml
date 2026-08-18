@@ -1,0 +1,2104 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: HealthDocs - Healthcare Credential Management Platform API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: credentials
+    description: Credential management
+  - name: employees
+    description: Employee management
+  - name: departments
+    description: Department management
+  - name: notifications
+    description: Notification management
+  - name: audit
+    description: Audit log operations
+  - name: dashboard
+    description: Dashboard and analytics
+  - name: policies
+    description: Credential requirement policies
+  - name: reports
+    description: Reports and exports
+
+  - name: Storage
+    description: Object storage upload and serving endpoints.
+paths:
+  /storage/uploads/request-url:
+    post:
+      tags: [Storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      description: |
+        Returns a presigned GCS URL for direct upload. The client sends JSON
+        metadata here, then uploads the file directly to the returned URL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadUrlRequest'
+      responses:
+        '200':
+          description: Presigned upload URL generated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadUrlResponse'
+        '400':
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Failed to generate upload URL.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /storage/public-objects/{filePath}:
+    get:
+      tags: [Storage]
+      operationId: getPublicObject
+      summary: Serve a public asset from PUBLIC_OBJECT_SEARCH_PATHS
+      description: |
+        Unconditionally public — no authentication or ACL checks.
+        Searches PUBLIC_OBJECT_SEARCH_PATHS for the given file path.
+      parameters:
+        - name: filePath
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Relative file path within the public search paths.
+      responses:
+        '200':
+          description: Object content streamed with correct Content-Type.
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: File not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Failed to serve public object.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /storage/objects/{objectPath}:
+    get:
+      tags: [Storage]
+      operationId: getStorageObject
+      summary: Serve an object entity from PRIVATE_OBJECT_DIR
+      description: |
+        Serves credential document files. Requires authentication; access is
+        limited to the file owner and manager roles.
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Object path within the private object dir (e.g. `uploads/some-uuid`).
+      responses:
+        '200':
+          description: Object content streamed with correct Content-Type.
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Not authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '403':
+          description: Not allowed to access this object.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: Object not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          description: Failed to serve object.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  # Auth
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "202":
+          description: Password correct but 2FA is enabled — complete the OTP challenge to get a session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TwoFactorPending"
+        "401":
+          description: Invalid credentials
+
+  /auth/demo-login:
+    post:
+      operationId: demoLogin
+      tags: [auth]
+      summary: Sign in to a showcase demo account (credentials never leave the server)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DemoLoginInput"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "403":
+          description: Demo login disabled or demo account unavailable
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Self-registration — create an employee account and sign in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInput"
+      responses:
+        "200":
+          description: Account created and signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Missing/invalid fields or password shorter than 8 characters
+        "409":
+          description: Email already in use
+
+  /facilities:
+    get:
+      operationId: getFacilities
+      tags: [facilities]
+      summary: List facilities (public — powers the registration facility dropdown)
+      responses:
+        "200":
+          description: Facilities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FacilityOption"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+
+  /auth/change-password:
+    post:
+      operationId: changePassword
+      tags: [auth]
+      summary: Change password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordInput"
+      responses:
+        "200":
+          description: >-
+            Password changed. All other sessions are revoked; the response
+            carries a fresh token for this session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChangePasswordResult"
+
+  /auth/forgot-password:
+    post:
+      operationId: forgotPassword
+      tags: [auth]
+      summary: Request password reset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordInput"
+      responses:
+        "200":
+          description: Reset email sent
+
+  /auth/reset-password:
+    post:
+      operationId: resetPassword
+      tags: [auth]
+      summary: Set a new password using an emailed reset token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordInput"
+      responses:
+        "200":
+          description: Password updated; session issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "202":
+          description: Password updated but 2FA is enabled — complete the OTP challenge to get a session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TwoFactorPending"
+        "400":
+          description: Invalid or expired token, or password too short
+
+  # Two-factor authentication (TOTP)
+  /auth/totp/setup:
+    post:
+      operationId: totpSetup
+      tags: [auth]
+      summary: Begin enabling 2FA — returns the secret, QR image and a signed setup token (nothing persisted yet)
+      responses:
+        "200":
+          description: Pending enrollment data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpSetupData"
+        "400":
+          description: Two-factor authentication already enabled
+
+  /auth/totp/verify-setup:
+    post:
+      operationId: totpVerifySetup
+      tags: [auth]
+      summary: Confirm the first OTP to activate 2FA and receive single-use backup codes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpVerifySetupInput"
+      responses:
+        "200":
+          description: 2FA activated; backup codes shown exactly once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpActivation"
+        "400":
+          description: Invalid code, expired setup session, or already enabled
+
+  /auth/totp/challenge:
+    post:
+      operationId: totpChallenge
+      tags: [auth]
+      summary: Exchange a pending 2FA challenge token plus an OTP or backup code for a full session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpChallengeInput"
+      responses:
+        "200":
+          description: Second factor accepted; session issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid code, expired challenge, or too many attempts
+
+  /auth/totp/disable:
+    delete:
+      operationId: totpDisable
+      tags: [auth]
+      summary: Disable 2FA (requires current password AND a valid OTP or backup code)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpConfirmInput"
+      responses:
+        "200":
+          description: Two-factor authentication disabled
+        "400":
+          description: Wrong password, invalid code, or 2FA not enabled
+
+  /auth/totp/regenerate-backup:
+    post:
+      operationId: totpRegenerateBackup
+      tags: [auth]
+      summary: Generate a fresh batch of backup codes, invalidating all previous ones
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpConfirmInput"
+      responses:
+        "200":
+          description: New backup codes shown exactly once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpActivation"
+        "400":
+          description: Wrong password, invalid code, or 2FA not enabled
+
+  /auth/totp/admin-disable:
+    post:
+      operationId: totpAdminDisable
+      tags: [auth]
+      summary: Admin recovery — disable 2FA for a locked-out employee (hospital/system admins)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpAdminDisableInput"
+      responses:
+        "200":
+          description: Two-factor authentication disabled for the employee
+        "400":
+          description: 2FA not enabled for this account
+        "403":
+          description: Not an admin
+        "404":
+          description: Employee not found or outside your facility
+
+  # Dashboard
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Get role-based dashboard stats
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /dashboard/compliance:
+    get:
+      operationId: getComplianceOverview
+      tags: [dashboard]
+      summary: Get compliance overview by department
+      responses:
+        "200":
+          description: Compliance by department
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DepartmentCompliance"
+
+  /dashboard/activity:
+    get:
+      operationId: getRecentActivity
+      tags: [dashboard]
+      summary: Get recent activity feed
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityItem"
+
+  # Credentials
+  /credentials:
+    get:
+      operationId: listCredentials
+      tags: [credentials]
+      summary: List credentials
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, expiring_soon, expired, missing]
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: employeeId
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: departmentId
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: number
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: number
+            default: 20
+      responses:
+        "200":
+          description: List of credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialListResponse"
+
+    post:
+      operationId: createCredential
+      tags: [credentials]
+      summary: Create credential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Credential"
+
+  /credentials/expiring:
+    get:
+      operationId: getExpiringCredentials
+      tags: [credentials]
+      summary: Get credentials expiring within N days
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: number
+            default: 90
+      responses:
+        "200":
+          description: Expiring credentials
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Credential"
+
+  /credentials/missing:
+    get:
+      operationId: getMissingCredentials
+      tags: [credentials]
+      summary: Get missing required credentials
+      parameters:
+        - name: employeeId
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: departmentId
+          in: query
+          schema:
+            type: ["number", "null"]
+      responses:
+        "200":
+          description: Missing credentials
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MissingCredential"
+
+  /credentials/ocr:
+    post:
+      operationId: extractCredentialOcr
+      tags: [credentials]
+      summary: Extract credential data from the uploaded document using AI vision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OcrInput"
+      responses:
+        "200":
+          description: Extracted credential data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OcrResult"
+
+  /credentials/{id}:
+    get:
+      operationId: getCredential
+      tags: [credentials]
+      summary: Get credential by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Credential
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Credential"
+        "404":
+          description: Not found
+
+    patch:
+      operationId: updateCredential
+      tags: [credentials]
+      summary: Update credential
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialUpdate"
+      responses:
+        "200":
+          description: Updated credential
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Credential"
+
+    delete:
+      operationId: deleteCredential
+      tags: [credentials]
+      summary: Delete credential
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "204":
+          description: Deleted
+
+  /credentials/{id}/verify:
+    get:
+      operationId: verifyCredential
+      tags: [credentials]
+      summary: Public credential verification by QR token
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Public verification data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialVerification"
+
+  /credentials/check-duplicate:
+    post:
+      operationId: checkDuplicate
+      tags: [credentials]
+      summary: Check for duplicate credential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DuplicateCheckInput"
+      responses:
+        "200":
+          description: Duplicate check result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DuplicateCheckResult"
+
+  # Employees
+  /employees:
+    get:
+      operationId: listEmployees
+      tags: [employees]
+      summary: List employees
+      parameters:
+        - name: facilityId
+          in: query
+          description: Optional facility selector for system administrators.
+          schema:
+            type: number
+        - name: departmentId
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: supervisorId
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: role
+          in: query
+          schema:
+            type: string
+        - name: isActive
+          in: query
+          schema:
+            type: boolean
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: atRisk
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: List of employees
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EmployeeWithStats"
+
+    post:
+      operationId: createEmployee
+      tags: [employees]
+      summary: Create employee
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeeInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+
+  /employees/{id}:
+    get:
+      operationId: getEmployee
+      tags: [employees]
+      summary: Get employee by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Employee with stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeDetail"
+        "404":
+          description: Not found
+
+    patch:
+      operationId: updateEmployee
+      tags: [employees]
+      summary: Update employee
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeeUpdate"
+      responses:
+        "200":
+          description: Updated employee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+
+    delete:
+      operationId: deleteEmployee
+      tags: [employees]
+      summary: Delete employee
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "204":
+          description: Deleted
+
+  /employees/{id}/activate:
+    post:
+      operationId: activateEmployee
+      tags: [employees]
+      summary: Activate employee
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Employee activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+
+  /employees/{id}/deactivate:
+    post:
+      operationId: deactivateEmployee
+      tags: [employees]
+      summary: Deactivate employee
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Employee deactivated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+
+  # Departments
+  /departments:
+    get:
+      operationId: listDepartments
+      tags: [departments]
+      summary: List departments
+      responses:
+        "200":
+          description: List of departments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DepartmentWithStats"
+
+    post:
+      operationId: createDepartment
+      tags: [departments]
+      summary: Create department
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepartmentInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Department"
+
+  /departments/{id}:
+    get:
+      operationId: getDepartment
+      tags: [departments]
+      summary: Get department by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Department
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepartmentWithStats"
+
+    patch:
+      operationId: updateDepartment
+      tags: [departments]
+      summary: Update department
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepartmentUpdate"
+      responses:
+        "200":
+          description: Updated department
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Department"
+
+    delete:
+      operationId: deleteDepartment
+      tags: [departments]
+      summary: Delete department
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "204":
+          description: Deleted
+
+  # Notifications
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [notifications]
+      summary: List notifications for current user
+      parameters:
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+
+  /notifications/unread-count:
+    get:
+      operationId: getUnreadCount
+      tags: [notifications]
+      summary: Get unread notification count
+      responses:
+        "200":
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnreadCount"
+
+  /notifications/mark-all-read:
+    post:
+      operationId: markAllNotificationsRead
+      tags: [notifications]
+      summary: Mark all notifications as read
+      responses:
+        "200":
+          description: All marked read
+
+  /notifications/{id}/read:
+    post:
+      operationId: markNotificationRead
+      tags: [notifications]
+      summary: Mark notification as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Marked read
+
+  # Audit Logs
+  /audit-logs:
+    get:
+      operationId: listAuditLogs
+      tags: [audit]
+      summary: List audit logs
+      parameters:
+        - name: userId
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: number
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: number
+            default: 50
+      responses:
+        "200":
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogListResponse"
+
+  # Policies
+  /policies:
+    get:
+      operationId: listPolicies
+      tags: [policies]
+      summary: List credential requirement policies
+      responses:
+        "200":
+          description: Policies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CredentialPolicy"
+
+    post:
+      operationId: createPolicy
+      tags: [policies]
+      summary: Create credential requirement policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CredentialPolicyInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CredentialPolicy"
+
+  /policies/{id}:
+    delete:
+      operationId: deletePolicy
+      tags: [policies]
+      summary: Delete policy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: number
+      responses:
+        "204":
+          description: Deleted
+
+  # Reports
+  /reports/compliance:
+    get:
+      operationId: getComplianceReport
+      tags: [reports]
+      summary: Generate compliance report
+      parameters:
+        - name: facilityId
+          in: query
+          description: Optional facility selector for system administrators.
+          schema:
+            type: number
+        - name: departmentId
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
+      responses:
+        "200":
+          description: Compliance report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplianceReport"
+
+components:
+  schemas:
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Original file name.
+        size:
+          type: number
+          minimum: 1
+          description: File size in bytes.
+        contentType:
+          type: string
+          minLength: 1
+          description: MIME type of the file (e.g. `image/jpeg`).
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL:
+          type: string
+          description: Presigned GCS URL for PUT upload.
+        objectPath:
+          type: string
+          description: Normalized object path (e.g. `/objects/uploads/uuid`). Store this in your database.
+        metadata:
+          $ref: '#/components/schemas/UploadUrlRequest'
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required: [status]
+
+    # Auth
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    DemoLoginInput:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum:
+            [system_admin, hospital_admin, department_manager, supervisor, employee]
+
+    AuthResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/User"
+
+    TwoFactorPending:
+      type: object
+      required: [pending2fa, challengeToken]
+      properties:
+        pending2fa:
+          type: boolean
+        challengeToken:
+          type: string
+
+    TotpSetupData:
+      type: object
+      required: [secret, otpauthUrl, qrDataUrl, setupToken]
+      properties:
+        secret:
+          type: string
+        otpauthUrl:
+          type: string
+        qrDataUrl:
+          type: string
+        setupToken:
+          type: string
+
+    TotpVerifySetupInput:
+      type: object
+      required: [setupToken, code]
+      properties:
+        setupToken:
+          type: string
+        code:
+          type: string
+
+    TotpActivation:
+      type: object
+      required: [backupCodes]
+      properties:
+        backupCodes:
+          type: array
+          items:
+            type: string
+
+    TotpChallengeInput:
+      type: object
+      required: [challengeToken, code]
+      properties:
+        challengeToken:
+          type: string
+        code:
+          type: string
+
+    TotpConfirmInput:
+      type: object
+      required: [currentPassword, code]
+      properties:
+        currentPassword:
+          type: string
+        code:
+          type: string
+
+    TotpAdminDisableInput:
+      type: object
+      required: [userId]
+      properties:
+        userId:
+          type: number
+
+    ChangePasswordInput:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+        newPassword:
+          type: string
+
+    ForgotPasswordInput:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+
+    ChangePasswordResult:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+
+    ResetPasswordInput:
+      type: object
+      required: [token, newPassword]
+      properties:
+        token:
+          type: string
+        newPassword:
+          type: string
+          minLength: 8
+
+    RegisterInput:
+      type: object
+      required: [name, nameAr, email, password, facilityId]
+      properties:
+        name:
+          type: string
+          description: Full name in English
+        nameAr:
+          type: string
+          description: Full name in Arabic
+        email:
+          type: string
+        password:
+          type: string
+          description: Minimum 8 characters
+        phone:
+          type: ["string", "null"]
+        facilityId:
+          type: number
+          description: >-
+            Facility id — must be a positive integer sent as a JSON number
+            (kept as `number` in the schema for codegen compatibility; the
+            server rejects non-integer values).
+
+    FacilityOption:
+      type: object
+      required: [id, name, nameAr]
+      properties:
+        id:
+          type: number
+        name:
+          type: string
+        nameAr:
+          type: string
+
+    # User
+    User:
+      type: object
+      required: [id, email, name, nameAr, role, facilityId, isActive, totpEnabled, createdAt]
+      properties:
+        id:
+          type: number
+        email:
+          type: string
+        name:
+          type: string
+        nameAr:
+          type: string
+        role:
+          type: string
+          enum: [employee, supervisor, department_manager, hospital_admin, system_admin]
+        departmentId:
+          type: ["number", "null"]
+        supervisorId:
+          type: ["number", "null"]
+        facilityId:
+          type: number
+        jobTitle:
+          type: string
+        jobTitleAr:
+          type: string
+        employeeNumber:
+          type: string
+        phone:
+          type: ["string", "null"]
+        avatarUrl:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        totpEnabled:
+          type: boolean
+        createdAt:
+          type: string
+
+    # Credential
+    Credential:
+      type: object
+      required: [id, employeeId, type, holderName, holderNameAr, issuerName, issuerNameAr, certificateNumber, issueDate, expiryDate, status, qrToken, createdAt, updatedAt]
+      properties:
+        id:
+          type: number
+        employeeId:
+          type: number
+        employee:
+          $ref: "#/components/schemas/EmployeeSummary"
+        type:
+          type: string
+          enum: [BLS, ACLS, PALS, NRP, TNCC, TCRN, code_red, code_blue, fire_safety, infection_control, SCFHS_license, SCFHS_classification, malpractice_insurance, employment_id, passport, iqama, visa, driving_license, medical_license, custom]
+        customTypeName:
+          type: ["string", "null"]
+        customTypeNameAr:
+          type: ["string", "null"]
+        holderName:
+          type: string
+        holderNameAr:
+          type: string
+        issuerName:
+          type: string
+        issuerNameAr:
+          type: string
+        certificateNumber:
+          type: string
+        issueDate:
+          type: string
+        expiryDate:
+          type: string
+        status:
+          type: string
+          enum: [active, expiring_soon, expired, missing]
+        fileUrl:
+          type: ["string", "null"]
+        fileType:
+          type: ["string", "null"]
+          enum: [image, pdf, null]
+        qrToken:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        notes:
+          type: ["string", "null"]
+        verificationUrl:
+          type: ["string", "null"]
+        confidence:
+          type: ["number", "null"]
+        isVerified:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+
+    CredentialInput:
+      type: object
+      required: [employeeId, type, holderName, holderNameAr, issuerName, issuerNameAr, certificateNumber, issueDate, expiryDate]
+      properties:
+        employeeId:
+          type: number
+        type:
+          type: string
+          enum: [BLS, ACLS, PALS, NRP, TNCC, TCRN, code_red, code_blue, fire_safety, infection_control, SCFHS_license, SCFHS_classification, malpractice_insurance, employment_id, passport, iqama, visa, driving_license, medical_license, custom]
+        customTypeName:
+          type: string
+        customTypeNameAr:
+          type: string
+        holderName:
+          type: string
+        holderNameAr:
+          type: string
+        issuerName:
+          type: string
+        issuerNameAr:
+          type: string
+        certificateNumber:
+          type: string
+        issueDate:
+          type: string
+        expiryDate:
+          type: string
+        fileUrl:
+          type: string
+          description: >-
+            Object storage path returned by the upload flow (starts with
+            /objects/). Inline data: URLs are rejected.
+        fileType:
+          type: string
+          enum: [image, pdf]
+        tags:
+          type: array
+          items:
+            type: string
+        notes:
+          type: string
+        verificationUrl:
+          type: string
+        confidence:
+          type: number
+
+    CredentialUpdate:
+      type: object
+      properties:
+        type:
+          type: string
+        customTypeName:
+          type: string
+        customTypeNameAr:
+          type: string
+        holderName:
+          type: string
+        holderNameAr:
+          type: string
+        issuerName:
+          type: string
+        issuerNameAr:
+          type: string
+        certificateNumber:
+          type: string
+        issueDate:
+          type: string
+        expiryDate:
+          type: string
+        fileUrl:
+          type: string
+          description: >-
+            Object storage path returned by the upload flow (starts with
+            /objects/). Inline data: URLs are rejected. Send an empty string
+            to clear the stored file.
+        fileType:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        notes:
+          type: string
+        verificationUrl:
+          type: string
+
+    CredentialListResponse:
+      type: object
+      required: [data, total, page, pageSize]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Credential"
+        total:
+          type: number
+        page:
+          type: number
+        pageSize:
+          type: number
+
+    CredentialVerification:
+      type: object
+      required: [type, issuerName, issueDate, expiryDate, status, verificationCode]
+      properties:
+        type:
+          type: string
+        issuerName:
+          type: string
+        issueDate:
+          type: string
+        expiryDate:
+          type: string
+        status:
+          type: string
+        verificationCode:
+          type: string
+
+    DuplicateCheckInput:
+      type: object
+      required: [employeeId, type, certificateNumber]
+      properties:
+        employeeId:
+          type: number
+        type:
+          type: string
+        certificateNumber:
+          type: string
+
+    DuplicateCheckResult:
+      type: object
+      required: [isDuplicate]
+      properties:
+        isDuplicate:
+          type: boolean
+        existingCredential:
+          $ref: "#/components/schemas/Credential"
+
+    OcrInput:
+      type: object
+      required: [fileUrl]
+      properties:
+        fileUrl:
+          type: string
+        fileName:
+          type: ["string", "null"]
+
+    OcrResult:
+      type: object
+      required: [detectedType, confidence]
+      properties:
+        detectedType:
+          type: string
+        holderName:
+          type: ["string", "null"]
+        holderNameAr:
+          type: ["string", "null"]
+        issuerName:
+          type: ["string", "null"]
+        issuerNameAr:
+          type: ["string", "null"]
+        certificateNumber:
+          type: ["string", "null"]
+        issueDate:
+          type: ["string", "null"]
+        expiryDate:
+          type: ["string", "null"]
+        confidence:
+          $ref: "#/components/schemas/OcrConfidence"
+
+    OcrConfidence:
+      type: object
+      required: [overall, type, name, issuer, certNumber, issueDate, expiryDate]
+      properties:
+        overall:
+          type: number
+        type:
+          type: number
+        name:
+          type: number
+        issuer:
+          type: number
+        certNumber:
+          type: number
+        issueDate:
+          type: number
+        expiryDate:
+          type: number
+
+    MissingCredential:
+      type: object
+      required: [employeeId, employeeName, credentialType, required]
+      properties:
+        employeeId:
+          type: number
+        employeeName:
+          type: string
+        employeeNameAr:
+          type: string
+        credentialType:
+          type: string
+        required:
+          type: boolean
+
+    # Employee
+    EmployeeSummary:
+      type: object
+      required: [id, name, nameAr, jobTitle, jobTitleAr]
+      properties:
+        id:
+          type: number
+        name:
+          type: string
+        nameAr:
+          type: string
+        jobTitle:
+          type: string
+        jobTitleAr:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+
+    Employee:
+      type: object
+      required: [id, name, nameAr, email, role, facilityId, isActive, createdAt]
+      properties:
+        totpEnabled:
+          type: boolean
+        id:
+          type: number
+        name:
+          type: string
+        nameAr:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+        departmentId:
+          type: ["number", "null"]
+        supervisorId:
+          type: ["number", "null"]
+        facilityId:
+          type: number
+        jobTitle:
+          type: string
+        jobTitleAr:
+          type: string
+        employeeNumber:
+          type: string
+        phone:
+          type: ["string", "null"]
+        avatarUrl:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+
+    EmployeeWithStats:
+      allOf:
+        - $ref: "#/components/schemas/Employee"
+        - type: object
+          properties:
+            department:
+              $ref: "#/components/schemas/DepartmentSummary"
+            complianceRate:
+              type: number
+            totalCredentials:
+              type: number
+            expiredCount:
+              type: number
+            expiringCount:
+              type: number
+            missingCount:
+              type: number
+            isAtRisk:
+              type: boolean
+
+    EmployeeDetail:
+      allOf:
+        - $ref: "#/components/schemas/EmployeeWithStats"
+        - type: object
+          properties:
+            credentials:
+              type: array
+              items:
+                $ref: "#/components/schemas/Credential"
+            missingCredentials:
+              type: array
+              items:
+                type: string
+            supervisor:
+              $ref: "#/components/schemas/EmployeeSummary"
+
+    EmployeeInput:
+      type: object
+      required: [name, nameAr, email, password, role, jobTitle, jobTitleAr, employeeNumber]
+      properties:
+        name:
+          type: string
+        nameAr:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+        role:
+          type: string
+        departmentId:
+          type: ["number", "null"]
+        supervisorId:
+          type: ["number", "null"]
+        jobTitle:
+          type: string
+        jobTitleAr:
+          type: string
+        employeeNumber:
+          type: string
+        phone:
+          type: string
+        facilityId:
+          type: number
+          description: Target facility; honored only for system administrators.
+
+    EmployeeUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        nameAr:
+          type: string
+        role:
+          type: string
+        departmentId:
+          type: ["number", "null"]
+        supervisorId:
+          type: ["number", "null"]
+        jobTitle:
+          type: string
+        jobTitleAr:
+          type: string
+        phone:
+          type: string
+        isActive:
+          type: boolean
+
+    # Department
+    DepartmentSummary:
+      type: object
+      required: [id, name, nameAr]
+      properties:
+        id:
+          type: number
+        name:
+          type: string
+        nameAr:
+          type: string
+
+    Department:
+      type: object
+      required: [id, name, nameAr, facilityId, createdAt]
+      properties:
+        id:
+          type: number
+        name:
+          type: string
+        nameAr:
+          type: string
+        facilityId:
+          type: number
+        headId:
+          type: ["number", "null"]
+        createdAt:
+          type: string
+
+    DepartmentWithStats:
+      allOf:
+        - $ref: "#/components/schemas/Department"
+        - type: object
+          properties:
+            employeeCount:
+              type: number
+            complianceRate:
+              type: number
+            expiredCount:
+              type: number
+            expiringCount:
+              type: number
+
+    DepartmentInput:
+      type: object
+      required: [name, nameAr]
+      properties:
+        name:
+          type: string
+        nameAr:
+          type: string
+        headId:
+          type: ["number", "null"]
+
+    DepartmentUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        nameAr:
+          type: string
+        headId:
+          type: ["number", "null"]
+
+    # Notifications
+    Notification:
+      type: object
+      required: [id, userId, type, titleAr, titleEn, messageAr, messageEn, isRead, createdAt]
+      properties:
+        id:
+          type: number
+        userId:
+          type: number
+        type:
+          type: string
+          enum: [expiry_warning, expired, new_credential, system]
+        titleAr:
+          type: string
+        titleEn:
+          type: string
+        messageAr:
+          type: string
+        messageEn:
+          type: string
+        credentialId:
+          type: ["number", "null"]
+        employeeId:
+          type: ["number", "null"]
+        isRead:
+          type: boolean
+        daysUntilExpiry:
+          type: ["number", "null"]
+        createdAt:
+          type: string
+
+    UnreadCount:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: number
+
+    # Audit Log
+    AuditLog:
+      type: object
+      required: [id, userId, userName, action, target, createdAt]
+      properties:
+        id:
+          type: number
+        userId:
+          type: number
+        userName:
+          type: string
+        userNameAr:
+          type: string
+        action:
+          type: string
+        actionAr:
+          type: string
+        target:
+          type: string
+        targetAr:
+          type: string
+        details:
+          type: ["string", "null"]
+        ipAddress:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    AuditLogListResponse:
+      type: object
+      required: [data, total, page, pageSize]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLog"
+        total:
+          type: number
+        page:
+          type: number
+        pageSize:
+          type: number
+
+    # Dashboard
+    DashboardStats:
+      type: object
+      required: [totalCredentials, activeCredentials, expiringCredentials, expiredCredentials, missingCredentials, complianceRate, totalEmployees, atRiskEmployees]
+      properties:
+        totalCredentials:
+          type: number
+        activeCredentials:
+          type: number
+        expiringCredentials:
+          type: number
+        expiredCredentials:
+          type: number
+        missingCredentials:
+          type: number
+        complianceRate:
+          type: number
+        totalEmployees:
+          type: number
+        atRiskEmployees:
+          type: number
+        upcomingExpirations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Credential"
+        recentActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityItem"
+
+    DepartmentCompliance:
+      type: object
+      required: [departmentId, departmentName, departmentNameAr, complianceRate, employeeCount, expiredCount, expiringCount]
+      properties:
+        departmentId:
+          type: number
+        departmentName:
+          type: string
+        departmentNameAr:
+          type: string
+        complianceRate:
+          type: number
+        employeeCount:
+          type: number
+        expiredCount:
+          type: number
+        expiringCount:
+          type: number
+
+    ActivityItem:
+      type: object
+      required: [id, action, actor, target, createdAt]
+      properties:
+        id:
+          type: number
+        action:
+          type: string
+        actionAr:
+          type: string
+        actor:
+          type: string
+        actorAr:
+          type: string
+        target:
+          type: string
+        targetAr:
+          type: string
+        createdAt:
+          type: string
+
+    # Policies
+    CredentialPolicy:
+      type: object
+      required: [id, credentialType, roles, isRequired, createdAt]
+      properties:
+        id:
+          type: number
+        credentialType:
+          type: string
+        departmentId:
+          type: ["number", "null"]
+        roles:
+          type: array
+          items:
+            type: string
+        isRequired:
+          type: boolean
+        createdAt:
+          type: string
+
+    CredentialPolicyInput:
+      type: object
+      required: [credentialType, roles, isRequired]
+      properties:
+        credentialType:
+          type: string
+        departmentId:
+          type: ["number", "null"]
+        roles:
+          type: array
+          items:
+            type: string
+        isRequired:
+          type: boolean
+
+    # Reports
+    ComplianceReport:
+      type: object
+      required: [generatedAt, facilityName, overallComplianceRate, departments]
+      properties:
+        generatedAt:
+          type: string
+        facilityName:
+          type: string
+        overallComplianceRate:
+          type: number
+        departments:
+          type: array
+          items:
+            $ref: "#/components/schemas/DepartmentComplianceDetail"
+
+    DepartmentComplianceDetail:
+      type: object
+      required: [departmentName, employeeCount, complianceRate, employees]
+      properties:
+        departmentName:
+          type: string
+        employeeCount:
+          type: number
+        complianceRate:
+          type: number
+        expiredCount:
+          type: number
+        expiringCount:
+          type: number
+        employees:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmployeeComplianceSummary"
+
+    EmployeeComplianceSummary:
+      type: object
+      required: [name, nameAr, employeeNumber, complianceRate, expiredCount, expiringCount, missingCount]
+      properties:
+        name:
+          type: string
+        nameAr:
+          type: string
+        employeeNumber:
+          type: string
+        complianceRate:
+          type: number
+        expiredCount:
+          type: number
+        expiringCount:
+          type: number
+        missingCount:
+          type: number
