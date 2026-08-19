@@ -758,6 +758,10 @@ employeeId?: number | null;
  */
 departmentId?: number | null;
 search?: string;
+/**
+ * Filter verification state after tenant and role scoping and before pagination. Use false for the manager review queue.
+ */
+isVerified?: boolean;
 page?: number;
 pageSize?: number;
 };

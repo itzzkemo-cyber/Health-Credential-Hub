@@ -3,7 +3,6 @@ import { db, auditLogsTable } from "@workspace/db";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { requireAuth, getUser } from "../lib/auth";
 import {
-  getScopedUsers,
   getCredentialScopedUsers,
   getCredentialsFor,
   getPolicies,
@@ -49,10 +48,14 @@ async function recentActivityFor(
 
 router.get("/dashboard/stats", async (req, res) => {
   const user = getUser(req);
-  const scoped = (await getCredentialScopedUsers(user)).filter((u) => u.isActive);
+  const scoped = (await getCredentialScopedUsers(user)).filter(
+    (u) => u.isActive,
+  );
   const byId = new Map(scoped.map((u) => [u.id, u]));
   const creds = await getCredentialsFor(scoped.map((u) => u.id));
-  const policies = await getPolicies(user.role === "system_admin" ? null : user.facilityId);
+  const policies = await getPolicies(
+    user.role === "system_admin" ? null : user.facilityId,
+  );
 
   let missingCredentials = 0;
   let atRiskEmployees = 0;
@@ -83,7 +86,9 @@ router.get("/dashboard/stats", async (req, res) => {
 
   res.json({
     totalCredentials: creds.length,
-    activeCredentials: creds.filter((c) => computeStatus(c.expiryDate) === "active").length,
+    activeCredentials: creds.filter(
+      (c) => computeStatus(c.expiryDate) === "active",
+    ).length,
     expiringCredentials,
     expiredCredentials,
     missingCredentials,
@@ -101,13 +106,21 @@ router.get("/dashboard/stats", async (req, res) => {
 
 router.get("/dashboard/compliance", async (req, res) => {
   const user = getUser(req);
-  const scoped = (await getCredentialScopedUsers(user)).filter((u) => u.isActive);
+  const scoped = (await getCredentialScopedUsers(user)).filter(
+    (u) => u.isActive,
+  );
   const creds = await getCredentialsFor(scoped.map((u) => u.id));
-  const policies = await getPolicies(user.role === "system_admin" ? null : user.facilityId);
-  const departments = await getDepartments(user.role === "system_admin" ? null : user.facilityId);
+  const policies = await getPolicies(
+    user.role === "system_admin" ? null : user.facilityId,
+  );
+  const departments = await getDepartments(
+    user.role === "system_admin" ? null : user.facilityId,
+  );
 
   const visibleDeptIds = new Set(
-    scoped.filter((u) => u.departmentId != null).map((u) => u.departmentId as number),
+    scoped
+      .filter((u) => u.departmentId != null)
+      .map((u) => u.departmentId as number),
   );
   const visibleDepts = departments.filter((d) => visibleDeptIds.has(d.id));
 
@@ -126,7 +139,8 @@ router.get("/dashboard/compliance", async (req, res) => {
       departmentId: d.id,
       departmentName: d.name,
       departmentNameAr: d.nameAr,
-      complianceRate: members.length === 0 ? 100 : Math.round(rateSum / members.length),
+      complianceRate:
+        members.length === 0 ? 100 : Math.round(rateSum / members.length),
       employeeCount: members.length,
       expiredCount,
       expiringCount,
@@ -138,7 +152,9 @@ router.get("/dashboard/compliance", async (req, res) => {
 
 router.get("/dashboard/activity", async (req, res) => {
   const user = getUser(req);
-  const scoped = await getScopedUsers(user);
+  // Activity actor IDs are hierarchy-scoped as well as facility-scoped so a
+  // tenant administrator cannot observe peer/higher administrator activity.
+  const scoped = await getCredentialScopedUsers(user);
   res.json(
     await recentActivityFor(
       scoped.map((u) => u.id),

@@ -6,6 +6,7 @@ import {
   usersTable,
   notificationsTable,
   auditLogsTable,
+  automationOutboxTable,
   uploadGrantsTable,
   CREDENTIAL_TYPES,
   type CredentialType,
@@ -27,6 +28,14 @@ import {
 } from "../lib/helpers";
 import { canAccessCredentialOwner } from "../lib/roleHierarchy";
 import {
+  credentialCreatedEvent,
+  credentialVerificationChangedEvent,
+} from "../lib/automation/events";
+import {
+  isAutomationOutboxEnabled,
+  readAutomationFacilityAllowlist,
+} from "../lib/automation/config";
+import {
   getObjectAclPolicy,
   setObjectAclPolicy,
   ObjectPermission,
@@ -45,6 +54,14 @@ import { getAi } from "@workspace/integrations-gemini-ai";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
+const automationOutboxEnabled = isAutomationOutboxEnabled();
+const automationFacilityAllowlist = new Set(
+  readAutomationFacilityAllowlist(process.env, automationOutboxEnabled),
+);
+
+function automationEnabledForFacility(facilityId: number): boolean {
+  return automationOutboxEnabled && automationFacilityAllowlist.has(facilityId);
+}
 
 class InvalidCredentialFileError extends Error {}
 
@@ -419,6 +436,20 @@ router.post("/credentials/check-duplicate", async (req, res) => {
 
 router.get("/credentials", async (req, res) => {
   const user = getUser(req);
+  const rawIsVerified = req.query.isVerified;
+  if (
+    rawIsVerified !== undefined &&
+    rawIsVerified !== "true" &&
+    rawIsVerified !== "false"
+  ) {
+    res.status(400).json({
+      message: "isVerified must be true or false",
+    });
+    return;
+  }
+  const isVerified =
+    rawIsVerified === undefined ? undefined : rawIsVerified === "true";
+
   const scoped = await getCredentialScopedUsers(user);
   const byId = new Map(scoped.map((u) => [u.id, u]));
   let creds = await getCredentialsFor(scoped.map((u) => u.id));
@@ -438,6 +469,9 @@ router.get("/credentials", async (req, res) => {
   if (type) creds = creds.filter((c) => c.type === type);
   if (status)
     creds = creds.filter((c) => computeStatus(c.expiryDate) === status);
+  if (isVerified !== undefined) {
+    creds = creds.filter((c) => c.isVerified === isVerified);
+  }
   if (search) {
     const q = search.toLowerCase();
     creds = creds.filter((c) => {
@@ -617,6 +651,13 @@ router.post("/credentials", async (req, res) => {
           .returning()
       )[0];
       if (!cred) throw new Error("Credential insert returned no row");
+
+      if (automationEnabledForFacility(employee.facilityId)) {
+        await tx
+          .insert(automationOutboxTable)
+          .values(credentialCreatedEvent(cred, employee.facilityId))
+          .onConflictDoNothing();
+      }
 
       await tx.insert(auditLogsTable).values({
         userId: actor.id,
@@ -933,6 +974,15 @@ router.patch("/credentials/:id", async (req, res) => {
       if (!cred) return { kind: "conflict" as const };
 
       const verificationChanged = cred.isVerified !== current.isVerified;
+      if (
+        automationEnabledForFacility(owner.facilityId) &&
+        verificationChanged
+      ) {
+        await tx
+          .insert(automationOutboxTable)
+          .values(credentialVerificationChangedEvent(cred, owner.facilityId))
+          .onConflictDoNothing();
+      }
       const auditAction: [string, string] = verificationChanged
         ? cred.isVerified
           ? ["Verified credential", "توثيق وثيقة"]

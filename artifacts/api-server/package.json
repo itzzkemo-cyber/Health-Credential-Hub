@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "pnpm run build && node --env-file-if-exists=../../.env --enable-source-maps ./dist/index.mjs",
     "build": "node ./build.mjs",
+    "bootstrap:admin": "node --env-file-if-exists=../../.env --import tsx src/bootstrap-admin.ts",
+    "automation:run": "node --env-file-if-exists=../../.env --import tsx src/automation-worker.ts",
     "seed:demo": "node --env-file-if-exists=../../.env --import tsx src/seed.ts",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "test": "vitest run",

@@ -37,15 +37,28 @@ router.use("/employees", requireAuth);
 
 router.get("/employees", async (req, res) => {
   const user = getUser(req);
-  let scoped = await getScopedUsers(user);
+  // Directory visibility follows the same strict hierarchy as credential
+  // access: self plus lower-ranked managed users. A hospital administrator
+  // must not discover a peer administrator or a system administrator merely
+  // because they share a facility.
+  let scoped = await getCredentialScopedUsers(user);
 
-  const { facilityId, departmentId, supervisorId, role, isActive, search, atRisk } =
-    req.query as Record<string, string | undefined>;
+  const {
+    facilityId,
+    departmentId,
+    supervisorId,
+    role,
+    isActive,
+    search,
+    atRisk,
+  } = req.query as Record<string, string | undefined>;
   if (facilityId && user.role === "system_admin") {
     scoped = scoped.filter((u) => u.facilityId === Number(facilityId));
   }
-  if (departmentId) scoped = scoped.filter((u) => u.departmentId === Number(departmentId));
-  if (supervisorId) scoped = scoped.filter((u) => u.supervisorId === Number(supervisorId));
+  if (departmentId)
+    scoped = scoped.filter((u) => u.departmentId === Number(departmentId));
+  if (supervisorId)
+    scoped = scoped.filter((u) => u.supervisorId === Number(supervisorId));
   if (role) scoped = scoped.filter((u) => u.role === role);
   if (isActive !== undefined) {
     scoped = scoped.filter((u) => u.isActive === (isActive === "true"));
@@ -62,16 +75,23 @@ router.get("/employees", async (req, res) => {
   }
 
   const creds = await getCredentialsFor(scoped.map((u) => u.id));
-  const policies = await getPolicies(user.role === "system_admin" ? null : user.facilityId);
-  const departments = await getDepartments(user.role === "system_admin" ? null : user.facilityId);
+  const policies = await getPolicies(
+    user.role === "system_admin" ? null : user.facilityId,
+  );
+  const departments = await getDepartments(
+    user.role === "system_admin" ? null : user.facilityId,
+  );
   const deptById = new Map(departments.map((d) => [d.id, d]));
 
   let result = scoped.map((u) => {
     const stats = computeEmployeeStats(u, creds, policies);
-    const dept = u.departmentId != null ? deptById.get(u.departmentId) : undefined;
+    const dept =
+      u.departmentId != null ? deptById.get(u.departmentId) : undefined;
     return {
       ...serializeUser(u),
-      ...(dept ? { department: { id: dept.id, name: dept.name, nameAr: dept.nameAr } } : {}),
+      ...(dept
+        ? { department: { id: dept.id, name: dept.name, nameAr: dept.nameAr } }
+        : {}),
       complianceRate: stats.complianceRate,
       totalCredentials: stats.totalCredentials,
       expiredCount: stats.expiredCount,
@@ -90,7 +110,16 @@ router.get("/employees", async (req, res) => {
 router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
   const user = getUser(req);
   const body = req.body as Record<string, unknown>;
-  const required = ["name", "nameAr", "email", "password", "role", "jobTitle", "jobTitleAr", "employeeNumber"];
+  const required = [
+    "name",
+    "nameAr",
+    "email",
+    "password",
+    "role",
+    "jobTitle",
+    "jobTitleAr",
+    "employeeNumber",
+  ];
   for (const f of required) {
     if (!body[f] || typeof body[f] !== "string") {
       res.status(400).json({ message: `Missing required field: ${f}` });
@@ -103,7 +132,9 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
     return;
   }
   if (!canAssignRole(user, role as User["role"])) {
-    res.status(403).json({ message: "You are not allowed to assign this role" });
+    res
+      .status(403)
+      .json({ message: "You are not allowed to assign this role" });
     return;
   }
   const email = (body.email as string).toLowerCase().trim();
@@ -112,10 +143,15 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
     return;
   }
   if ((body.password as string).length < 8) {
-    res.status(400).json({ message: "Password must contain at least 8 characters" });
+    res
+      .status(400)
+      .json({ message: "Password must contain at least 8 characters" });
     return;
   }
-  const existing = await db.select().from(usersTable).where(eq(usersTable.email, email));
+  const existing = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.email, email));
   if (existing.length > 0) {
     res.status(409).json({ message: "Email already registered" });
     return;
@@ -136,9 +172,15 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
     res.status(400).json({ message: "Facility not found" });
     return;
   }
-  const departmentId = body.departmentId != null ? Number(body.departmentId) : null;
-  if (departmentId != null && (!Number.isInteger(departmentId) || departmentId <= 0)) {
-    res.status(400).json({ message: "departmentId must be a positive integer" });
+  const departmentId =
+    body.departmentId != null ? Number(body.departmentId) : null;
+  if (
+    departmentId != null &&
+    (!Number.isInteger(departmentId) || departmentId <= 0)
+  ) {
+    res
+      .status(400)
+      .json({ message: "departmentId must be a positive integer" });
     return;
   }
   if (departmentId != null) {
@@ -152,13 +194,21 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
         ),
       );
     if (department.length === 0) {
-      res.status(400).json({ message: "Department not found in the target facility" });
+      res
+        .status(400)
+        .json({ message: "Department not found in the target facility" });
       return;
     }
   }
-  const supervisorId = body.supervisorId != null ? Number(body.supervisorId) : null;
-  if (supervisorId != null && (!Number.isInteger(supervisorId) || supervisorId <= 0)) {
-    res.status(400).json({ message: "supervisorId must be a positive integer" });
+  const supervisorId =
+    body.supervisorId != null ? Number(body.supervisorId) : null;
+  if (
+    supervisorId != null &&
+    (!Number.isInteger(supervisorId) || supervisorId <= 0)
+  ) {
+    res
+      .status(400)
+      .json({ message: "supervisorId must be a positive integer" });
     return;
   }
   if (supervisorId != null) {
@@ -172,7 +222,9 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
         ),
       );
     if (supervisor.length === 0) {
-      res.status(400).json({ message: "Supervisor not found in the target facility" });
+      res
+        .status(400)
+        .json({ message: "Supervisor not found in the target facility" });
       return;
     }
   }
@@ -233,9 +285,10 @@ router.get("/employees/:id", async (req, res) => {
   const policies = await getPolicies(target.facilityId);
   const stats = computeEmployeeStats(target, creds, policies);
   const departments = await getDepartments(target.facilityId);
-  const dept = target.departmentId != null
-    ? departments.find((d) => d.id === target.departmentId)
-    : undefined;
+  const dept =
+    target.departmentId != null
+      ? departments.find((d) => d.id === target.departmentId)
+      : undefined;
   let supervisor: User | undefined;
   if (target.supervisorId != null) {
     const sup = await db
@@ -246,7 +299,9 @@ router.get("/employees/:id", async (req, res) => {
   }
   res.json({
     ...serializeUser(target),
-    ...(dept ? { department: { id: dept.id, name: dept.name, nameAr: dept.nameAr } } : {}),
+    ...(dept
+      ? { department: { id: dept.id, name: dept.name, nameAr: dept.nameAr } }
+      : {}),
     complianceRate: stats.complianceRate,
     totalCredentials: stats.totalCredentials,
     expiredCount: stats.expiredCount,
@@ -261,174 +316,225 @@ router.get("/employees/:id", async (req, res) => {
   });
 });
 
-router.patch("/employees/:id", requireRole(...MANAGER_ROLES), async (req, res) => {
-  const user = getUser(req);
-  const id = Number(req.params.id);
-  const scoped = await getScopedUsers(user);
-  const target = scoped.find((u) => u.id === id);
-  if (!target) {
-    res.status(404).json({ message: "Employee not found" });
-    return;
-  }
-  // Managers may edit themselves (non-role fields) or strictly lower-ranked users only.
-  if (target.id !== user.id && !canManageTarget(user, target)) {
-    res.status(403).json({ message: "Not authorized to modify this employee" });
-    return;
-  }
-  const body = req.body as Record<string, unknown>;
-  const organizationalFields = ["role", "departmentId", "supervisorId", "isActive"];
-  if (
-    target.id === user.id &&
-    organizationalFields.some((field) => field in body)
-  ) {
-    res.status(403).json({ message: "You cannot change your own role or organizational scope" });
-    return;
-  }
-  if (
-    !ADMIN_ROLES.includes(user.role) &&
-    organizationalFields.some((field) => field in body)
-  ) {
-    res.status(403).json({ message: "Only administrators may change organizational fields" });
-    return;
-  }
-  const patch: Record<string, unknown> = {};
-  for (const f of ["name", "nameAr", "jobTitle", "jobTitleAr", "phone"]) {
-    if (typeof body[f] === "string") patch[f] = body[f];
-  }
-  if (typeof body.role === "string" && USER_ROLES.includes(body.role as User["role"])) {
-    const newRole = body.role as User["role"];
-    if (newRole !== target.role) {
-      if (target.id === user.id) {
-        res.status(403).json({ message: "You cannot change your own role" });
-        return;
-      }
-      if (!canAssignRole(user, newRole)) {
-        res.status(403).json({ message: "You are not allowed to assign this role" });
-        return;
-      }
-      patch.role = newRole;
-    }
-  }
-  if ("departmentId" in body) {
-    const departmentId = body.departmentId != null ? Number(body.departmentId) : null;
-    if (departmentId != null && (!Number.isInteger(departmentId) || departmentId <= 0)) {
-      res.status(400).json({ message: "departmentId must be a positive integer" });
+router.patch(
+  "/employees/:id",
+  requireRole(...MANAGER_ROLES),
+  async (req, res) => {
+    const user = getUser(req);
+    const id = Number(req.params.id);
+    const scoped = await getScopedUsers(user);
+    const target = scoped.find((u) => u.id === id);
+    if (!target) {
+      res.status(404).json({ message: "Employee not found" });
       return;
     }
-    if (departmentId != null) {
-      const department = await db
-        .select({ id: departmentsTable.id })
-        .from(departmentsTable)
-        .where(
-          and(
-            eq(departmentsTable.id, departmentId),
-            eq(departmentsTable.facilityId, target.facilityId),
-          ),
-        );
-      if (department.length === 0) {
-        res.status(400).json({ message: "Department not found in the employee facility" });
-        return;
-      }
-    }
-    patch.departmentId = departmentId;
-  }
-  if ("supervisorId" in body) {
-    const supervisorId = body.supervisorId != null ? Number(body.supervisorId) : null;
-    if (supervisorId != null && (!Number.isInteger(supervisorId) || supervisorId <= 0)) {
-      res.status(400).json({ message: "supervisorId must be a positive integer" });
+    // Managers may edit themselves (non-role fields) or strictly lower-ranked users only.
+    if (target.id !== user.id && !canManageTarget(user, target)) {
+      res
+        .status(403)
+        .json({ message: "Not authorized to modify this employee" });
       return;
     }
-    if (supervisorId === target.id) {
-      res.status(400).json({ message: "An employee cannot supervise themselves" });
+    const body = req.body as Record<string, unknown>;
+    const organizationalFields = [
+      "role",
+      "departmentId",
+      "supervisorId",
+      "isActive",
+    ];
+    if (
+      target.id === user.id &&
+      organizationalFields.some((field) => field in body)
+    ) {
+      res
+        .status(403)
+        .json({
+          message: "You cannot change your own role or organizational scope",
+        });
       return;
     }
-    if (supervisorId != null) {
-      const supervisor = await db
-        .select({ id: usersTable.id })
-        .from(usersTable)
-        .where(
-          and(
-            eq(usersTable.id, supervisorId),
-            eq(usersTable.facilityId, target.facilityId),
-          ),
-        );
-      if (supervisor.length === 0) {
-        res.status(400).json({ message: "Supervisor not found in the employee facility" });
-        return;
+    if (
+      !ADMIN_ROLES.includes(user.role) &&
+      organizationalFields.some((field) => field in body)
+    ) {
+      res
+        .status(403)
+        .json({
+          message: "Only administrators may change organizational fields",
+        });
+      return;
+    }
+    const patch: Record<string, unknown> = {};
+    for (const f of ["name", "nameAr", "jobTitle", "jobTitleAr", "phone"]) {
+      if (typeof body[f] === "string") patch[f] = body[f];
+    }
+    if (
+      typeof body.role === "string" &&
+      USER_ROLES.includes(body.role as User["role"])
+    ) {
+      const newRole = body.role as User["role"];
+      if (newRole !== target.role) {
+        if (target.id === user.id) {
+          res.status(403).json({ message: "You cannot change your own role" });
+          return;
+        }
+        if (!canAssignRole(user, newRole)) {
+          res
+            .status(403)
+            .json({ message: "You are not allowed to assign this role" });
+          return;
+        }
+        patch.role = newRole;
       }
     }
-    patch.supervisorId = supervisorId;
-  }
-  if (typeof body.isActive === "boolean") {
-    patch.isActive = body.isActive;
-    // Revoke unconditionally when an administrator submits an account-state
-    // change. This is safe for idempotent retries and closes stale-write races.
-    patch.sessionVersion = sql`${usersTable.sessionVersion} + 1`;
-  }
-  const updated = await db
-    .update(usersTable)
-    .set(patch)
-    .where(eq(usersTable.id, id))
-    .returning();
-  const result = updated[0];
-  if (!result) {
-    res.status(500).json({ message: "Update failed" });
-    return;
-  }
-  await logAudit(
-    user,
-    "Updated employee",
-    "تحديث موظف",
-    result.name,
-    result.nameAr,
-    undefined,
-    req.ip,
-    result.facilityId,
-  );
-  res.json(serializeUser(result));
-});
+    if ("departmentId" in body) {
+      const departmentId =
+        body.departmentId != null ? Number(body.departmentId) : null;
+      if (
+        departmentId != null &&
+        (!Number.isInteger(departmentId) || departmentId <= 0)
+      ) {
+        res
+          .status(400)
+          .json({ message: "departmentId must be a positive integer" });
+        return;
+      }
+      if (departmentId != null) {
+        const department = await db
+          .select({ id: departmentsTable.id })
+          .from(departmentsTable)
+          .where(
+            and(
+              eq(departmentsTable.id, departmentId),
+              eq(departmentsTable.facilityId, target.facilityId),
+            ),
+          );
+        if (department.length === 0) {
+          res
+            .status(400)
+            .json({ message: "Department not found in the employee facility" });
+          return;
+        }
+      }
+      patch.departmentId = departmentId;
+    }
+    if ("supervisorId" in body) {
+      const supervisorId =
+        body.supervisorId != null ? Number(body.supervisorId) : null;
+      if (
+        supervisorId != null &&
+        (!Number.isInteger(supervisorId) || supervisorId <= 0)
+      ) {
+        res
+          .status(400)
+          .json({ message: "supervisorId must be a positive integer" });
+        return;
+      }
+      if (supervisorId === target.id) {
+        res
+          .status(400)
+          .json({ message: "An employee cannot supervise themselves" });
+        return;
+      }
+      if (supervisorId != null) {
+        const supervisor = await db
+          .select({ id: usersTable.id })
+          .from(usersTable)
+          .where(
+            and(
+              eq(usersTable.id, supervisorId),
+              eq(usersTable.facilityId, target.facilityId),
+            ),
+          );
+        if (supervisor.length === 0) {
+          res
+            .status(400)
+            .json({ message: "Supervisor not found in the employee facility" });
+          return;
+        }
+      }
+      patch.supervisorId = supervisorId;
+    }
+    if (typeof body.isActive === "boolean") {
+      patch.isActive = body.isActive;
+      // Revoke unconditionally when an administrator submits an account-state
+      // change. This is safe for idempotent retries and closes stale-write races.
+      patch.sessionVersion = sql`${usersTable.sessionVersion} + 1`;
+    }
+    const updated = await db
+      .update(usersTable)
+      .set(patch)
+      .where(eq(usersTable.id, id))
+      .returning();
+    const result = updated[0];
+    if (!result) {
+      res.status(500).json({ message: "Update failed" });
+      return;
+    }
+    await logAudit(
+      user,
+      "Updated employee",
+      "تحديث موظف",
+      result.name,
+      result.nameAr,
+      undefined,
+      req.ip,
+      result.facilityId,
+    );
+    res.json(serializeUser(result));
+  },
+);
 
-router.delete("/employees/:id", requireRole(...ADMIN_ROLES), async (req, res) => {
-  const user = getUser(req);
-  const id = Number(req.params.id);
-  if (id === user.id) {
-    res.status(400).json({ message: "Cannot delete your own account" });
-    return;
-  }
-  const rows = await db.select().from(usersTable).where(eq(usersTable.id, id));
-  const target = rows[0];
-  if (
-    !target ||
-    (user.role !== "system_admin" && target.facilityId !== user.facilityId)
-  ) {
-    res.status(404).json({ message: "Employee not found" });
-    return;
-  }
-  if (!canManageTarget(user, target)) {
-    res.status(403).json({ message: "Not authorized to delete this employee" });
-    return;
-  }
-  // Credential and audit history are regulated records. A DELETE request is
-  // therefore implemented as a reversible deactivation and session revocation.
-  await db
-    .update(usersTable)
-    .set({
-      isActive: false,
-      sessionVersion: sql`${usersTable.sessionVersion} + 1`,
-    })
-    .where(eq(usersTable.id, id));
-  await logAudit(
-    user,
-    "Deactivated employee",
-    "إيقاف موظف",
-    target.name,
-    target.nameAr,
-    undefined,
-    req.ip,
-    target.facilityId,
-  );
-  res.status(204).end();
-});
+router.delete(
+  "/employees/:id",
+  requireRole(...ADMIN_ROLES),
+  async (req, res) => {
+    const user = getUser(req);
+    const id = Number(req.params.id);
+    if (id === user.id) {
+      res.status(400).json({ message: "Cannot delete your own account" });
+      return;
+    }
+    const rows = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, id));
+    const target = rows[0];
+    if (
+      !target ||
+      (user.role !== "system_admin" && target.facilityId !== user.facilityId)
+    ) {
+      res.status(404).json({ message: "Employee not found" });
+      return;
+    }
+    if (!canManageTarget(user, target)) {
+      res
+        .status(403)
+        .json({ message: "Not authorized to delete this employee" });
+      return;
+    }
+    // Credential and audit history are regulated records. A DELETE request is
+    // therefore implemented as a reversible deactivation and session revocation.
+    await db
+      .update(usersTable)
+      .set({
+        isActive: false,
+        sessionVersion: sql`${usersTable.sessionVersion} + 1`,
+      })
+      .where(eq(usersTable.id, id));
+    await logAudit(
+      user,
+      "Deactivated employee",
+      "إيقاف موظف",
+      target.name,
+      target.nameAr,
+      undefined,
+      req.ip,
+      target.facilityId,
+    );
+    res.status(204).end();
+  },
+);
 
 async function setActive(
   req: Request,
@@ -444,7 +550,9 @@ async function setActive(
     return;
   }
   if (target.id === user.id) {
-    res.status(400).json({ message: "Cannot change activation of your own account" });
+    res
+      .status(400)
+      .json({ message: "Cannot change activation of your own account" });
     return;
   }
   if (!canManageTarget(user, target)) {
@@ -479,11 +587,15 @@ async function setActive(
   res.json(serializeUser(result));
 }
 
-router.post("/employees/:id/activate", requireRole(...MANAGER_ROLES), (req, res) =>
-  setActive(req, res, true),
+router.post(
+  "/employees/:id/activate",
+  requireRole(...MANAGER_ROLES),
+  (req, res) => setActive(req, res, true),
 );
-router.post("/employees/:id/deactivate", requireRole(...MANAGER_ROLES), (req, res) =>
-  setActive(req, res, false),
+router.post(
+  "/employees/:id/deactivate",
+  requireRole(...MANAGER_ROLES),
+  (req, res) => setActive(req, res, false),
 );
 
 export default router;

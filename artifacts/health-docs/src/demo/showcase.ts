@@ -1,8 +1,13 @@
 import { clearAuthSession } from "@/lib/auth";
+import { shouldShowShowcaseRoleButtons } from "./showcase-visibility";
+
+export { shouldShowShowcaseRoleButtons } from "./showcase-visibility";
 
 const showcaseFiles = new Map<string, string>();
 
-export const isShowcaseMode = import.meta.env.MODE === "showcase";
+export const isShowcaseMode = shouldShowShowcaseRoleButtons(
+  import.meta.env.MODE,
+);
 
 export function retainShowcaseFile(blob: Blob): string {
   const id =

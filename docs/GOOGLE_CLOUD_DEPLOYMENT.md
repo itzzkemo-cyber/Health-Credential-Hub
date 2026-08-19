@@ -43,6 +43,94 @@ project's changing default Cloud Build identity.
 Run the script from the repository root. Review expected Cloud SQL and Cloud
 Run charges before accepting the provider's creation prompts.
 
+The first run also provisions or updates a disabled-by-default one-shot
+`health-credential-hub-automation` Cloud Run Job. It uses a dedicated service
+account with Cloud SQL and its own regional HMAC secret, but no GCS, session,
+or TOTP-secret access. A separate scheduler identity receives Job-level
+`roles/run.invoker` only; its five-minute `me-central2` schedule is created
+paused and remains paused unless automation is explicitly enabled. The
+bootstrap does not create a webhook receiver. See
+[`INTEGRATIONS.md`](./INTEGRATIONS.md) before enabling it.
+
+## Create the first production administrator
+
+The migration job creates schema only. A new database intentionally has no
+default user or password. The bootstrap provisions an inert
+`health-credential-hub-bootstrap-admin` Cloud Run Job under a dedicated
+identity with only Cloud SQL and `DATABASE_URL` access. Missing confirmation
+and password values make an accidental execution fail before a write. For local
+operator testing, the equivalent package command is:
+
+```bash
+pnpm --filter @workspace/api-server run bootstrap:admin
+```
+
+Inject these values into the one-shot job; do not put the password on a shell
+command line, in source, in an image layer, or in a committed `.env` file:
+
+- `BOOTSTRAP_CONFIRM=CREATE_FIRST_ADMIN`
+- `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` (16+ characters with
+  upper/lower/number/symbol), `BOOTSTRAP_ADMIN_NAME`,
+  `BOOTSTRAP_ADMIN_NAME_AR`, `BOOTSTRAP_ADMIN_EMPLOYEE_NUMBER`
+- `BOOTSTRAP_ADMIN_ROLE=hospital_admin` or `system_admin` (no default)
+- either `BOOTSTRAP_FACILITY_ID=<reviewed existing id>`, or for a completely
+  empty database the additional explicit
+  `BOOTSTRAP_CREATE_FACILITY=CREATE_FACILITY` plus
+  `BOOTSTRAP_FACILITY_NAME` and `BOOTSTRAP_FACILITY_NAME_AR`
+
+Store the password as a short-lived Secret Manager version mounted only into
+this job. Create it from standard input so it does not enter shell history,
+grant only the bootstrap identity access, update the Job with the non-secret
+values above, and execute it once. Destroy or disable the password secret
+version and delete the temporary Job immediately after a successful run.
+The command deletes the password from its process environment after reading
+it, never prints it, serializes concurrent runs with a PostgreSQL advisory
+lock, and creates the facility/account/audit event in one transaction.
+
+The command refuses to change anything if any hospital/system administrator
+already exists, if the email already belongs to a user, or if the selected
+facility is absent. It has no reset/update mode. Subsequent administrator
+creation and account recovery must use the authenticated application workflow
+and approved audit process.
+
+There is currently no database-enforced `mustChangePassword` or
+`mustEnrollMfa` flag. Consequently, production launch must remain blocked from
+loading real workforce data until two operators verify that the first
+administrator has signed in, changed the one-time bootstrap password, enrolled
+TOTP, stored recovery codes in the approved password manager, and that the
+temporary password secret and Job were removed. This is an explicit operator
+gate, not a control the application can presently prove automatically.
+
+## Migration database identity
+
+The bootstrap now gives the migration Job its own Google service account,
+separate from the public API, worker, scheduler, and first-admin identities.
+The current bootstrap still mounts the same PostgreSQL `DATABASE_URL`, so Cloud
+IAM isolation is implemented but database-principal least privilege is not yet
+automatic. Before production, create a separate PostgreSQL login/Secret Manager
+URL for the migrator, grant it schema ownership/DDL only, revoke schema creation
+from the application login, and grant the application login only the required
+DML and sequence rights. A reviewed starting policy is:
+
+```sql
+GRANT CONNECT ON DATABASE healthdocs TO healthdocs_migrator, healthdocs_app;
+GRANT USAGE, CREATE ON SCHEMA public TO healthdocs_migrator;
+REVOKE CREATE ON SCHEMA public FROM healthdocs_app;
+GRANT USAGE ON SCHEMA public TO healthdocs_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO healthdocs_app;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO healthdocs_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE healthdocs_migrator IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO healthdocs_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE healthdocs_migrator IN SCHEMA public
+  GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO healthdocs_app;
+```
+
+Create the logins and passwords through the approved Cloud SQL/Secret Manager
+procedure; do not paste passwords into SQL files or shell history. Point only
+the migration Job at the migrator URL and test migrate plus API startup before
+revoking the shared role. Until completed, PostgreSQL role separation remains
+a production launch blocker.
+
 ## Existing installation upgrade
 
 Migration `0003_fuzzy_scarlet_witch.sql` adds credential row-version locking,
@@ -63,6 +151,12 @@ SELECT id
 FROM users
 WHERE totp_enabled = true AND totp_secret IS NULL;
 ```
+
+Migration `0005_automation_outbox.sql` adds the optional minimized workflow
+outbox and a minimal permanent terminal delivery/discard ledger. It does not
+send external traffic. Both event production and the separate webhook worker
+remain disabled until their explicit environment switches are enabled; see
+[`INTEGRATIONS.md`](./INTEGRATIONS.md).
 
 ## Custom domain
 

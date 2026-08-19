@@ -8,3 +8,4 @@ export * from "./credential-policies";
 export * from "./email-log";
 export * from "./password-reset-tokens";
 export * from "./upload-grants";
+export * from "./automation-outbox";

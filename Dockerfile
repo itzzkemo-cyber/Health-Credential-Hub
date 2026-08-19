@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS build
+FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS build
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -10,7 +10,7 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm run build:production
 RUN pnpm --filter @workspace/api-server deploy --prod --legacy /opt/healthdocs-api
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runtime
 
 ENV NODE_ENV=production
 ENV PORT=8080

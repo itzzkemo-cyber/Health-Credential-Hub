@@ -1,0 +1,29 @@
+# Source-control and local state
+.git/
+.github/
+.agents/
+.codex/
+.cursor/
+.gcloudignore
+
+# Dependencies, generated output, and caches
+node_modules/
+**/node_modules/
+**/dist/
+**/build/
+**/coverage/
+**/.cache/
+**/.pnpm-store/
+artifacts/mobile/static-build/
+
+# Local secrets and temporary cloud credentials
+.env
+.env.*
+!.env.example
+gha-creds-*.json
+**/gha-creds-*.json
+
+# Local-only files
+*.log
+attached_assets/
+security_best_practices_report.md

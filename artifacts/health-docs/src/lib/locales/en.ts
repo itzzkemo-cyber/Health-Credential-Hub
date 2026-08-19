@@ -57,7 +57,7 @@ export const en = {
     notice:
       "Synthetic showcase — selected files stay in this device's memory and reset when the page reloads.",
     reset: "Reset demo",
-    employee_demo: "Start the employee journey in one click",
+    employee_demo: "Start an employee or manager journey in one click",
     external_disabled: "External integrations are disabled in the showcase",
     use_sample_document: "Use a sample document and try smart capture",
     security_settings_disabled:
@@ -259,6 +259,33 @@ export const en = {
     issuer: "Issuer",
     expires: "Expires",
     verify: "Verify",
+  },
+  manager_dashboard: {
+    eyebrow: "Manager workspace",
+    scope_hint:
+      "Review employees and professional documents returned by your authorized facility, department, or supervisory scope.",
+    summary: "Management summary",
+    scoped_employees: "Employees in scope",
+    pending_review: "Documents awaiting review",
+    team_title: "Employees in your scope",
+    no_employees: "No employees are currently in your scope",
+    no_employees_hint:
+      "Your access may be limited to another department or supervisory team.",
+    open_employee: "Open profile",
+    review_queue: "Document review queue",
+    review_empty: "No documents are awaiting review",
+    review_empty_hint:
+      "New employee uploads that require your review will appear here.",
+    employee_file: "Employee file",
+    open_document: "Open document",
+    verify: "Verify document",
+    verify_confirm_title: "Confirm document verification",
+    verify_confirm_description:
+      "Confirm only after matching the document details with the employee record. This action is recorded in the audit history.",
+    verify_confirm_action: "Confirm verification",
+    verify_success: "Document verified successfully",
+    verify_failed:
+      "The document could not be verified. Refresh the queue and try again.",
   },
   employees_page: {
     subtitle: "Manage staff and their compliance status.",

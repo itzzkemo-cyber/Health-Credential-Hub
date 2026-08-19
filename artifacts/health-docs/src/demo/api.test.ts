@@ -1,7 +1,9 @@
 import {
   demoLogin,
   listCredentials,
+  listEmployees,
   setRequestHandler,
+  updateCredential,
 } from "@workspace/api-client-react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -35,6 +37,36 @@ describe("showcase API", () => {
       email: "employee@healthdocs.sa",
       role: "employee",
     });
+  });
+
+  it("gives a one-click manager scoped staff and a reviewable queue", async () => {
+    enableShowcaseApi();
+    const session = await demoLogin({ role: "hospital_admin" });
+    const employees = await listEmployees({ isActive: true });
+    const list = await listCredentials({ isVerified: false, pageSize: 1 });
+    const pending = list.data[0];
+
+    expect(session.user.role).toBe("hospital_admin");
+    expect(employees.length).toBeGreaterThan(1);
+    expect(list.total).toBeGreaterThan(1);
+    expect(list.data).toHaveLength(1);
+    expect(pending?.isVerified).toBe(false);
+    expect(pending?.employee).toBeDefined();
+
+    const verified = await updateCredential(pending!.id, {
+      expectedVersion: pending!.version,
+      isVerified: true,
+    });
+    expect(verified.isVerified).toBe(true);
+    expect(verified.version).toBe(pending!.version + 1);
+  });
+
+  it("does not expose management staff to the employee showcase", async () => {
+    enableShowcaseApi();
+    await demoLogin({ role: "employee" });
+
+    expect(await listEmployees({ isActive: true })).toEqual([]);
+    expect((await listCredentials({ pageSize: 100 })).total).toBe(3);
   });
 
   it("returns a consistent employee dashboard and credential list", async () => {
@@ -95,9 +127,7 @@ describe("showcase API", () => {
     const restored = await (await request("/api/credentials")).json();
     expect(restored.total).toBe(3);
     expect(
-      restored.data.some(
-        (item: { id: number }) => item.id === credentialId,
-      ),
+      restored.data.some((item: { id: number }) => item.id === credentialId),
     ).toBe(true);
   });
 

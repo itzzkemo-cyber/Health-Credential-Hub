@@ -47,26 +47,26 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UploadUrlRequest'
+              $ref: "#/components/schemas/UploadUrlRequest"
       responses:
-        '200':
+        "200":
           description: Presigned upload URL generated.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UploadUrlResponse'
-        '400':
+                $ref: "#/components/schemas/UploadUrlResponse"
+        "400":
           description: Missing or invalid required fields.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '500':
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
           description: Failed to generate upload URL.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                $ref: "#/components/schemas/ErrorEnvelope"
   /storage/public-objects/{filePath}:
     get:
       tags: [Storage]
@@ -83,25 +83,25 @@ paths:
             type: string
           description: Relative file path within the public search paths.
       responses:
-        '200':
+        "200":
           description: Object content streamed with correct Content-Type.
           content:
-            '*/*':
+            "*/*":
               schema:
                 type: string
                 format: binary
-        '404':
+        "404":
           description: File not found.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '500':
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
           description: Failed to serve public object.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                $ref: "#/components/schemas/ErrorEnvelope"
   /storage/objects/{objectPath}:
     get:
       tags: [Storage]
@@ -118,37 +118,37 @@ paths:
             type: string
           description: Object path within the private object dir (e.g. `uploads/some-uuid`).
       responses:
-        '200':
+        "200":
           description: Object content streamed with correct Content-Type.
           content:
-            '*/*':
+            "*/*":
               schema:
                 type: string
                 format: binary
-        '401':
+        "401":
           description: Not authenticated.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '403':
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
           description: Not allowed to access this object.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '404':
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
           description: Object not found.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '500':
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
           description: Failed to serve object.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
+                $ref: "#/components/schemas/ErrorEnvelope"
   /healthz:
     get:
       operationId: healthCheck
@@ -543,6 +543,13 @@ paths:
           in: query
           schema:
             type: string
+        - name: isVerified
+          in: query
+          description: >-
+            Filter verification state after tenant and role scoping and before
+            pagination. Use false for the manager review queue.
+          schema:
+            type: boolean
         - name: page
           in: query
           schema:
@@ -1216,7 +1223,7 @@ components:
           additionalProperties:
             type: string
         metadata:
-          $ref: '#/components/schemas/UploadUrlRequest'
+          $ref: "#/components/schemas/UploadUrlRequest"
     ErrorEnvelope:
       type: object
       required: [error]
@@ -1257,7 +1264,13 @@ components:
         role:
           type: string
           enum:
-            [system_admin, hospital_admin, department_manager, supervisor, employee]
+            [
+              system_admin,
+              hospital_admin,
+              department_manager,
+              supervisor,
+              employee,
+            ]
 
     AuthResponse:
       type: object
@@ -1404,7 +1417,18 @@ components:
     # User
     User:
       type: object
-      required: [id, email, name, nameAr, role, facilityId, isActive, totpEnabled, createdAt]
+      required:
+        [
+          id,
+          email,
+          name,
+          nameAr,
+          role,
+          facilityId,
+          isActive,
+          totpEnabled,
+          createdAt,
+        ]
       properties:
         id:
           type: number
@@ -1416,7 +1440,14 @@ components:
           type: string
         role:
           type: string
-          enum: [employee, supervisor, department_manager, hospital_admin, system_admin]
+          enum:
+            [
+              employee,
+              supervisor,
+              department_manager,
+              hospital_admin,
+              system_admin,
+            ]
         departmentId:
           type: ["number", "null"]
         supervisorId:
@@ -1443,7 +1474,24 @@ components:
     # Credential
     Credential:
       type: object
-      required: [id, employeeId, type, holderName, holderNameAr, issuerName, issuerNameAr, certificateNumber, issueDate, expiryDate, status, qrToken, version, createdAt, updatedAt]
+      required:
+        [
+          id,
+          employeeId,
+          type,
+          holderName,
+          holderNameAr,
+          issuerName,
+          issuerNameAr,
+          certificateNumber,
+          issueDate,
+          expiryDate,
+          status,
+          qrToken,
+          version,
+          createdAt,
+          updatedAt,
+        ]
       properties:
         id:
           type: number
@@ -1453,7 +1501,29 @@ components:
           $ref: "#/components/schemas/EmployeeSummary"
         type:
           type: string
-          enum: [BLS, ACLS, PALS, NRP, TNCC, TCRN, code_red, code_blue, fire_safety, infection_control, SCFHS_license, SCFHS_classification, malpractice_insurance, employment_id, passport, iqama, visa, driving_license, medical_license, custom]
+          enum:
+            [
+              BLS,
+              ACLS,
+              PALS,
+              NRP,
+              TNCC,
+              TCRN,
+              code_red,
+              code_blue,
+              fire_safety,
+              infection_control,
+              SCFHS_license,
+              SCFHS_classification,
+              malpractice_insurance,
+              employment_id,
+              passport,
+              iqama,
+              visa,
+              driving_license,
+              medical_license,
+              custom,
+            ]
         customTypeName:
           type: ["string", "null"]
         customTypeNameAr:
@@ -1506,13 +1576,46 @@ components:
 
     CredentialInput:
       type: object
-      required: [employeeId, type, holderName, holderNameAr, issuerName, issuerNameAr, certificateNumber, issueDate, expiryDate]
+      required:
+        [
+          employeeId,
+          type,
+          holderName,
+          holderNameAr,
+          issuerName,
+          issuerNameAr,
+          certificateNumber,
+          issueDate,
+          expiryDate,
+        ]
       properties:
         employeeId:
           type: number
         type:
           type: string
-          enum: [BLS, ACLS, PALS, NRP, TNCC, TCRN, code_red, code_blue, fire_safety, infection_control, SCFHS_license, SCFHS_classification, malpractice_insurance, employment_id, passport, iqama, visa, driving_license, medical_license, custom]
+          enum:
+            [
+              BLS,
+              ACLS,
+              PALS,
+              NRP,
+              TNCC,
+              TCRN,
+              code_red,
+              code_blue,
+              fire_safety,
+              infection_control,
+              SCFHS_license,
+              SCFHS_classification,
+              malpractice_insurance,
+              employment_id,
+              passport,
+              iqama,
+              visa,
+              driving_license,
+              medical_license,
+              custom,
+            ]
         customTypeName:
           type: string
         customTypeNameAr:
@@ -1615,7 +1718,8 @@ components:
 
     CredentialVerification:
       type: object
-      required: [type, issuerName, issueDate, expiryDate, status, verificationCode]
+      required:
+        [type, issuerName, issueDate, expiryDate, status, verificationCode]
       properties:
         type:
           type: string
@@ -1809,7 +1913,17 @@ components:
 
     EmployeeInput:
       type: object
-      required: [name, nameAr, email, password, role, jobTitle, jobTitleAr, employeeNumber]
+      required:
+        [
+          name,
+          nameAr,
+          email,
+          password,
+          role,
+          jobTitle,
+          jobTitleAr,
+          employeeNumber,
+        ]
       properties:
         name:
           type: string
@@ -1926,7 +2040,18 @@ components:
     # Notifications
     Notification:
       type: object
-      required: [id, userId, type, titleAr, titleEn, messageAr, messageEn, isRead, createdAt]
+      required:
+        [
+          id,
+          userId,
+          type,
+          titleAr,
+          titleEn,
+          messageAr,
+          messageEn,
+          isRead,
+          createdAt,
+        ]
       properties:
         id:
           type: number
@@ -2007,7 +2132,17 @@ components:
     # Dashboard
     DashboardStats:
       type: object
-      required: [totalCredentials, activeCredentials, expiringCredentials, expiredCredentials, missingCredentials, complianceRate, totalEmployees, atRiskEmployees]
+      required:
+        [
+          totalCredentials,
+          activeCredentials,
+          expiringCredentials,
+          expiredCredentials,
+          missingCredentials,
+          complianceRate,
+          totalEmployees,
+          atRiskEmployees,
+        ]
       properties:
         totalCredentials:
           type: number
@@ -2036,7 +2171,16 @@ components:
 
     DepartmentCompliance:
       type: object
-      required: [departmentId, departmentName, departmentNameAr, complianceRate, employeeCount, expiredCount, expiringCount]
+      required:
+        [
+          departmentId,
+          departmentName,
+          departmentNameAr,
+          complianceRate,
+          employeeCount,
+          expiredCount,
+          expiringCount,
+        ]
       properties:
         departmentId:
           type: number
@@ -2083,14 +2227,43 @@ components:
           type: number
         credentialType:
           type: string
-          enum: [BLS, ACLS, PALS, NRP, TNCC, TCRN, code_red, code_blue, fire_safety, infection_control, SCFHS_license, SCFHS_classification, malpractice_insurance, employment_id, passport, iqama, visa, driving_license, medical_license, custom]
+          enum:
+            [
+              BLS,
+              ACLS,
+              PALS,
+              NRP,
+              TNCC,
+              TCRN,
+              code_red,
+              code_blue,
+              fire_safety,
+              infection_control,
+              SCFHS_license,
+              SCFHS_classification,
+              malpractice_insurance,
+              employment_id,
+              passport,
+              iqama,
+              visa,
+              driving_license,
+              medical_license,
+              custom,
+            ]
         departmentId:
           type: ["number", "null"]
         roles:
           type: array
           items:
             type: string
-            enum: [employee, supervisor, department_manager, hospital_admin, system_admin]
+            enum:
+              [
+                employee,
+                supervisor,
+                department_manager,
+                hospital_admin,
+                system_admin,
+              ]
         isRequired:
           type: boolean
         createdAt:
@@ -2102,14 +2275,43 @@ components:
       properties:
         credentialType:
           type: string
-          enum: [BLS, ACLS, PALS, NRP, TNCC, TCRN, code_red, code_blue, fire_safety, infection_control, SCFHS_license, SCFHS_classification, malpractice_insurance, employment_id, passport, iqama, visa, driving_license, medical_license, custom]
+          enum:
+            [
+              BLS,
+              ACLS,
+              PALS,
+              NRP,
+              TNCC,
+              TCRN,
+              code_red,
+              code_blue,
+              fire_safety,
+              infection_control,
+              SCFHS_license,
+              SCFHS_classification,
+              malpractice_insurance,
+              employment_id,
+              passport,
+              iqama,
+              visa,
+              driving_license,
+              medical_license,
+              custom,
+            ]
         departmentId:
           type: ["number", "null"]
         roles:
           type: array
           items:
             type: string
-            enum: [employee, supervisor, department_manager, hospital_admin, system_admin]
+            enum:
+              [
+                employee,
+                supervisor,
+                department_manager,
+                hospital_admin,
+                system_admin,
+              ]
         isRequired:
           type: boolean
 
@@ -2150,7 +2352,16 @@ components:
 
     EmployeeComplianceSummary:
       type: object
-      required: [name, nameAr, employeeNumber, complianceRate, expiredCount, expiringCount, missingCount]
+      required:
+        [
+          name,
+          nameAr,
+          employeeNumber,
+          complianceRate,
+          expiredCount,
+          expiringCount,
+          missingCount,
+        ]
       properties:
         name:
           type: string

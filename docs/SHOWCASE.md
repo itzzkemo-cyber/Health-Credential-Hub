@@ -1,6 +1,7 @@
 # Health Credential Hub — Showcase handoff
 
-هذه نسخة عرض للواجهة الأساسية على الويب، مهيأة لتجربة مسار الموظف من الجوال دون قاعدة بيانات أو تخزين أو مفاتيح API.
+هذه نسخة عرض للواجهة الأساسية على الويب، مهيأة لتجربة مساري الموظف والمدير
+من الجوال دون قاعدة بيانات أو تخزين أو مفاتيح API.
 
 ## تشغيل العرض
 
@@ -11,7 +12,8 @@ pnpm install --frozen-lockfile
 pnpm demo:web
 ```
 
-افتح `http://localhost:4173`، ثم اختر حساب «ممرضة / موظف». لا توجد كلمة مرور في هذا المسار.
+افتح `http://localhost:4173`، ثم اختر حساب «ممرضة / موظف» أو أحد حسابات
+المشرف/مدير القسم/مسؤول المنشأة. لا توجد كلمة مرور في هذا المسار.
 
 ## التحقق على شاشة جوال بعرض 390px
 
@@ -27,6 +29,10 @@ pnpm demo:web
 6. احذف وثيقة من العرض. الحذف محلي ويزيل بيانات صناعية من جلسة العرض الحالية فقط؛ لا يحذف ملفًا أو سجلًا إنتاجيًا.
 7. حدّث الصفحة وتأكد من عودة البيانات الصناعية الافتراضية واختفاء الملفات المؤقتة من الذاكرة.
 8. اختر «إعادة التجربة» وتأكد من مسح جلسة العرض والعودة إلى البداية بأمان.
+9. سجّل الدخول بحساب إداري، وتأكد من ظهور لوحة نطاق الإدارة، قائمة الموظفين،
+   وطابور الوثائق المعلقة. افتح ملف موظف ووثيقته ثم اعتمدها؛ يجب أن تختفي من
+   طابور المراجعة.
+10. عد إلى حساب الموظف وتأكد من عدم ظهور لوحة الإدارة أو بيانات موظف آخر.
 
 ### English
 
@@ -38,6 +44,11 @@ pnpm demo:web
 6. Delete a document in the showcase. Deletion is local and removes synthetic data only from the current showcase session; it does not delete a production file or record.
 7. Refresh the page and confirm that default synthetic data returns and temporary in-memory files disappear.
 8. Choose “Reset demo” and confirm that the showcase session is cleared and returns safely to the beginning.
+9. Sign in with a management account. Confirm that the scoped employee list
+   and pending-review queue appear, open an employee and credential, then
+   verify it; it must leave the pending queue.
+10. Return to the employee account and confirm that no manager dashboard or
+    other employee data is visible.
 
 ## حدود العرض
 

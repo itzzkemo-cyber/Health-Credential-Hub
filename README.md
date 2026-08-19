@@ -61,7 +61,12 @@ pnpm --filter @workspace/health-docs run dev
 pnpm demo:web
 ```
 
-افتح `http://localhost:4173` واختر حساب الموظف بنقرة واحدة. وضع العرض يستخدم بيانات صناعية فقط، ويحفظ الملفات المختارة في ذاكرة المتصفح إلى أن تُحدّث الصفحة، ويتضمن وثيقة نموذجية لتجربة القراءة الذكية المحاكية. التفاصيل الكاملة في [docs/SHOWCASE.md](docs/SHOWCASE.md).
+افتح `http://localhost:4173` واختر حساب الموظف أو أحد حسابات الإدارة بنقرة
+واحدة. يستطيع المدير رؤية الموظفين الواقعين ضمن نطاق صلاحياته، فتح ملفاتهم،
+ومراجعة الوثائق المعلقة، بينما لا يرى الموظف إلا وثائقه. وضع العرض يستخدم
+بيانات صناعية فقط، ويحفظ الملفات المختارة في ذاكرة المتصفح إلى أن تُحدّث
+الصفحة، ويتضمن وثيقة نموذجية لتجربة القراءة الذكية المحاكية. التفاصيل الكاملة
+في [docs/SHOWCASE.md](docs/SHOWCASE.md).
 
 The API reads the root `.env` only in its `dev` command. Production `start` expects environment variables from the deployment platform.
 
@@ -102,6 +107,17 @@ Cloud Shell bootstrap is included at `infra/gcp/bootstrap.sh`. Data flows,
 provider setup, retention assumptions, and remaining approval decisions for
 GCS, Gemini, Resend, and Google OAuth are documented in
 [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+
+إنشاء أول حساب إدارة في قاعدة جديدة مسار مستقل ومحمي بلا كلمة مرور افتراضية؛
+اتبع قسم **First production administrator** في دليل Google Cloud ولا ترسل كلمة
+المرور في المحادثات أو ملفات المستودع. الأتمتة الاختيارية تستخدم transactional
+outbox وعاملًا منفصلًا يوقع أحداثًا مصغرة قبل إرسالها إلى مستلم مركزي معتمد؛
+راجع [docs/PRODUCTION_AUTOMATION.md](docs/PRODUCTION_AUTOMATION.md) قبل ربط n8n.
+
+اقتراح الاسم التجاري الحالي هو **CredArabia | كريد أرابيا**، والدومين المرشح
+هو `credarabia.com`. لا تغيّر هوية المنتج قبل شراء الدومين وإجراء بحث العلامة
+التجارية؛ القرار والبدائل موثقة في
+[docs/BRAND_AND_DOMAIN.md](docs/BRAND_AND_DOMAIN.md).
 
 - Keep `DEMO_LOGIN_ENABLED`, `ALLOW_DEMO_SEED`, `SELF_REGISTRATION_ENABLED`, and `GOOGLE_AUTO_PROVISION_ENABLED` false unless explicitly required.
 - Use a secret manager and a random `SESSION_SECRET` of at least 32 characters.

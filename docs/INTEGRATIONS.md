@@ -14,12 +14,13 @@ application.
 
 ## Status at a glance
 
-| Integration                        | Implemented in the repository                                                                                                          | Provisioned by the supplied Google Cloud bootstrap                                                                                            | Production status                                                                                                                                                                                                                          |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                   | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account. | Supported deployment path, but document lifecycle deletion, orphan cleanup, malware scanning, and restore drills remain operator work.                                                                                                     |
-| Gemini OCR                         | Authenticated users can send an authorized stored file to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields. | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                           | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                             |
-| Resend email                       | Password resets, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API.                                 | No. The bootstrap explicitly deploys with email disabled and does not create the Resend secret.                                               | Optional and fail-closed until an operator enables it. Subprocessor approval, data-region/retention confirmation, bounce handling, and delivery reconciliation remain required.                                                            |
-| Google OAuth                       | Authorization-code login, verified-email linking, local session issuance, and local 2FA continuation are implemented.                  | No. The bootstrap does not create an OAuth client or bind its secret.                                                                         | Optional when client credentials and the canonical public URL are configured. Production auto-provisioning is disabled in code. Bounded timeouts are implemented; retry decisions and account unlink/lifecycle procedures remain required. |
+| Integration                        | Implemented in the repository                                                                                                          | Provisioned by the supplied Google Cloud bootstrap                                                                                                                                                                      | Production status                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                   | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | Supported deployment path, but document lifecycle deletion, orphan cleanup, malware scanning, and restore drills remain operator work.                                                                                                                                                                                |
+| Gemini OCR                         | Authenticated users can send an authorized stored file to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields. | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                        |
+| Resend email                       | Password resets, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API.                                 | No. The bootstrap explicitly deploys with email disabled and does not create the Resend secret.                                                                                                                         | Optional and fail-closed until an operator enables it. Subprocessor approval, data-region/retention confirmation, bounce handling, and delivery reconciliation remain required.                                                                                                                                       |
+| Google OAuth                       | Authorization-code login for an already linked Google subject, local session issuance, and local 2FA continuation are implemented.     | No. The bootstrap does not create an OAuth client or bind its secret.                                                                                                                                                   | Optional when client credentials and the canonical public URL are configured. Email-only account linking and production auto-provisioning are disabled in code. Bounded timeouts are implemented; account-link/unlink procedures remain required.                                                                     |
+| Signed automation webhook          | A PostgreSQL transactional outbox and optional HMAC-signed worker emit three minimized credential lifecycle events.                    | Partly. The bootstrap provisions or updates an inert one-shot Cloud Run Job, dedicated worker/scheduler identities, a regional HMAC secret, and a paused five-minute Scheduler job. It does not provision the receiver. | Disabled by default. Supports explicit facility routing, exact-host/public-IP enforcement, idempotency, bounded timeout, retry/backoff, stale-claim recovery, dead-letter retention, and no document/token fields. The recipient remains an operator-approved subprocessor and must verify signatures/replay windows. |
 
 "Implemented" does not mean that the provider has been enabled in a deployed
 environment. No FHIR, HL7, SMART on FHIR, regulator API, or other health-data
@@ -375,6 +376,182 @@ this ledger.
    and a documented emergency disable method before enabling the button for
    production users. Validate the 15-second timeout behavior against the
    approved network path.
+
+## 5. Durable workflow automation / n8n-compatible webhook
+
+### Scope and safe defaults
+
+Workflow automation has two independent, disabled-by-default switches:
+
+- `AUTOMATION_OUTBOX_ENABLED=true` makes credential create and verification
+  changes write an outbox row in the same PostgreSQL transaction as the source
+  record. The API does not need the webhook secret.
+- `AUTOMATION_WEBHOOK_ENABLED=true` enables the separate worker. It requires an
+  HTTPS `AUTOMATION_WEBHOOK_URL` and a canonical Base64 HMAC secret containing
+  at least 32 random bytes. HTTP is accepted only for localhost outside
+  production. The worker refuses to start unless
+  `AUTOMATION_OUTBOX_ENABLED=true` is also set, so expiry scanning cannot bypass
+  the common feature gate.
+- `AUTOMATION_FACILITY_ALLOWLIST` is a required comma-separated list of
+  positive facility IDs whenever event production is enabled. There is no
+  wildcard. Credential create/update enqueue, expiry scans, and delivery claims
+  all apply this same database-level boundary.
+- Delivery additionally requires
+  `AUTOMATION_WEBHOOK_MODE=SINGLE_CONTROLLER` to acknowledge that one receiver
+  is privileged across the listed facilities, plus an exact
+  `AUTOMATION_WEBHOOK_HOST_ALLOWLIST`. Wildcards, schemes, ports, and paths are
+  rejected in that host list.
+
+The worker may run as a scheduled one-shot Cloud Run Job
+(`AUTOMATION_WORKER_MODE=once`) or as a dedicated continuously polling worker
+(`continuous`). Do not run it inside the public API process. The shipped Google
+Cloud bootstrap provisions or updates the one-shot job with its own identity,
+Cloud SQL access, and the HMAC secret while keeping both switches false by
+default. It also provisions a five-minute Cloud Scheduler invocation in
+`me-central2` under a separate identity with `roles/run.invoker` only on this
+job; the schedule is paused by default. It resumes and runs one initial worker
+cycle only when an operator explicitly supplies all reviewed automation
+settings.
+
+### Event contract and data minimization
+
+The exact JSON envelope is:
+
+```json
+{
+  "id": "outbox-uuid-used-for-idempotency",
+  "type": "credential.created | credential.verification_changed | credential.expiry_due",
+  "occurredAt": "2026-08-19T12:00:00.000Z",
+  "facilityId": 17,
+  "data": {
+    "credentialId": 42,
+    "employeeId": 7,
+    "credentialType": "BLS"
+  }
+}
+```
+
+`credential.verification_changed` additionally has `isVerified`.
+`credential.expiry_due` additionally has `expiryDate`, `dueInDays`, and the
+crossed `thresholdDays` (`90, 60, 30, 15, 7, 1, 0`). A delayed worker emits the
+closest crossed threshold and database uniqueness prevents repeating that
+threshold for the same credential expiry date. Renewing the credential changes
+the deduplication key so the new lifecycle can emit its own due events.
+
+The payload validator rejects unexpected keys. In particular, events never
+contain a document body/path, original filename, presigned URL, QR token,
+certificate number, OCR body/result, employee name/email/phone, password,
+session token, or TOTP material. `facilityId` is the affected tenant, not a
+value derived from a cross-facility actor.
+
+### Signature, replay, and idempotency
+
+The worker serializes the exact body once and sends:
+
+- `Idempotency-Key` and `X-Health-Credential-Event-Id`: the outbox UUID.
+- `X-Health-Credential-Event-Type`: the event type.
+- `X-Health-Credential-Timestamp`: Unix seconds.
+- `X-Health-Credential-Signature`: `sha256=<hex HMAC>`, calculated over
+  `<timestamp>.<exact raw request body>`.
+
+The receiver must read the raw bytes before JSON parsing, calculate HMAC-SHA256
+with the Secret Manager value, compare in constant time, reject timestamps
+outside an approved short window (recommended five minutes), and atomically
+deduplicate the event ID before starting a workflow. Returning any non-2xx
+status leaves the event undelivered. Never return provider secrets or document
+content in an error response.
+
+Before production delivery, the URL hostname must exactly match the configured
+host allowlist. The worker performs DNS resolution inside the actual HTTPS
+connection lookup, rejects any private, loopback, link-local, documentation, or
+multicast result, and keeps the original hostname for TLS SNI/certificate and
+Host validation. This avoids a separate DNS-check/fetch rebinding window.
+Also apply outbound firewall/egress policy to the approved receiver where the
+platform supports it; application checks do not replace network controls.
+
+### Delivery, failure, and retention
+
+- Claims use PostgreSQL row locks with `SKIP LOCKED`; duplicate delivery is
+  still possible if the receiver succeeds and the worker crashes before
+  marking the row. The event ID is therefore the correctness boundary.
+- Each event is claimed immediately before its own request. A batch never
+  shares one lock deadline across sequential network calls, and the five-minute
+  default lock remains greater than twice the maximum request timeout.
+- The default request timeout is 10 seconds. Failures retry from 30 seconds
+  with exponential backoff capped at one hour, for eight attempts by default.
+  HTTP 408/409/425/429/5xx and network/timeout failures retry; other 4xx
+  responses are treated as permanent configuration/contract rejection.
+  Bounded `Retry-After` values are honored up to one hour.
+- A stale claim can be recovered after five minutes. An exhausted stale claim
+  is explicitly dead-lettered rather than becoming permanently stuck.
+- Invalid payloads fail closed and are dead-lettered without an outbound call.
+  Logs contain event/facility IDs and bounded error codes, never response bodies
+  or integration secrets.
+- Pending events older than seven days are dead-lettered without delivery by
+  default, preventing a newly enabled receiver from receiving an unbounded old
+  backlog. Before every delivery, the worker rechecks the credential: deleted
+  records, inactive/transferred employees, mismatched tenant, superseded
+  verification state, and replaced expiry dates are suppressed.
+- Processed and dead-letter rows are deleted after 30 days by default. Approve
+  that value against audit/incident requirements before production; the
+  authoritative credential/audit records are not deleted by this cleanup. Each
+  delivered or finally discarded event is also written transactionally to the
+  append-only `automation_delivery_log` with only event/facility/type/status,
+  attempt count, a safe error code, and timestamp. Worker cleanup does not
+  delete this disclosure ledger.
+
+For Saudi data residency, prefer an operator-controlled n8n deployment whose
+compute, database, backups, logs, and encryption keys all remain in Dammam
+(`me-central2`) and whose ingress accepts only the worker identity/network where
+practical. A public n8n/webhook SaaS endpoint is a new external data recipient:
+do not enable it until legal/privacy review confirms region, retention,
+subprocessors, breach terms, access controls, and deletion procedures. n8n
+workflow execution logs must not persist the full event longer than approved.
+
+The configured webhook is a cross-facility privileged recipient because a
+single worker can deliver events for every facility. Restrict receiver access,
+workflow editing, and event inspection accordingly. Give n8n only the webhook
+verification secret: never provide it with Health Credential Hub administrator
+credentials, application sessions, database credentials, storage access, or
+document URLs. Rotate the HMAC secret through an overlap procedure that keeps
+verification available while the worker and receiver move to the new value.
+
+### Operator sequence
+
+1. Apply migration `0005_automation_outbox.sql`.
+2. Provision the receiver and HMAC secret. Test signature rejection, replay,
+   duplicate ID, timeout, 5xx retry, and dead-letter alerting with synthetic
+   data.
+3. Rerun the bootstrap, or update the provisioned
+   `health-credential-hub-automation` job, with the approved HTTPS
+   `AUTOMATION_WEBHOOK_URL`, its exact host allowlist,
+   `AUTOMATION_WEBHOOK_MODE=SINGLE_CONTROLLER`, the reviewed facility ID list,
+   and both automation switches set to `true`. Keep the HMAC secret mounted
+   only on that job. Enable event production only when monitoring is ready,
+   otherwise pending rows can accumulate until the worker next runs.
+4. Confirm the bootstrap-created Scheduler job resumed at the approved
+   five-minute cadence, or keep it paused and trigger the worker manually. Its
+   identity must retain only Job-level `roles/run.invoker`.
+5. Monitor pending age, attempt count, dead-letter count, delivery latency,
+   Cloud SQL load, and receiver failures. The repository does not currently
+   ship alert policies or an operator re-drive command for dead-letter rows.
+
+For the supported Google Cloud layout, the bootstrap-created job already uses
+the reviewed application image, its own least-privilege identity, Cloud SQL,
+`DATABASE_URL`, and the HMAC secret; the public API cannot access that HMAC
+secret. Set the non-secret worker variables explicitly on every bootstrap or
+release update. Run a one-shot cycle with:
+
+```bash
+gcloud run jobs execute "health-credential-hub-automation" \
+  --region="me-central2" --wait
+```
+
+The bootstrap-created Scheduler job uses an authenticated invocation and is
+paused whenever webhook delivery is disabled. An operator may keep it paused
+and deploy the same entry point as a dedicated worker service using
+`AUTOMATION_WORKER_MODE=continuous`. The public API service must not receive the
+webhook HMAC secret.
 
 ## Cross-integration production gate
 

@@ -4,7 +4,11 @@ import {
   type AuthResponse,
   type Credential,
   type CredentialInput,
+  type CredentialUpdate,
   type DashboardStats,
+  type DemoLoginInputRole,
+  type EmployeeDetail,
+  type EmployeeWithStats,
   type Notification,
   type OcrResult,
   type RequestHandler,
@@ -30,14 +34,106 @@ const employee: User = {
   createdAt: shiftedIso(-480),
 };
 
+const supervisor: User = {
+  ...employee,
+  id: 4,
+  email: "supervisor@healthdocs.sa",
+  name: "Omar Alharbi",
+  nameAr: "عمر الحربي",
+  role: "supervisor",
+  supervisorId: null,
+  jobTitle: "Nursing Supervisor",
+  jobTitleAr: "مشرف تمريض",
+  employeeNumber: "SUP-1004",
+};
+
+const departmentManager: User = {
+  ...employee,
+  id: 3,
+  email: "dept@healthdocs.sa",
+  name: "Sara Alotaibi",
+  nameAr: "سارة العتيبي",
+  role: "department_manager",
+  supervisorId: null,
+  jobTitle: "Department Manager",
+  jobTitleAr: "مديرة القسم",
+  employeeNumber: "MGR-1003",
+};
+
+const hospitalAdmin: User = {
+  ...employee,
+  id: 2,
+  email: "hospital@healthdocs.sa",
+  name: "Khalid Alqahtani",
+  nameAr: "خالد القحطاني",
+  role: "hospital_admin",
+  departmentId: null,
+  supervisorId: null,
+  jobTitle: "Hospital Administrator",
+  jobTitleAr: "مدير المنشأة",
+  employeeNumber: "ADM-1002",
+};
+
+const systemAdmin: User = {
+  ...hospitalAdmin,
+  id: 1,
+  email: "admin@healthdocs.sa",
+  name: "HealthDocs Admin",
+  nameAr: "مسؤول وثائقي الصحي",
+  role: "system_admin",
+  employeeNumber: "SYS-1001",
+};
+
+const secondEmployee: User = {
+  ...employee,
+  id: 6,
+  email: "fahad@healthdocs.sa",
+  name: "Fahad Almutairi",
+  nameAr: "فهد المطيري",
+  jobTitle: "Emergency Nurse",
+  jobTitleAr: "ممرض طوارئ",
+  employeeNumber: "EMP-1006",
+};
+
+const pharmacyEmployee: User = {
+  ...employee,
+  id: 7,
+  email: "reem@healthdocs.sa",
+  name: "Reem Alzahrani",
+  nameAr: "ريم الزهراني",
+  departmentId: 2,
+  supervisorId: null,
+  jobTitle: "Clinical Pharmacist",
+  jobTitleAr: "صيدلانية سريرية",
+  employeeNumber: "EMP-1007",
+};
+
+const showcaseAccounts: Record<DemoLoginInputRole, User> = {
+  employee,
+  supervisor,
+  department_manager: departmentManager,
+  hospital_admin: hospitalAdmin,
+  system_admin: systemAdmin,
+};
+
+const showcaseStaff = [
+  departmentManager,
+  supervisor,
+  employee,
+  secondEmployee,
+  pharmacyEmployee,
+];
+
 let credentials = createSeedCredentials();
 let notifications = createSeedNotifications();
-let nextCredentialId = 104;
+let nextCredentialId = 107;
+let currentUser: User = employee;
 
 export function resetShowcaseApiState(): void {
   credentials = createSeedCredentials();
   notifications = createSeedNotifications();
-  nextCredentialId = 104;
+  nextCredentialId = 107;
+  currentUser = employee;
 }
 
 export function enableShowcaseApi(): void {
@@ -67,18 +163,64 @@ export function createShowcaseRequestHandler(): RequestHandler {
       (path === "/api/auth/demo-login" || path === "/api/auth/login") &&
       method === "POST"
     ) {
+      const input = await readJson<{ role?: DemoLoginInputRole }>(init);
+      currentUser = input?.role
+        ? (showcaseAccounts[input.role] ?? employee)
+        : employee;
       const response: AuthResponse = {
         token: "showcase-session",
-        user: employee,
+        user: currentUser,
       };
       return json(response);
     }
 
-    if (path === "/api/auth/me" && method === "GET") return json(employee);
+    if (path === "/api/auth/me" && method === "GET") return json(currentUser);
     if (path === "/api/auth/logout" && method === "POST") return noContent();
 
     if (path === "/api/dashboard/stats" && method === "GET") {
       return json(buildDashboardStats());
+    }
+
+    if (path === "/api/employees" && method === "GET") {
+      const search = url.searchParams.get("search")?.trim().toLowerCase();
+      const departmentId = Number(url.searchParams.get("departmentId"));
+      const supervisorId = Number(url.searchParams.get("supervisorId"));
+      const role = url.searchParams.get("role");
+      const active = url.searchParams.get("isActive");
+      const employees = visibleEmployeesFor(currentUser)
+        .filter((item) => {
+          if (
+            Number.isFinite(departmentId) &&
+            departmentId > 0 &&
+            item.departmentId !== departmentId
+          )
+            return false;
+          if (
+            Number.isFinite(supervisorId) &&
+            supervisorId > 0 &&
+            item.supervisorId !== supervisorId
+          )
+            return false;
+          if (role && item.role !== role) return false;
+          if (active === "true" && !item.isActive) return false;
+          if (active === "false" && item.isActive) return false;
+          if (!search) return true;
+          return [item.name, item.nameAr, item.email, item.employeeNumber].some(
+            (value) => value?.toLowerCase().includes(search),
+          );
+        })
+        .map(employeeWithStats);
+      return json(employees);
+    }
+
+    const employeeMatch = path.match(/^\/api\/employees\/(\d+)$/);
+    if (employeeMatch && method === "GET") {
+      const id = Number(employeeMatch[1]);
+      const target = visibleEmployeesFor(currentUser).find(
+        (item) => item.id === id,
+      );
+      if (!target) return problem(404, "Employee not found");
+      return json(employeeDetail(target));
     }
 
     if (path === "/api/credentials/ocr" && method === "POST") {
@@ -107,25 +249,41 @@ export function createShowcaseRequestHandler(): RequestHandler {
     if (path === "/api/credentials" && method === "GET") {
       const status = url.searchParams.get("status");
       const type = url.searchParams.get("type");
+      const rawIsVerified = url.searchParams.get("isVerified");
+      if (
+        rawIsVerified !== null &&
+        rawIsVerified !== "true" &&
+        rawIsVerified !== "false"
+      ) {
+        return problem(400, "isVerified must be true or false");
+      }
       const search = url.searchParams.get("search")?.trim().toLowerCase();
       const page = Math.max(1, Number(url.searchParams.get("page") || 1));
       const pageSize = Math.max(
         1,
         Number(url.searchParams.get("pageSize") || 50),
       );
-      const filtered = credentials.filter((credential) => {
-        if (status && credential.status !== status) return false;
-        if (type && credential.type !== type) return false;
-        if (!search) return true;
-        return [
-          credential.type,
-          credential.customTypeName,
-          credential.customTypeNameAr,
-          credential.issuerName,
-          credential.issuerNameAr,
-          credential.certificateNumber,
-        ].some((value) => value?.toLowerCase().includes(search));
-      });
+      const filtered = scopedCredentialsFor(currentUser).filter(
+        (credential) => {
+          if (status && credential.status !== status) return false;
+          if (type && credential.type !== type) return false;
+          if (
+            rawIsVerified !== null &&
+            credential.isVerified !== (rawIsVerified === "true")
+          ) {
+            return false;
+          }
+          if (!search) return true;
+          return [
+            credential.type,
+            credential.customTypeName,
+            credential.customTypeNameAr,
+            credential.issuerName,
+            credential.issuerNameAr,
+            credential.certificateNumber,
+          ].some((value) => value?.toLowerCase().includes(search));
+        },
+      );
       const start = (page - 1) * pageSize;
       return json({
         data: filtered.slice(start, start + pageSize),
@@ -148,10 +306,22 @@ export function createShowcaseRequestHandler(): RequestHandler {
         return problem(400, "Valid issue and expiry dates are required");
       }
       const now = new Date().toISOString();
+      const requestedOwner = showcaseStaff.find(
+        (item) => item.id === data.employeeId,
+      );
+      const owner =
+        currentUser.role === "employee"
+          ? currentUser
+          : requestedOwner &&
+              visibleEmployeesFor(currentUser).some(
+                (item) => item.id === requestedOwner.id,
+              )
+            ? requestedOwner
+            : employee;
       const credential: Credential = {
         id: nextCredentialId++,
-        employeeId: employee.id,
-        employee: employeeSummary(),
+        employeeId: owner.id,
+        employee: employeeSummary(owner),
         type: data.type,
         customTypeName: data.customTypeName ?? null,
         customTypeNameAr: data.customTypeNameAr ?? null,
@@ -179,7 +349,7 @@ export function createShowcaseRequestHandler(): RequestHandler {
       notifications = [
         {
           id: Date.now(),
-          userId: employee.id,
+          userId: owner.id,
           type: "new_credential",
           titleAr: "تم استلام وثيقتك",
           titleEn: "Document received",
@@ -187,7 +357,7 @@ export function createShowcaseRequestHandler(): RequestHandler {
           messageEn:
             "The document was saved in the showcase and awaits review.",
           credentialId: credential.id,
-          employeeId: employee.id,
+          employeeId: owner.id,
           isRead: false,
           daysUntilExpiry: null,
           createdAt: now,
@@ -216,9 +386,37 @@ export function createShowcaseRequestHandler(): RequestHandler {
     const credentialMatch = path.match(/^\/api\/credentials\/(\d+)$/);
     if (credentialMatch) {
       const id = Number(credentialMatch[1]);
-      const credential = credentials.find((item) => item.id === id);
+      const credential = scopedCredentialsFor(currentUser).find(
+        (item) => item.id === id,
+      );
       if (!credential) return problem(404, "Credential not found");
       if (method === "GET") return json(credential);
+      if (method === "PATCH") {
+        const body = await readJson<CredentialUpdate>(init);
+        if (!body || body.expectedVersion !== credential.version)
+          return problem(409, "Credential version conflict");
+        if (
+          typeof body.isVerified === "boolean" &&
+          ![
+            "supervisor",
+            "department_manager",
+            "hospital_admin",
+            "system_admin",
+          ].includes(currentUser.role)
+        )
+          return problem(403, "Credential verification is not allowed");
+
+        const updated: Credential = {
+          ...credential,
+          isVerified: body.isVerified ?? credential.isVerified,
+          version: credential.version + 1,
+          updatedAt: new Date().toISOString(),
+        };
+        credentials = credentials.map((item) =>
+          item.id === updated.id ? updated : item,
+        );
+        return json(updated);
+      }
       if (method === "DELETE") {
         credentials = credentials.filter((item) => item.id !== id);
         return noContent();
@@ -289,6 +487,45 @@ function createSeedCredentials(): Credential[] {
       expiryDate: shiftedDate(-55),
       isVerified: true,
     }),
+    credentialSeed(
+      {
+        id: 104,
+        type: "BLS",
+        issuerName: "Saudi Heart Association",
+        issuerNameAr: "جمعية القلب السعودية",
+        certificateNumber: "SHA-BLS-88412",
+        issueDate: shiftedDate(-20),
+        expiryDate: shiftedDate(345),
+        isVerified: false,
+      },
+      secondEmployee,
+    ),
+    credentialSeed(
+      {
+        id: 105,
+        type: "fire_safety",
+        issuerName: "Hospital Safety Academy",
+        issuerNameAr: "أكاديمية سلامة المنشآت الصحية",
+        certificateNumber: "FIRE-2026-610",
+        issueDate: shiftedDate(-60),
+        expiryDate: shiftedDate(305),
+        isVerified: true,
+      },
+      secondEmployee,
+    ),
+    credentialSeed(
+      {
+        id: 106,
+        type: "SCFHS_license",
+        issuerName: "Saudi Commission for Health Specialties",
+        issuerNameAr: "الهيئة السعودية للتخصصات الصحية",
+        certificateNumber: "SCFHS-PH-29108",
+        issueDate: shiftedDate(-10),
+        expiryDate: shiftedDate(355),
+        isVerified: false,
+      },
+      pharmacyEmployee,
+    ),
   ];
 }
 
@@ -304,15 +541,16 @@ function credentialSeed(
     | "expiryDate"
     | "isVerified"
   >,
+  owner: User = employee,
 ): Credential {
   return {
     ...values,
-    employeeId: employee.id,
-    employee: employeeSummary(),
+    employeeId: owner.id,
+    employee: employeeSummary(owner),
     customTypeName: null,
     customTypeNameAr: null,
-    holderName: employee.name,
-    holderNameAr: employee.nameAr,
+    holderName: owner.name,
+    holderNameAr: owner.nameAr,
     status: statusFor(values.expiryDate),
     fileUrl: null,
     fileType: null,
@@ -361,40 +599,128 @@ function createSeedNotifications(): Notification[] {
 }
 
 function buildDashboardStats(): DashboardStats {
-  const active = credentials.filter((item) => item.status === "active").length;
-  const expiring = credentials.filter(
+  const scopedCredentials = scopedCredentialsFor(currentUser);
+  const scopedEmployees =
+    currentUser.role === "employee"
+      ? [currentUser]
+      : visibleEmployeesFor(currentUser);
+  const active = scopedCredentials.filter(
+    (item) => item.status === "active",
+  ).length;
+  const expiring = scopedCredentials.filter(
     (item) => item.status === "expiring_soon",
   ).length;
-  const expired = credentials.filter(
+  const expired = scopedCredentials.filter(
     (item) => item.status === "expired",
   ).length;
   return {
-    totalCredentials: credentials.length,
+    totalCredentials: scopedCredentials.length,
     activeCredentials: active,
     expiringCredentials: expiring,
     expiredCredentials: expired,
     missingCredentials: 1,
     complianceRate:
-      credentials.length === 0
+      scopedCredentials.length === 0
         ? 0
-        : Math.round(((active + expiring) / (credentials.length + 1)) * 100),
-    totalEmployees: 1,
+        : Math.round(
+            ((active + expiring) / (scopedCredentials.length + 1)) * 100,
+          ),
+    totalEmployees: scopedEmployees.length,
     atRiskEmployees: expired > 0 ? 1 : 0,
-    upcomingExpirations: credentials
+    upcomingExpirations: scopedCredentials
       .filter((item) => item.status === "expiring_soon")
       .slice(0, 5),
     recentActivity: [],
   };
 }
 
-function employeeSummary() {
+function employeeSummary(owner: User = employee) {
   return {
-    id: employee.id,
-    name: employee.name,
-    nameAr: employee.nameAr,
-    jobTitle: employee.jobTitle ?? "Registered Nurse",
-    jobTitleAr: employee.jobTitleAr ?? "ممرضة مسجلة",
-    avatarUrl: employee.avatarUrl,
+    id: owner.id,
+    name: owner.name,
+    nameAr: owner.nameAr,
+    jobTitle: owner.jobTitle ?? "Healthcare Professional",
+    jobTitleAr: owner.jobTitleAr ?? "ممارس صحي",
+    avatarUrl: owner.avatarUrl,
+  };
+}
+
+function visibleEmployeesFor(user: User): User[] {
+  const rank: Record<User["role"], number> = {
+    employee: 0,
+    supervisor: 1,
+    department_manager: 2,
+    hospital_admin: 3,
+    system_admin: 4,
+  };
+  const lowerRanked = showcaseStaff.filter(
+    (item) => item.id !== user.id && rank[item.role] < rank[user.role],
+  );
+
+  switch (user.role) {
+    case "supervisor":
+      return lowerRanked.filter((item) => item.supervisorId === user.id);
+    case "department_manager":
+      return lowerRanked.filter(
+        (item) => item.departmentId === user.departmentId,
+      );
+    case "hospital_admin":
+      return lowerRanked.filter((item) => item.facilityId === user.facilityId);
+    case "system_admin":
+      return lowerRanked;
+    default:
+      return [];
+  }
+}
+
+function scopedCredentialsFor(user: User): Credential[] {
+  if (user.role === "employee")
+    return credentials.filter((item) => item.employeeId === user.id);
+  const visibleIds = new Set(visibleEmployeesFor(user).map((item) => item.id));
+  return credentials.filter((item) => visibleIds.has(item.employeeId));
+}
+
+function employeeWithStats(owner: User): EmployeeWithStats {
+  const ownedCredentials = credentials.filter(
+    (item) => item.employeeId === owner.id,
+  );
+  const validCount = ownedCredentials.filter(
+    (item) => item.status === "active" || item.status === "expiring_soon",
+  ).length;
+  const expiredCount = ownedCredentials.filter(
+    (item) => item.status === "expired",
+  ).length;
+  const expiringCount = ownedCredentials.filter(
+    (item) => item.status === "expiring_soon",
+  ).length;
+
+  return {
+    ...owner,
+    department:
+      owner.departmentId === 1
+        ? { id: 1, name: "Nursing", nameAr: "التمريض" }
+        : owner.departmentId === 2
+          ? { id: 2, name: "Pharmacy", nameAr: "الصيدلية" }
+          : undefined,
+    complianceRate:
+      ownedCredentials.length === 0
+        ? 0
+        : Math.round((validCount / ownedCredentials.length) * 100),
+    totalCredentials: ownedCredentials.length,
+    expiredCount,
+    expiringCount,
+    missingCount: ownedCredentials.length === 0 ? 1 : 0,
+    isAtRisk: expiredCount > 0 || ownedCredentials.length === 0,
+  };
+}
+
+function employeeDetail(owner: User): EmployeeDetail {
+  return {
+    ...employeeWithStats(owner),
+    credentials: credentials.filter((item) => item.employeeId === owner.id),
+    missingCredentials: credentials.some((item) => item.employeeId === owner.id)
+      ? []
+      : ["BLS"],
   };
 }
 

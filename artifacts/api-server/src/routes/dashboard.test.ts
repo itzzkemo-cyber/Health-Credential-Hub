@@ -12,6 +12,7 @@ const dashboardMocks = vi.hoisted(() => ({
   eq: vi.fn(),
   inArray: vi.fn(),
   where: vi.fn(),
+  getCredentialScopedUsers: vi.fn(),
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -58,6 +59,7 @@ vi.mock("../lib/helpers", () => ({
   computeStatus: vi.fn(),
   daysUntil: vi.fn(),
   getCredentialsFor: vi.fn(),
+  getCredentialScopedUsers: dashboardMocks.getCredentialScopedUsers,
   getDepartments: vi.fn(),
   getPolicies: vi.fn(),
   getScopedUsers: vi.fn(async () =>
@@ -79,6 +81,10 @@ describe("dashboard recent activity tenant scope", () => {
     dashboardMocks.eq.mockReset();
     dashboardMocks.inArray.mockReset();
     dashboardMocks.where.mockClear();
+    dashboardMocks.getCredentialScopedUsers.mockReset();
+    dashboardMocks.getCredentialScopedUsers.mockImplementation(async () =>
+      dashboardMocks.scopedUserIds.map((id) => ({ id, isActive: true })),
+    );
     dashboardMocks.inArray.mockImplementation((column, values) => ({
       kind: "inArray",
       column,
@@ -113,15 +119,16 @@ describe("dashboard recent activity tenant scope", () => {
     if (!address || typeof address === "string") {
       throw new Error("Expected a disposable TCP listener");
     }
-    return fetch(
-      `http://127.0.0.1:${address.port}/api/dashboard/activity`,
-    );
+    return fetch(`http://127.0.0.1:${address.port}/api/dashboard/activity`);
   }
 
   it("combines scoped actor ids with the audit event facility", async () => {
     const response = await requestActivity();
 
     expect(response.status).toBe(200);
+    expect(dashboardMocks.getCredentialScopedUsers).toHaveBeenCalledWith(
+      dashboardMocks.currentUser,
+    );
     expect(dashboardMocks.inArray).toHaveBeenCalledWith(
       "auditLogs.userId",
       dashboardMocks.scopedUserIds,

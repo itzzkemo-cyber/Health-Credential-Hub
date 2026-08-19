@@ -474,6 +474,7 @@ export const ListCredentialsQueryParams = zod.object({
   "employeeId": zod.coerce.number().nullish(),
   "departmentId": zod.coerce.number().nullish(),
   "search": zod.coerce.string().optional(),
+  "isVerified": zod.coerce.boolean().optional().describe('Filter verification state after tenant and role scoping and before pagination. Use false for the manager review queue.'),
   "page": zod.coerce.number().default(listCredentialsQueryPageDefault),
   "pageSize": zod.coerce.number().default(listCredentialsQueryPageSizeDefault)
 })

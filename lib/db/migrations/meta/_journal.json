@@ -36,6 +36,13 @@
       "when": 1787137717320,
       "tag": "0004_audit_facility_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787143795017,
+      "tag": "0005_automation_outbox",
+      "breakpoints": true
     }
   ]
 }

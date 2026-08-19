@@ -127,38 +127,40 @@ export default function Login() {
     email: string;
     icon: typeof ShieldCheck;
     color: string;
-  }[] = [
-    {
-      role: "system_admin",
-      email: "admin@healthdocs.sa",
-      icon: ShieldCheck,
-      color: "text-red-500",
-    },
-    {
-      role: "hospital_admin",
-      email: "hospital@healthdocs.sa",
-      icon: Activity,
-      color: "text-blue-500",
-    },
-    {
-      role: "department_manager",
-      email: "dept@healthdocs.sa",
-      icon: Users,
-      color: "text-amber-500",
-    },
-    {
-      role: "supervisor",
-      email: "supervisor@healthdocs.sa",
-      icon: HeartPulse,
-      color: "text-green-500",
-    },
-    {
-      role: "employee",
-      email: "employee@healthdocs.sa",
-      icon: UserCircle,
-      color: "text-primary",
-    },
-  ];
+  }[] = isShowcaseMode
+    ? [
+        {
+          role: "system_admin",
+          email: "admin@healthdocs.sa",
+          icon: ShieldCheck,
+          color: "text-red-500",
+        },
+        {
+          role: "hospital_admin",
+          email: "hospital@healthdocs.sa",
+          icon: Activity,
+          color: "text-blue-500",
+        },
+        {
+          role: "department_manager",
+          email: "dept@healthdocs.sa",
+          icon: Users,
+          color: "text-amber-500",
+        },
+        {
+          role: "supervisor",
+          email: "supervisor@healthdocs.sa",
+          icon: HeartPulse,
+          color: "text-green-500",
+        },
+        {
+          role: "employee",
+          email: "employee@healthdocs.sa",
+          icon: UserCircle,
+          color: "text-primary",
+        },
+      ]
+    : [];
 
   const handleDemoLogin = (role: DemoLoginInputRole) => {
     demoLoginMutation.mutate(
@@ -171,9 +173,9 @@ export default function Login() {
       },
     );
   };
-  const visibleDemoAccounts = isShowcaseMode
-    ? demoAccounts.filter((account) => account.role === "employee")
-    : demoAccounts;
+  const visibleDemoAccounts = demoAccounts.filter(
+    (account) => account.role !== "system_admin",
+  );
 
   return (
     <div className="min-h-[100dvh] bg-background">
@@ -336,39 +338,37 @@ export default function Login() {
               </>
             )}
 
-            <div className="pt-8 border-t space-y-4">
-              <p className="text-sm text-muted-foreground text-center font-medium">
-                {t(
-                  isShowcaseMode
-                    ? "showcase.employee_demo"
-                    : "auth.demo_accounts",
-                )}
-              </p>
-              <div className="grid gap-2">
-                {visibleDemoAccounts.map((demo) => (
-                  <button
-                    key={demo.role}
-                    type="button"
-                    disabled={demoLoginMutation.isPending}
-                    onClick={() => handleDemoLogin(demo.role)}
-                    className="flex min-h-14 flex-col items-start justify-between gap-1 rounded-lg border bg-card p-3 text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-60 sm:flex-row sm:items-center"
-                  >
-                    <div className="flex items-center gap-3">
-                      <demo.icon className={`h-4 w-4 ${demo.color}`} />
-                      <span className="font-semibold">
-                        {t(`roles.${demo.role}`)}
-                      </span>
-                    </div>
-                    <span
-                      className="break-all text-start text-xs text-muted-foreground"
-                      dir="ltr"
+            {isShowcaseMode && (
+              <div className="space-y-4 border-t pt-8">
+                <p className="text-center text-sm font-medium text-muted-foreground">
+                  {t("showcase.employee_demo")}
+                </p>
+                <div className="grid gap-2">
+                  {visibleDemoAccounts.map((demo) => (
+                    <button
+                      key={demo.role}
+                      type="button"
+                      disabled={demoLoginMutation.isPending}
+                      onClick={() => handleDemoLogin(demo.role)}
+                      className="flex min-h-14 flex-col items-start justify-between gap-1 rounded-lg border bg-card p-3 text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-60 sm:flex-row sm:items-center"
                     >
-                      {demo.email}
-                    </span>
-                  </button>
-                ))}
+                      <div className="flex items-center gap-3">
+                        <demo.icon className={`h-4 w-4 ${demo.color}`} />
+                        <span className="font-semibold">
+                          {t(`roles.${demo.role}`)}
+                        </span>
+                      </div>
+                      <span
+                        className="break-all text-start text-xs text-muted-foreground"
+                        dir="ltr"
+                      >
+                        {demo.email}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
