@@ -1,0 +1,20 @@
+{
+  "name": "وثائقي الصحي | HealthDocs",
+  "short_name": "وثائقي",
+  "description": "بوابة الموظف لإدارة الوثائق والاعتمادات الصحية.",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8fbfb",
+  "theme_color": "#0d7d78",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

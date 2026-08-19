@@ -15,7 +15,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ShieldCheck, UserCircle, Users, Activity, HeartPulse } from "lucide-react";
 import { toast } from "sonner";
-import { ThemeProvider, useTheme } from "@/components/theme-provider";
 
 // Failure codes the Google OAuth callback may append as ?error=… on its
 // redirect back to this page, mapped to localized toasts.
@@ -98,16 +97,15 @@ export default function Login() {
   // never passwords (nothing secret ships in the JS bundle).
   const demoAccounts: {
     role: DemoLoginInputRole;
-    label: string;
     email: string;
     icon: typeof ShieldCheck;
     color: string;
   }[] = [
-    { role: "system_admin", label: "System Admin", email: "admin@healthdocs.sa", icon: ShieldCheck, color: "text-red-500" },
-    { role: "hospital_admin", label: "Hospital Admin", email: "hospital@healthdocs.sa", icon: Activity, color: "text-blue-500" },
-    { role: "department_manager", label: "Dept Manager", email: "dept@healthdocs.sa", icon: Users, color: "text-amber-500" },
-    { role: "supervisor", label: "Supervisor", email: "supervisor@healthdocs.sa", icon: HeartPulse, color: "text-green-500" },
-    { role: "employee", label: "Employee", email: "employee@healthdocs.sa", icon: UserCircle, color: "text-primary" },
+    { role: "system_admin", email: "admin@healthdocs.sa", icon: ShieldCheck, color: "text-red-500" },
+    { role: "hospital_admin", email: "hospital@healthdocs.sa", icon: Activity, color: "text-blue-500" },
+    { role: "department_manager", email: "dept@healthdocs.sa", icon: Users, color: "text-amber-500" },
+    { role: "supervisor", email: "supervisor@healthdocs.sa", icon: HeartPulse, color: "text-green-500" },
+    { role: "employee", email: "employee@healthdocs.sa", icon: UserCircle, color: "text-primary" },
   ];
 
   const handleDemoLogin = (role: DemoLoginInputRole) => {
@@ -155,10 +153,14 @@ export default function Login() {
       </div>
 
       {/* Right side - Login Form */}
-      <div className="w-full md:w-1/2 lg:w-[40%] flex flex-col justify-center px-8 md:px-16 py-12">
-        <div className="w-full max-w-md mx-auto space-y-8">
+      <div className="flex w-full flex-col justify-center px-4 py-8 sm:px-8 md:w-1/2 md:px-12 md:py-12 lg:w-[40%] lg:px-16">
+        <div className="mx-auto w-full max-w-md space-y-7 sm:space-y-8">
+          <div className="flex items-center justify-center gap-2 text-primary md:hidden">
+            <ShieldCheck className="h-9 w-9" aria-hidden="true" />
+            <span className="text-2xl font-bold">وثائقي الصحي</span>
+          </div>
           <div className="text-center md:text-start space-y-2">
-            <h2 className="text-3xl font-bold">{t('auth.login')}</h2>
+            <h2 className="text-2xl font-bold sm:text-3xl">{t('auth.login')}</h2>
             <p className="text-muted-foreground">{t('auth.login_subtitle')}</p>
           </div>
 
@@ -194,7 +196,7 @@ export default function Login() {
                   className="h-11"
                 />
               </div>
-              <div className="flex items-center space-x-2 space-x-reverse">
+              <div className="flex items-center gap-2">
                 <Checkbox id="remember" />
                 <label
                   htmlFor="remember"
@@ -204,7 +206,7 @@ export default function Login() {
                 </label>
               </div>
             </div>
-            <Button type="submit" className="w-full h-11 text-lg font-semibold" disabled={loginMutation.isPending}>
+            <Button type="submit" className="min-h-12 w-full text-base font-semibold sm:text-lg" disabled={loginMutation.isPending}>
               {loginMutation.isPending ? t('common.loading') : t('auth.login_button')}
             </Button>
           </form>
@@ -246,13 +248,13 @@ export default function Login() {
                   type="button"
                   disabled={demoLoginMutation.isPending}
                   onClick={() => handleDemoLogin(demo.role)}
-                  className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent hover:text-accent-foreground transition-colors text-sm disabled:opacity-60"
+                  className="flex min-h-14 flex-col items-start justify-between gap-1 rounded-lg border bg-card p-3 text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-60 sm:flex-row sm:items-center"
                 >
                   <div className="flex items-center gap-3">
                     <demo.icon className={`h-4 w-4 ${demo.color}`} />
-                    <span className="font-semibold">{demo.label}</span>
+                    <span className="font-semibold">{t(`roles.${demo.role}`)}</span>
                   </div>
-                  <span className="text-muted-foreground dir-ltr">{demo.email}</span>
+                  <span className="break-all text-start text-xs text-muted-foreground" dir="ltr">{demo.email}</span>
                 </button>
               ))}
             </div>

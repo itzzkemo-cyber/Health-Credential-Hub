@@ -1,36 +1,48 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiError } from '@workspace/api-client-react';
 import { clearAuthSession, isAuthenticated } from '@/lib/auth';
+import { lazy, Suspense } from 'react';
 import { Toaster } from 'sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import NotFound from '@/pages/not-found';
 import { Route, Switch, Router as WouterRouter } from 'wouter';
 
 import { ThemeProvider } from '@/components/theme-provider';
 import { LanguageProvider } from '@/lib/i18n';
+import { useLanguage } from '@/lib/language-context';
 import { AppShell } from '@/components/layout/Shell';
 
-// Pages
-import Login from '@/pages/login';
-import Register from '@/pages/register';
-import ForgotPassword from '@/pages/forgot-password';
-import ResetPassword from '@/pages/reset-password';
-import TwoFactorChallenge from '@/pages/two-factor-challenge';
-import Dashboard from '@/pages/dashboard';
-import CredentialsList from '@/pages/credentials';
-import CredentialNew from '@/pages/credentials/new';
-import CredentialDetail from '@/pages/credentials/detail';
-import EmployeesList from '@/pages/employees';
-import EmployeeDetail from '@/pages/employees/detail';
-import DepartmentsList from '@/pages/departments';
-import NotificationsList from '@/pages/notifications';
-import AuditLogList from '@/pages/audit-log';
-import ReportsView from '@/pages/reports';
-import PoliciesList from '@/pages/policies';
-import IntegrationsView from '@/pages/integrations';
+// Split route bundles so mobile employees do not download management screens up front.
+const Login = lazy(() => import('@/pages/login'));
+const Register = lazy(() => import('@/pages/register'));
+const ForgotPassword = lazy(() => import('@/pages/forgot-password'));
+const ResetPassword = lazy(() => import('@/pages/reset-password'));
+const TwoFactorChallenge = lazy(() => import('@/pages/two-factor-challenge'));
+const Dashboard = lazy(() => import('@/pages/dashboard'));
+const CredentialsList = lazy(() => import('@/pages/credentials'));
+const CredentialNew = lazy(() => import('@/pages/credentials/new'));
+const CredentialDetail = lazy(() => import('@/pages/credentials/detail'));
+const EmployeesList = lazy(() => import('@/pages/employees'));
+const EmployeeDetail = lazy(() => import('@/pages/employees/detail'));
+const DepartmentsList = lazy(() => import('@/pages/departments'));
+const NotificationsList = lazy(() => import('@/pages/notifications'));
+const AuditLogList = lazy(() => import('@/pages/audit-log'));
+const ReportsView = lazy(() => import('@/pages/reports'));
+const PoliciesList = lazy(() => import('@/pages/policies'));
+const IntegrationsView = lazy(() => import('@/pages/integrations'));
+const VerifyQR = lazy(() => import('@/pages/verify'));
+const Settings = lazy(() => import('@/pages/settings'));
+const NotFound = lazy(() => import('@/pages/not-found'));
 
-import VerifyQR from '@/pages/verify';
-import Settings from '@/pages/settings';
+function RouteFallback() {
+  const { t } = useLanguage();
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+      <span className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" />
+      <span className="ms-3">{t('common.loading')}</span>
+    </div>
+  );
+}
 
 // The session lives in an httpOnly cookie, so the client can't inspect it.
 // When it expires or is revoked the API answers 401 — drop the cached profile
@@ -95,7 +107,9 @@ function App() {
         <LanguageProvider>
           <TooltipProvider>
             <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-              <Router />
+              <Suspense fallback={<RouteFallback />}>
+                <Router />
+              </Suspense>
             </WouterRouter>
             <Toaster position="top-center" richColors />
           </TooltipProvider>

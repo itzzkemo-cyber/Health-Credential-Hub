@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { QRCodeSVG } from "qrcode.react";
-import { ArrowRight, ArrowLeft, Printer, Copy, Trash2, Edit, FileText, CheckCircle2, AlertTriangle, ShieldAlert, ExternalLink } from "lucide-react";
+import { ArrowRight, ArrowLeft, Printer, Copy, Trash2, FileText, CheckCircle2, AlertTriangle, ShieldAlert, ExternalLink } from "lucide-react";
 import { isPdfUrl, resolveStoredFileUrl, openFileInNewTab } from "@/lib/file-preview";
 import { toast } from "sonner";
 import { formatDistanceToNow, isPast } from "date-fns";
@@ -34,7 +34,7 @@ export default function CredentialDetail() {
   }
 
   if (isError || !cred) {
-    return <div className="text-center p-8 text-destructive">Error loading credential</div>;
+    return <div className="p-8 text-center text-destructive">{t("credential.load_error")}</div>;
   }
 
   // Storage paths resolve to the authenticated API serving route.
@@ -44,7 +44,7 @@ export default function CredentialDetail() {
     if (confirm(t('common.confirm') + " " + t('common.delete') + "?")) {
       deleteCred.mutate({ id }, {
         onSuccess: () => {
-          toast.success("Credential deleted");
+          toast.success(t("credential.deleted"));
           queryClient.invalidateQueries({ queryKey: getListCredentialsQueryKey() });
           setLocation('/credentials');
         }
@@ -57,9 +57,9 @@ export default function CredentialDetail() {
     window.location.origin,
   ).toString();
 
-  const copyLink = () => {
-    navigator.clipboard.writeText(verifyUrl);
-    toast.success("Verification link copied to clipboard");
+  const copyLink = async () => {
+    await navigator.clipboard.writeText(verifyUrl);
+    toast.success(t("credential.link_copied"));
   };
 
   const getStatusIcon = (status: string) => {
@@ -87,44 +87,41 @@ export default function CredentialDetail() {
   });
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500 pb-12">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => setLocation('/credentials')}>
+    <div className="mx-auto max-w-5xl space-y-5 pb-6 animate-in fade-in duration-500 md:space-y-8 md:pb-12">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2 sm:items-center sm:gap-4">
+          <Button variant="ghost" size="icon" onClick={() => setLocation('/credentials')} aria-label={t("common.back")} className="shrink-0">
             {isRTL ? <ArrowRight className="h-5 w-5" /> : <ArrowLeft className="h-5 w-5" />}
           </Button>
-          <div className="flex items-center gap-3">
-            <div className="bg-primary/10 p-2 rounded-lg">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="hidden rounded-lg bg-primary/10 p-2 sm:block">
               {getStatusIcon(cred.status)}
             </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">
+              <h1 className="truncate text-xl font-bold tracking-tight sm:text-2xl">
                 {isRTL ? (cred.customTypeNameAr || cred.type) : (cred.customTypeName || cred.type)}
               </h1>
-              <p className="text-muted-foreground text-sm">{t('credential.certificate_number')}: {cred.certificateNumber}</p>
+              <p className="truncate text-xs text-muted-foreground sm:text-sm">{t('credential.certificate_number')}: {cred.certificateNumber}</p>
             </div>
           </div>
         </div>
 
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-2">
-            <Edit className="h-4 w-4" /> <span className="hidden sm:inline">{t('common.edit')}</span>
-          </Button>
-          <Button variant="destructive" size="sm" onClick={handleDelete} className="gap-2" disabled={deleteCred.isPending}>
+        <div className="flex shrink-0 gap-2">
+          <Button variant="destructive" size="sm" onClick={handleDelete} className="min-h-10 gap-2" disabled={deleteCred.isPending} aria-label={t("common.delete")}>
             <Trash2 className="h-4 w-4" /> <span className="hidden sm:inline">{t('common.delete')}</span>
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-8">
         
         <div className="lg:col-span-2 space-y-6">
           <Card className="hover-elevate">
             <CardHeader>
-              <CardTitle className="text-lg">Credential Details</CardTitle>
+              <CardTitle className="text-lg">{t("credential.details")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6">
                 <div>
                   <p className="text-sm text-muted-foreground">{t('credential.holder_name')}</p>
                   <p className="font-medium text-lg">{isRTL ? cred.holderNameAr : cred.holderName}</p>
@@ -181,7 +178,7 @@ export default function CredentialDetail() {
                   <object
                     data={fileSrc!}
                     type="application/pdf"
-                    className="w-full h-[520px] bg-white"
+                    className="h-[360px] w-full bg-white sm:h-[520px]"
                   >
                     <div className="w-full h-full flex flex-col items-center justify-center gap-4 text-muted-foreground p-8 text-center">
                       <FileText className="h-16 w-16 opacity-50" />
@@ -209,7 +206,7 @@ export default function CredentialDetail() {
           <Card className="hover-elevate">
             <CardHeader className="bg-primary/5 pb-4 border-b border-primary/10">
               <CardTitle className="text-lg flex justify-between items-center">
-                Verification QR
+                {t("credential.verification_qr")}
                 <Badge className={getStatusColor(cred.status)} variant="outline">
                   {t(`common.${cred.status}`)}
                 </Badge>
@@ -226,11 +223,11 @@ export default function CredentialDetail() {
                 />
               </div>
               <div className="w-full space-y-3">
-                <Button variant="outline" className="w-full gap-2" onClick={copyLink}>
-                  <Copy className="h-4 w-4" /> Copy Link
+                <Button variant="outline" className="min-h-11 w-full gap-2" onClick={() => void copyLink()}>
+                  <Copy className="h-4 w-4" /> {t("credential.copy_link")}
                 </Button>
-                <Button variant="outline" className="w-full gap-2" onClick={() => window.print()}>
-                  <Printer className="h-4 w-4" /> Print QR Badge
+                <Button variant="outline" className="min-h-11 w-full gap-2" onClick={() => window.print()}>
+                  <Printer className="h-4 w-4" /> {t("credential.print_badge")}
                 </Button>
               </div>
             </CardContent>
@@ -238,28 +235,28 @@ export default function CredentialDetail() {
 
           <Card className="hover-elevate">
             <CardHeader>
-              <CardTitle className="text-lg">Status Timeline</CardTitle>
+              <CardTitle className="text-lg">{t("credential.status_timeline")}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
                 <div className="flex gap-4 relative">
-                  <div className="absolute top-8 left-2.5 bottom-[-16px] w-px bg-border rtl:right-2.5" />
+                  <div className="absolute bottom-[-16px] start-2.5 top-8 w-px bg-border" />
                   <div className="w-5 h-5 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center shrink-0 mt-1 z-10">
                     <div className="w-2 h-2 rounded-full bg-emerald-500" />
                   </div>
                   <div>
-                    <p className="font-medium text-sm">Issued</p>
+                    <p className="font-medium text-sm">{t("credential.issued")}</p>
                     <p className="text-xs text-muted-foreground">{new Date(cred.issueDate).toLocaleDateString(isRTL ? 'ar-SA' : 'en-US')}</p>
                   </div>
                 </div>
                 
                 <div className="flex gap-4 relative">
-                   <div className="absolute top-8 left-2.5 bottom-[-16px] w-px bg-border rtl:right-2.5" />
+                   <div className="absolute bottom-[-16px] start-2.5 top-8 w-px bg-border" />
                   <div className="w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center shrink-0 mt-1 z-10">
                     <div className="w-2 h-2 rounded-full bg-blue-500" />
                   </div>
                   <div>
-                    <p className="font-medium text-sm">System Entry</p>
+                    <p className="font-medium text-sm">{t("credential.system_entry")}</p>
                     <p className="text-xs text-muted-foreground">{new Date(cred.createdAt).toLocaleDateString(isRTL ? 'ar-SA' : 'en-US')}</p>
                   </div>
                 </div>
@@ -275,7 +272,7 @@ export default function CredentialDetail() {
                     )} />
                   </div>
                   <div>
-                    <p className="font-medium text-sm">Expiry</p>
+                    <p className="font-medium text-sm">{t("credential.expiry")}</p>
                     <p className="text-xs text-muted-foreground">{expiryDate.toLocaleDateString(isRTL ? 'ar-SA' : 'en-US')}</p>
                   </div>
                 </div>

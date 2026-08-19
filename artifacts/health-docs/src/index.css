@@ -146,3 +146,18 @@ html[dir="ltr"] {
     @apply font-sans antialiased bg-background text-foreground;
   }
 }
+
+/* Keep employee actions clear of phone home indicators and the fixed mobile nav. */
+.mobile-safe-bottom {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+.mobile-main-padding {
+  padding-bottom: calc(6.5rem + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 64rem) {
+  .mobile-main-padding {
+    padding-bottom: 1.5rem;
+  }
+}

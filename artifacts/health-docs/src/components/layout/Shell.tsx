@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { AppSidebar } from "./Sidebar";
 import { AppHeader } from "./Header";
+import { MobileBottomNav } from "./MobileBottomNav";
 import { isAuthenticated } from "@/lib/auth";
 import { Redirect, useLocation } from "wouter";
 
@@ -33,11 +34,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">
         <AppHeader />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-50 dark:bg-slate-900">
+        <main className="mobile-main-padding flex-1 overflow-y-auto bg-slate-50 p-4 dark:bg-slate-900 md:p-6 lg:pb-6">
           <div className="mx-auto max-w-6xl w-full">
             {children}
           </div>
         </main>
+        <MobileBottomNav />
       </div>
     </div>
   );

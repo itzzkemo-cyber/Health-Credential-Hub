@@ -2,6 +2,8 @@
 
 منصة عربية/إنجليزية لإدارة وثائق واعتمادات الكوادر الصحية، مع لوحة ويب، تطبيق Expo، API، تخزين ملفات خاص، قراءة OCR اختيارية، تنبيهات، وتقارير امتثال. يتضمن المستودع Demo متكاملًا للأدوار الخمسة، لكنه مغلق تلقائيًا في الإنتاج.
 
+> **التركيز الحالي:** الموقع المتجاوب هو واجهة المنتج الأساسية. يستطيع الموظف من الجوال إدخال بياناته ورفع وثائقه يدويًا أو اختيار القراءة الذكية، ومتابعة حالة وثائقه وتنبيهاته. تطبيق Expo وواجهة الـmockup محفوظان كمرجع، لكن التطوير الجديد يبدأ من `artifacts/health-docs` ما لم تتغير الخطة صراحةً.
+
 ## Workspace
 
 | Package | Purpose |
@@ -43,6 +45,8 @@ Run the web app separately:
 pnpm --filter @workspace/health-docs run dev
 ```
 
+اختبر مسار الموظف على عرض جوال أيضًا: تسجيل الدخول، فتح «وثائقي»، رفع ملف، تعبئة البيانات، ومراجعة حالة الوثيقة. الرفع اليدوي لا يرسل الملف إلى OCR؛ خيار «القراءة الذكية» وحده يستدعي خدمة المعالجة الخارجية.
+
 The API reads the root `.env` only in its `dev` command. Production `start` expects environment variables from the deployment platform.
 
 ## Demo data
@@ -81,7 +85,7 @@ pnpm --filter @workspace/api-spec run codegen
 - Configure Gemini only after approving the privacy/data-processing terms for uploaded workforce documents.
 - Configure Google OAuth redirect domains and an email provider if those features are enabled.
 - Add a distributed rate limiter and production observability before exposing authentication or OCR publicly at scale.
-- Build and sign native releases with EAS or the organization’s mobile release pipeline.
+- إذا أُعيد تفعيل تطبيق Expo مستقبلًا، استخدم EAS أو مسار إصدارات الجوال المعتمد في الجهة لبنائه وتوقيعه.
 
 `pnpm audit --prod` currently reports two high-severity denial-of-service advisories in Metro's transitive `image-size@1.2.1`. The registry advertises `2.0.3` as patched, but that version is not published yet. The dependency is used by the Expo build toolchain rather than the API runtime; monitor Expo/Metro and upgrade as soon as a compatible patched release exists.
 

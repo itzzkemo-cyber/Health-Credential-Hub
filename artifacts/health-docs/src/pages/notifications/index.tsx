@@ -61,15 +61,15 @@ export default function Notifications() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
         <div className="flex items-center gap-3">
           <div className="p-3 bg-primary/10 rounded-xl">
             <Bell className="h-6 w-6 text-primary" />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight">{t('notifications.title')}</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{t('notifications.title')}</h1>
         </div>
         {hasUnread && (
-          <Button onClick={handleMarkAllRead} variant="outline" className="gap-2" disabled={markAllRead.isPending}>
+          <Button onClick={handleMarkAllRead} variant="outline" className="min-h-11 w-full gap-2 sm:w-auto" disabled={markAllRead.isPending}>
             <Check className="h-4 w-4" />
             {t('notifications.mark_all_read')}
           </Button>
@@ -105,18 +105,18 @@ export default function Notifications() {
                     <Card 
                       key={notif.id} 
                       className={cn(
-                        "overflow-hidden transition-colors border-l-4",
-                        !notif.isRead ? "bg-muted/30 border-l-primary" : "bg-card border-l-transparent"
+                        "overflow-hidden border-s-4 transition-colors",
+                        !notif.isRead ? "border-s-primary bg-muted/30" : "border-s-transparent bg-card"
                       )}
                     >
-                      <CardContent className="p-4 sm:p-5 flex gap-4">
+                      <CardContent className="flex gap-3 p-4 sm:gap-4 sm:p-5">
                         <div className="shrink-0 mt-1">
                           <div className={cn("p-2 rounded-full", !notif.isRead ? "bg-background shadow-sm" : "bg-muted/50")}>
                             {getIcon(notif.type)}
                           </div>
                         </div>
                         <div className="flex-1 space-y-1">
-                          <div className="flex justify-between items-start gap-4">
+                          <div className="flex flex-col items-start gap-1 sm:flex-row sm:justify-between sm:gap-4">
                             <h4 className={cn("font-medium text-base", !notif.isRead && "text-foreground")}>
                               {language === 'en' ? notif.titleEn : notif.title}
                             </h4>
@@ -133,10 +133,10 @@ export default function Notifications() {
                               <Button 
                                 variant="ghost" 
                                 size="sm" 
-                                className="h-8 text-xs px-2 -ml-2 text-primary"
+                                className="-ms-2 h-9 px-2 text-xs text-primary"
                                 onClick={() => handleMarkRead(notif.id)}
                               >
-                                {t('notifications.mark_all_read')} {/* reusing string, or "Mark read" */}
+                                {t('notifications.mark_read')}
                               </Button>
                             </div>
                           )}
