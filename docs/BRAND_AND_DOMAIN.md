@@ -1,7 +1,7 @@
 # Watha'iqi Health launch name and domain
 
-Research date: 19 August 2026. Domain status is a point-in-time registry check,
-not a reservation and not a trademark clearance.
+Research date: 19 August 2026. Domain ownership and DNS status updated on
+20 August 2026. Registration is not trademark clearance.
 
 ## Chosen product name
 
@@ -14,17 +14,15 @@ identifiers stable unless a separately reviewed technical migration requires a
 change. The public name does not imply that the service is a regulator,
 government authority, or official source of professional licensing.
 
-## Recommended domain
+## Domain plan
 
-The preferred domain is **`wathaiqihealth.com`**. The Verisign `.com` registry
-returned `404` for it during the check, which means no current registration was
-returned at that moment. This does not reserve the domain; recheck it at the
-registrar and purchase it before publishing links or commissioning a logo.
+The project owns **`wathaiqihealth.com`**, registered through Squarespace
+Domains. Google Workspace DNS and mail records must remain intact.
 
 Suggested hostnames after purchase:
 
 - `app.wathaiqihealth.com` — production application;
-- `demo.wathaiqihealth.com` — synthetic stakeholder demo;
+- `demo.wathaiqihealth.com` — synthetic stakeholder demo hosted on GitHub Pages;
 - `status.wathaiqihealth.com` — later, for service status only.
 
 The shorter `wathaiqi.com` was already registered when checked. The following
@@ -39,10 +37,10 @@ An [App Store product](https://apps.apple.com/sa/app/%D9%88%D8%AB%D8%A7%D8%A6%D9
 already uses the Arabic name **«وثائقي»** for tracking organization documents
 and expiry reminders, which overlaps with this product's category. Adding
 **«الصحية»** improves distinction but is not legal clearance. Treat this as a
-material naming risk and do not buy the domain or commission a public identity
+material naming risk; do not commission a public identity or launch production
 until the SAIP search and legal review are complete.
 
-1. Recheck and buy `wathaiqihealth.com` through the chosen registrar.
+1. Keep registrar recovery, billing, and domain contact details current.
 2. Check `wathaiqihealth.sa` and `wathaiqihealth.com.sa` with a
    [SaudiNIC-accredited registrar](https://nic.sa/).
 3. Run [SAIP trademark searches](https://www.saip.gov.sa/en/services/trademarks/trademark1)
@@ -51,6 +49,6 @@ until the SAIP search and legal review are complete.
 4. Configure DNS, TLS, the application base URL, OAuth consent and callback
    domains, email sender identity, support addresses, and legal notices
    together in one reviewed release.
-5. Keep the existing GitHub Pages address as a synthetic demo until the
-   production Google Cloud deployment and custom domain pass the release
-   checklist.
+5. Keep `demo.wathaiqihealth.com` visibly identified as a synthetic demo until
+   the Google Cloud production deployment on `app.wathaiqihealth.com` passes
+   the release checklist.

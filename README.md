@@ -50,7 +50,7 @@ pnpm --filter @workspace/health-docs run dev
 ## Stakeholder showcase
 
 النسخة التجريبية المنشورة متاحة على:
-[https://itzzkemo-cyber.github.io/Health-Credential-Hub/](https://itzzkemo-cyber.github.io/Health-Credential-Hub/)
+[https://demo.wathaiqihealth.com/](https://demo.wathaiqihealth.com/)
 
 > هذه معاينة ببيانات صناعية داخل ذاكرة المتصفح، وليست بيئة الإنتاج ذات
 > قاعدة البيانات والتخزين الخاص.
@@ -115,8 +115,9 @@ outbox وعاملًا منفصلًا يوقع أحداثًا مصغرة قبل �
 راجع [docs/PRODUCTION_AUTOMATION.md](docs/PRODUCTION_AUTOMATION.md) قبل ربط n8n.
 
 اسم المنتج المعتمد للواجهة هو **Watha'iqi Health | وثائقي الصحية**، والدومين
-المرشح هو `wathaiqihealth.com`. حالة الدومين وقت الفحص ليست حجزًا ولا موافقة
-على العلامة التجارية؛ خطوات الشراء وفحص SaudiNIC وSAIP موثقة في
+المملوك هو `wathaiqihealth.com`، وتُستخدم `demo.wathaiqihealth.com` للعرض
+الصناعي فقط. لا يُعد شراء الدومين موافقة على العلامة التجارية؛ خطوات فحص
+SaudiNIC وSAIP موثقة في
 [docs/BRAND_AND_DOMAIN.md](docs/BRAND_AND_DOMAIN.md).
 
 - Keep `DEMO_LOGIN_ENABLED`, `ALLOW_DEMO_SEED`, `SELF_REGISTRATION_ENABLED`, and `GOOGLE_AUTO_PROVISION_ENABLED` false unless explicitly required.
