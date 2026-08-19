@@ -30,11 +30,11 @@ export default function EmployeesList() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">{t('common.employees')}</h1>
-          <p className="text-muted-foreground mt-1">Manage staff and their compliance status.</p>
+          <p className="text-muted-foreground mt-1">{t('employees_page.subtitle')}</p>
         </div>
         <Button className="gap-2">
           <Plus className="h-4 w-4" />
-          {t('common.add')} Employee
+          {t('employees_page.add_employee')}
         </Button>
       </div>
 
@@ -50,7 +50,7 @@ export default function EmployeesList() {
         </div>
         <Button variant="outline" className="w-full sm:w-auto gap-2">
           <Filter className="h-4 w-4" />
-          Filter
+          {t('employees_page.filter')}
         </Button>
       </div>
 
@@ -62,7 +62,7 @@ export default function EmployeesList() {
         ) : !employees || employees.length === 0 ? (
           <div className="text-center py-12 bg-card rounded-xl border border-dashed">
             <HeartPulse className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-20" />
-            <h3 className="text-lg font-medium">No employees found</h3>
+            <h3 className="text-lg font-medium">{t('employees_page.empty')}</h3>
           </div>
         ) : (
           <div className="rounded-xl border border-border overflow-hidden bg-card shadow-sm">
@@ -70,11 +70,11 @@ export default function EmployeesList() {
               <table className="w-full text-sm text-left rtl:text-right">
                 <thead className="bg-muted/50 text-muted-foreground border-b border-border font-medium">
                   <tr>
-                    <th className="px-6 py-4">Employee</th>
-                    <th className="px-6 py-4">Role</th>
-                    <th className="px-6 py-4 hidden md:table-cell">Status</th>
-                    <th className="px-6 py-4">Compliance</th>
-                    <th className="px-6 py-4 text-right rtl:text-left">Actions</th>
+                    <th className="px-6 py-4">{t('employees_page.employee')}</th>
+                    <th className="px-6 py-4">{t('employees_page.role')}</th>
+                    <th className="px-6 py-4 hidden md:table-cell">{t('employees_page.status')}</th>
+                    <th className="px-6 py-4">{t('employees_page.compliance')}</th>
+                    <th className="px-6 py-4 text-right rtl:text-left">{t('common.actions')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -101,11 +101,11 @@ export default function EmployeesList() {
                       <td className="px-6 py-4 hidden md:table-cell">
                         {emp.isAtRisk ? (
                           <Badge variant="outline" className="bg-destructive/10 text-destructive border-0 gap-1">
-                            <AlertCircle className="h-3 w-3" /> At Risk
+                            <AlertCircle className="h-3 w-3" /> {t('employees_page.at_risk')}
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 border-0">
-                            Compliant
+                            {t('employees_page.compliant')}
                           </Badge>
                         )}
                       </td>

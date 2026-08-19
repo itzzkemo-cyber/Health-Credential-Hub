@@ -7,12 +7,19 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { format, isToday, isYesterday } from "date-fns";
+import { QueryErrorState } from "@/components/QueryErrorState";
 
 export default function Notifications() {
   const { t, language } = useLanguage();
   const queryClient = useQueryClient();
 
-  const { data: notifications, isLoading } = useListNotifications();
+  const {
+    data: notifications,
+    error,
+    isError,
+    isLoading,
+    refetch,
+  } = useListNotifications();
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
 
@@ -82,6 +89,8 @@ export default function Notifications() {
             <Card key={i} className="animate-pulse h-24" />
           ))}
         </div>
+      ) : isError ? (
+        <QueryErrorState error={error} onRetry={() => void refetch()} />
       ) : !notifications?.length ? (
         <Card className="flex flex-col items-center justify-center p-12 text-center border-dashed">
           <div className="h-16 w-16 bg-muted rounded-full flex items-center justify-center text-muted-foreground mb-4">

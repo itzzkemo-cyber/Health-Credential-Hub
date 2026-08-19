@@ -63,6 +63,7 @@ import type {
   Notification,
   OcrInput,
   OcrResult,
+  ReadinessStatus,
   RegisterInput,
   ResetPasswordInput,
   TotpActivation,
@@ -115,7 +116,9 @@ export const getRequestUploadUrlUrl = () => {
 
 /**
  * Returns a presigned GCS URL for direct upload. The client sends JSON
- * metadata here, then uploads the file directly to the returned URL.
+ * metadata here, then uploads the file directly to the returned URL with
+ * every returned required header. The overwrite precondition makes each
+ * URL create one new object generation only.
  * @summary Request a presigned URL for file upload
  */
 export const requestUploadUrl = async (uploadUrlRequest: UploadUrlRequest, options?: Parameters<typeof customFetch>[1]): Promise<UploadUrlResponse> => {
@@ -401,6 +404,83 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getReadinessCheckUrl = () => {
+
+
+
+
+  return `/api/readyz`
+}
+
+/**
+ * @summary Check whether persistent dependencies are ready
+ */
+export const readinessCheck = async ( options?: Parameters<typeof customFetch>[1]): Promise<ReadinessStatus> => {
+
+  return customFetch<ReadinessStatus>(getReadinessCheckUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getReadinessCheckQueryKey = () => {
+    return [
+    `/api/readyz`
+    ] as const;
+    }
+
+
+export const getReadinessCheckQueryOptions = <TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getReadinessCheckQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof readinessCheck>>> = ({ signal }) => readinessCheck({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ReadinessCheckQueryResult = NonNullable<Awaited<ReturnType<typeof readinessCheck>>>
+export type ReadinessCheckQueryError = ErrorType<HealthStatus>
+
+
+/**
+ * @summary Check whether persistent dependencies are ready
+ */
+
+export function useReadinessCheck<TData = Awaited<ReturnType<typeof readinessCheck>>, TError = ErrorType<HealthStatus>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof readinessCheck>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getReadinessCheckQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
@@ -2219,7 +2299,7 @@ export const updateCredential = async (id: number,
 
 
 
-export const getUpdateCredentialMutationOptions = <TError = ErrorType<unknown>,
+export const getUpdateCredentialMutationOptions = <TError = ErrorType<ErrorEnvelope>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCredential>>, TError,{id: number;data: BodyType<CredentialUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateCredential>>, TError,{id: number;data: BodyType<CredentialUpdate>}, TContext> => {
 
@@ -2248,12 +2328,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateCredentialMutationResult = NonNullable<Awaited<ReturnType<typeof updateCredential>>>
     export type UpdateCredentialMutationBody = BodyType<CredentialUpdate>
-    export type UpdateCredentialMutationError = ErrorType<unknown>
+    export type UpdateCredentialMutationError = ErrorType<ErrorEnvelope>
 
     /**
  * @summary Update credential
  */
-export const useUpdateCredential = <TError = ErrorType<unknown>,
+export const useUpdateCredential = <TError = ErrorType<ErrorEnvelope>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCredential>>, TError,{id: number;data: BodyType<CredentialUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateCredential>>,

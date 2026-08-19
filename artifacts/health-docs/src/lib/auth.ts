@@ -1,6 +1,5 @@
-// Session model: the API sets an httpOnly cookie on login (SameSite=None so
-// it also works inside the cross-site Replit preview iframe), so the auth
-// token is never stored in — or readable from — JavaScript and XSS cannot
+// Session model: the API sets an httpOnly cookie on login, so the auth token
+// is never stored in — or readable from — JavaScript and XSS cannot
 // exfiltrate it. The browser attaches the cookie to API calls automatically.
 // localStorage keeps only a non-sensitive cache of the user's own profile so
 // the UI can boot instantly; the cookie is the credential and the server

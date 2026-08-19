@@ -6,6 +6,7 @@ import {
   getCredentialsFor,
   getPolicies,
   computeEmployeeStats,
+  getScopedUsers,
   logAudit,
 } from "../lib/helpers";
 
@@ -19,15 +20,14 @@ router.get("/departments", async (req, res) => {
     .select()
     .from(departmentsTable)
     .where(eq(departmentsTable.facilityId, user.facilityId));
-  const allUsers = await db
-    .select()
-    .from(usersTable)
-    .where(eq(usersTable.facilityId, user.facilityId));
-  const creds = await getCredentialsFor(allUsers.map((u) => u.id));
+  const scopedUsers = (await getScopedUsers(user)).filter(
+    (candidate) => candidate.facilityId === user.facilityId,
+  );
+  const creds = await getCredentialsFor(scopedUsers.map((u) => u.id));
   const policies = await getPolicies(user.facilityId);
 
   const result = departments.map((d) => {
-    const members = allUsers.filter((u) => u.departmentId === d.id && u.isActive);
+    const members = scopedUsers.filter((u) => u.departmentId === d.id && u.isActive);
     let expiredCount = 0;
     let expiringCount = 0;
     let rateSum = 0;

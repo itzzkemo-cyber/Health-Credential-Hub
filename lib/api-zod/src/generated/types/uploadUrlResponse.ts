@@ -6,11 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { UploadUrlRequest } from './uploadUrlRequest';
+import type { UploadUrlResponseRequiredHeaders } from './uploadUrlResponseRequiredHeaders';
 
 export interface UploadUrlResponse {
   /** Presigned GCS URL for PUT upload. */
   uploadURL: string;
   /** Normalized object path (e.g. `/objects/uploads/uuid`). Store this in your database. */
   objectPath: string;
+  /** Headers that must be included verbatim in the signed PUT request. */
+  requiredHeaders: UploadUrlResponseRequiredHeaders;
   metadata?: UploadUrlRequest;
 }

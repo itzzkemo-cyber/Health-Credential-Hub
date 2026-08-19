@@ -10,7 +10,9 @@ import * as zod from 'zod';
 
 /**
  * Returns a presigned GCS URL for direct upload. The client sends JSON
- * metadata here, then uploads the file directly to the returned URL.
+ * metadata here, then uploads the file directly to the returned URL with
+ * every returned required header. The overwrite precondition makes each
+ * URL create one new object generation only.
  * @summary Request a presigned URL for file upload
  */
 
@@ -32,6 +34,7 @@ export const RequestUploadUrlBody = zod.object({
 export const RequestUploadUrlResponse = zod.object({
   "uploadURL": zod.string().describe('Presigned GCS URL for PUT upload.'),
   "objectPath": zod.string().describe('Normalized object path (e.g. `\/objects\/uploads\/uuid`). Store this in your database.'),
+  "requiredHeaders": zod.record(zod.string(), zod.string()).describe('Headers that must be included verbatim in the signed PUT request.'),
   "metadata": zod.object({
   "name": zod.string().min(1).describe('Original file name.'),
   "size": zod.number().min(1).describe('File size in bytes.'),
@@ -69,6 +72,16 @@ export const GetStorageObjectResponse = zod.unknown()
  */
 export const HealthCheckResponse = zod.object({
   "status": zod.string()
+})
+
+
+/**
+ * @summary Check whether persistent dependencies are ready
+ */
+export const ReadinessCheckResponse = zod.object({
+  "status": zod.string(),
+  "database": zod.string(),
+  "objectStorage": zod.string()
 })
 
 
@@ -358,6 +371,10 @@ export const TotpAdminDisableResponse = zod.unknown()
 /**
  * @summary Get role-based dashboard stats
  */
+export const getDashboardStatsResponseUpcomingExpirationsItemVersionMultipleOf = 1;
+
+
+
 export const GetDashboardStatsResponse = zod.object({
   "totalCredentials": zod.number(),
   "activeCredentials": zod.number(),
@@ -397,6 +414,7 @@ export const GetDashboardStatsResponse = zod.object({
   "verificationUrl": zod.string().nullish(),
   "confidence": zod.number().nullish(),
   "isVerified": zod.boolean().optional(),
+  "version": zod.number().min(1).multipleOf(getDashboardStatsResponseUpcomingExpirationsItemVersionMultipleOf).describe('Monotonic whole-number record version used for verification concurrency control.'),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })).optional(),
@@ -460,6 +478,10 @@ export const ListCredentialsQueryParams = zod.object({
   "pageSize": zod.coerce.number().default(listCredentialsQueryPageSizeDefault)
 })
 
+export const listCredentialsResponseDataItemVersionMultipleOf = 1;
+
+
+
 export const ListCredentialsResponse = zod.object({
   "data": zod.array(zod.object({
   "id": zod.number(),
@@ -491,6 +513,7 @@ export const ListCredentialsResponse = zod.object({
   "verificationUrl": zod.string().nullish(),
   "confidence": zod.number().nullish(),
   "isVerified": zod.boolean().optional(),
+  "version": zod.number().min(1).multipleOf(listCredentialsResponseDataItemVersionMultipleOf).describe('Monotonic whole-number record version used for verification concurrency control.'),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })),
@@ -523,6 +546,10 @@ export const CreateCredentialBody = zod.object({
   "confidence": zod.number().optional()
 })
 
+export const createCredentialResponseVersionMultipleOf = 1;
+
+
+
 export const CreateCredentialResponse = zod.object({
   "id": zod.number(),
   "employeeId": zod.number(),
@@ -553,6 +580,7 @@ export const CreateCredentialResponse = zod.object({
   "verificationUrl": zod.string().nullish(),
   "confidence": zod.number().nullish(),
   "isVerified": zod.boolean().optional(),
+  "version": zod.number().min(1).multipleOf(createCredentialResponseVersionMultipleOf).describe('Monotonic whole-number record version used for verification concurrency control.'),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })
@@ -566,6 +594,10 @@ export const getExpiringCredentialsQueryDaysDefault = 90;
 export const GetExpiringCredentialsQueryParams = zod.object({
   "days": zod.coerce.number().default(getExpiringCredentialsQueryDaysDefault)
 })
+
+export const getExpiringCredentialsResponseVersionMultipleOf = 1;
+
+
 
 export const GetExpiringCredentialsResponseItem = zod.object({
   "id": zod.number(),
@@ -597,6 +629,7 @@ export const GetExpiringCredentialsResponseItem = zod.object({
   "verificationUrl": zod.string().nullish(),
   "confidence": zod.number().nullish(),
   "isVerified": zod.boolean().optional(),
+  "version": zod.number().min(1).multipleOf(getExpiringCredentialsResponseVersionMultipleOf).describe('Monotonic whole-number record version used for verification concurrency control.'),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })
@@ -657,6 +690,10 @@ export const GetCredentialParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const getCredentialResponseVersionMultipleOf = 1;
+
+
+
 export const GetCredentialResponse = zod.object({
   "id": zod.number(),
   "employeeId": zod.number(),
@@ -687,6 +724,7 @@ export const GetCredentialResponse = zod.object({
   "verificationUrl": zod.string().nullish(),
   "confidence": zod.number().nullish(),
   "isVerified": zod.boolean().optional(),
+  "version": zod.number().min(1).multipleOf(getCredentialResponseVersionMultipleOf).describe('Monotonic whole-number record version used for verification concurrency control.'),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })
@@ -699,7 +737,12 @@ export const UpdateCredentialParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateCredentialBodyExpectedVersionMultipleOf = 1;
+
+
+
 export const UpdateCredentialBody = zod.object({
+  "expectedVersion": zod.number().min(1).multipleOf(updateCredentialBodyExpectedVersionMultipleOf).describe('Required whole-number version for every update; stale versions return HTTP 409.'),
   "type": zod.string().optional(),
   "customTypeName": zod.string().optional(),
   "customTypeNameAr": zod.string().optional(),
@@ -714,8 +757,13 @@ export const UpdateCredentialBody = zod.object({
   "fileType": zod.string().optional(),
   "tags": zod.array(zod.string()).optional(),
   "notes": zod.string().optional(),
-  "verificationUrl": zod.string().optional()
+  "verificationUrl": zod.string().optional(),
+  "isVerified": zod.boolean().optional()
 })
+
+export const updateCredentialResponseVersionMultipleOf = 1;
+
+
 
 export const UpdateCredentialResponse = zod.object({
   "id": zod.number(),
@@ -747,6 +795,7 @@ export const UpdateCredentialResponse = zod.object({
   "verificationUrl": zod.string().nullish(),
   "confidence": zod.number().nullish(),
   "isVerified": zod.boolean().optional(),
+  "version": zod.number().min(1).multipleOf(updateCredentialResponseVersionMultipleOf).describe('Monotonic whole-number record version used for verification concurrency control.'),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })
@@ -788,6 +837,10 @@ export const CheckDuplicateBody = zod.object({
   "certificateNumber": zod.string()
 })
 
+export const checkDuplicateResponseExistingCredentialVersionMultipleOf = 1;
+
+
+
 export const CheckDuplicateResponse = zod.object({
   "isDuplicate": zod.boolean(),
   "existingCredential": zod.object({
@@ -820,6 +873,7 @@ export const CheckDuplicateResponse = zod.object({
   "verificationUrl": zod.string().nullish(),
   "confidence": zod.number().nullish(),
   "isVerified": zod.boolean().optional(),
+  "version": zod.number().min(1).multipleOf(checkDuplicateResponseExistingCredentialVersionMultipleOf).describe('Monotonic whole-number record version used for verification concurrency control.'),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 }).optional()
@@ -917,6 +971,10 @@ export const GetEmployeeParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const getEmployeeResponseTwoCredentialsItemVersionMultipleOf = 1;
+
+
+
 export const GetEmployeeResponse = zod.object({
   "totpEnabled": zod.boolean().optional(),
   "id": zod.number(),
@@ -977,6 +1035,7 @@ export const GetEmployeeResponse = zod.object({
   "verificationUrl": zod.string().nullish(),
   "confidence": zod.number().nullish(),
   "isVerified": zod.boolean().optional(),
+  "version": zod.number().min(1).multipleOf(getEmployeeResponseTwoCredentialsItemVersionMultipleOf).describe('Monotonic whole-number record version used for verification concurrency control.'),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })).optional(),

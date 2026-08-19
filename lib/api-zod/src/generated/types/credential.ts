@@ -40,6 +40,11 @@ export interface Credential {
   /** @nullable */
   confidence?: number | null;
   isVerified?: boolean;
+  /**
+     * Monotonic whole-number record version used for verification concurrency control.
+     * @minimum 1
+     */
+  version: number;
   createdAt: string;
   updatedAt: string;
 }

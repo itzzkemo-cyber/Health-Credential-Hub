@@ -31,6 +31,15 @@ export const en = {
     not_connected: "Not Connected",
     all: "All",
     loading: "Loading…",
+    retry: "Try again",
+    load_error_title: "We couldn't load this information",
+    load_error_description:
+      "Check your connection and try again. If the problem continues, contact your facility administrator.",
+    forbidden_title: "Access not permitted",
+    forbidden_description:
+      "Your account does not have permission to open this page. Return to the dashboard or contact your facility administrator.",
+    go_home: "Return to dashboard",
+    user: "User",
   },
   mobile: {
     home: "Home",
@@ -78,6 +87,11 @@ export const en = {
     days: "Days",
     reset: "Reset Defaults",
     saved: "Settings saved",
+    not_available: "This option is not available in this version.",
+    alerts_managed_by_admin:
+      "Email alert schedules are managed centrally by your facility administrator and cannot be changed here.",
+    applies_immediately:
+      "Language and appearance changes apply immediately on this device; there is no separate Save step.",
   },
   auth: {
     brand_name: "HealthDocs",
@@ -246,6 +260,42 @@ export const en = {
     expires: "Expires",
     verify: "Verify",
   },
+  employees_page: {
+    subtitle: "Manage staff and their compliance status.",
+    add_employee: "Add Employee",
+    filter: "Filter",
+    empty: "No employees found",
+    employee: "Employee",
+    role: "Role",
+    status: "Status",
+    compliance: "Compliance",
+    at_risk: "At Risk",
+    compliant: "Compliant",
+    load_error: "Could not load the employee profile",
+    profile: "Employee Profile",
+    not_available: "Not available",
+    overall_compliance: "Overall Compliance",
+    credentials: "Credentials & Licenses",
+    missing_required: "Missing Required Credentials",
+    expires: "Expires",
+    no_active_credentials: "No active credentials.",
+  },
+  verify_page: {
+    title: "HealthDocs Verification",
+    registry: "Official Credential Registry",
+    invalid_title: "Invalid or Expired QR",
+    invalid_description:
+      "This credential could not be verified. It may have been revoked, expired, or the QR code is invalid.",
+    authentic_expired: "Authentic — Expired",
+    verified_active: "Verified & Active",
+    auth_code: "Auth Code",
+    credential_type: "Credential Type",
+    issuing_authority: "Issuing Authority",
+    issue_date: "Issue Date",
+    expiry_date: "Expiry Date",
+    verified_on: "Verified on",
+    powered_by: "Powered by HealthDocs",
+  },
   credential: {
     add_new: "Add Credential",
     manual: "Manual Entry",
@@ -258,7 +308,7 @@ export const en = {
     expiry_date: "Expiry Date",
     file: "Attached File",
     notes: "Notes",
-    upload_hint: "Drag and drop file here or click to browse",
+    upload_hint: "Choose an image or PDF from your device",
     scan_success: "Document scanned — review the details, then save",
     scan_failed: "Failed to extract data. Please enter manually",
     file_too_large:
@@ -270,12 +320,16 @@ export const en = {
       'Inline PDF preview isn\'t supported in this browser — use "Open File" to view it',
     ocr_review_notice:
       "Smart scan is powered by AI: the system reads the document and fills the fields automatically — review and correct them before saving.",
+    ocr_external_notice:
+      "Smart scan sends the selected document to the configured Google Gemini service for OCR. It may contain sensitive workforce or health information, so continue only if you are authorized to use this processor.",
+    ocr_consent:
+      "I understand and agree to send this document to the external OCR processor for smart scanning.",
     upload_failed:
       "Could not upload the file — check your connection and try again",
     add_subtitle: "Upload a new professional certificate or license.",
     scanning_title: "Processing document...",
     scanning_hint: "The fields will be filled automatically for your review",
-    upload_zone_title: "Click or drag your document here",
+    upload_zone_title: "Choose a document to scan",
     upload_zone_hint:
       "Upload your certificate (image or PDF) and the fields will be filled for you to review before saving.",
     duplicate_warning:
@@ -290,6 +344,12 @@ export const en = {
     uploading_for: "Uploading for employee",
     private_upload_notice:
       "The document is uploaded to private encrypted storage. Do not share upload links or document images outside the platform.",
+    showcase_upload_notice:
+      "In the showcase, the selected file stays only in this device's memory; it is not uploaded to a server or sent to any external service.",
+    showcase_ocr_review_notice:
+      "Smart scan is a local simulation using synthetic data here; the file is not sent to external AI or OCR. Review the fields before saving.",
+    showcase_file_selected:
+      "File selected and retained temporarily in this device's memory until the page reloads.",
     manual_upload_hint:
       "Optional: attach an image or PDF without sending it to smart scan.",
     select_type: "Select document type",
@@ -377,6 +437,11 @@ export const en = {
     delete_confirm:
       "Are you sure you want to delete this policy? This may affect employee compliance calculations.",
     empty: "No policies defined yet.",
+    required_fields: "Complete all required fields",
+    select_type: "Select credential type",
+    all_departments: "All departments",
+    required_for: "Required for",
+    optional_for: "Optional for",
   },
   integrations: {
     title: "Integrations",

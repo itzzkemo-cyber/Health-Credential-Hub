@@ -58,7 +58,7 @@ export default function EmployeeDetail() {
   }
 
   if (isError || !emp) {
-    return <div className="text-center p-8 text-destructive">Error loading employee</div>;
+    return <div className="text-center p-8 text-destructive">{t('employees_page.load_error')}</div>;
   }
 
   const getComplianceColor = (rate: number) => {
@@ -79,10 +79,16 @@ export default function EmployeeDetail() {
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500 pb-12">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => setLocation('/employees')}>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setLocation('/employees')}
+          aria-label={t('common.back')}
+          className="h-11 w-11 shrink-0"
+        >
           {isRTL ? <ArrowRight className="h-5 w-5" /> : <ArrowLeft className="h-5 w-5" />}
         </Button>
-        <h1 className="text-2xl font-bold tracking-tight">Employee Profile</h1>
+        <h1 className="text-2xl font-bold tracking-tight">{t('employees_page.profile')}</h1>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -99,7 +105,7 @@ export default function EmployeeDetail() {
                 <p className="text-muted-foreground text-sm">{t(`roles.${emp.role}`)}</p>
                 {emp.isAtRisk && (
                   <Badge variant="destructive" className="mt-3 gap-1">
-                    <AlertTriangle className="h-3 w-3" /> At Risk
+                    <AlertTriangle className="h-3 w-3" /> {t('employees_page.at_risk')}
                   </Badge>
                 )}
               </div>
@@ -117,7 +123,7 @@ export default function EmployeeDetail() {
                 )}
                 <div className="flex items-center gap-3 text-sm text-muted-foreground">
                   <Briefcase className="h-4 w-4" />
-                  <span>{emp.employeeNumber || "N/A"}</span>
+                  <span>{emp.employeeNumber || t('employees_page.not_available')}</span>
                 </div>
                 {emp.department && (
                   <div className="flex items-center gap-3 text-sm text-muted-foreground">
@@ -170,7 +176,7 @@ export default function EmployeeDetail() {
               )}
 
               <div className="pt-6">
-                <p className="text-sm font-medium mb-3">Overall Compliance</p>
+                <p className="text-sm font-medium mb-3">{t('employees_page.overall_compliance')}</p>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-2xl font-bold">{emp.complianceRate || 0}%</span>
                 </div>
@@ -188,9 +194,9 @@ export default function EmployeeDetail() {
         <div className="lg:col-span-2 space-y-6">
           <Card className="hover-elevate">
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Credentials & Licenses</CardTitle>
+              <CardTitle>{t('employees_page.credentials')}</CardTitle>
               <Button size="sm" onClick={() => setLocation(`/credentials/new?employeeId=${emp.id}`)} className="gap-2">
-                <Plus className="h-4 w-4" /> Add
+                <Plus className="h-4 w-4" /> {t('common.add')}
               </Button>
             </CardHeader>
             <CardContent>
@@ -199,7 +205,7 @@ export default function EmployeeDetail() {
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
                     <div>
-                      <h4 className="font-semibold text-destructive text-sm">Missing Required Credentials</h4>
+                      <h4 className="font-semibold text-destructive text-sm">{t('employees_page.missing_required')}</h4>
                       <ul className="list-disc list-inside mt-2 text-sm text-destructive/80 space-y-1">
                         {emp.missingCredentials.map((mc, idx) => (
                           <li key={idx}>{mc}</li>
@@ -225,7 +231,7 @@ export default function EmployeeDetail() {
                           {isRTL ? (cred.customTypeNameAr || cred.type) : (cred.customTypeName || cred.type)}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          Exp: {new Date(cred.expiryDate).toLocaleDateString(isRTL ? 'ar-SA' : 'en-US')}
+                          {t('employees_page.expires')}: {new Date(cred.expiryDate).toLocaleDateString(isRTL ? 'ar-SA' : 'en-US')}
                         </div>
                       </div>
                     </div>
@@ -235,7 +241,7 @@ export default function EmployeeDetail() {
                   </div>
                 )) : (
                   <div className="text-center py-8 text-muted-foreground border border-dashed rounded-lg">
-                    No active credentials.
+                    {t('employees_page.no_active_credentials')}
                   </div>
                 )}
               </div>

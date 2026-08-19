@@ -5,11 +5,13 @@ import {
   credentialsTable,
   usersTable,
   notificationsTable,
+  auditLogsTable,
+  uploadGrantsTable,
   CREDENTIAL_TYPES,
   type CredentialType,
   type User,
 } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { requireAuth, getUser, MANAGER_ROLES } from "../lib/auth";
 import {
   computeStatus,
@@ -20,6 +22,8 @@ import {
   getCredentialsFor,
   getPolicies,
   missingTypesFor,
+  evaluateCredentialVerificationChange,
+  isUserInScope,
   logAudit,
 } from "../lib/helpers";
 import {
@@ -27,64 +31,52 @@ import {
   setObjectAclPolicy,
   ObjectPermission,
 } from "../lib/objectAcl";
-import { ObjectNotFoundError, ObjectStorageService } from "../lib/objectStorage";
+import {
+  ObjectNotFoundError,
+  ObjectStorageService,
+} from "../lib/objectStorage";
+import {
+  ALLOWED_UPLOAD_CONTENT_TYPE,
+  MAX_UPLOAD_BYTES,
+  findActiveUploadGrant,
+  validateUploadedObject,
+} from "../lib/uploadSecurity";
 import { getAi } from "@workspace/integrations-gemini-ai";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 
+class InvalidCredentialFileError extends Error {}
+
 function normalizeCalendarDate(value: string): string | null {
   const date = value.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const parsed = new Date(`${date}T00:00:00Z`);
-  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date
+  return Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== date
     ? null
     : date;
 }
 
-/**
- * Credential files now live in object storage: the client uploads to a
- * presigned URL and sends back an `/objects/...` path. Before persisting,
- * normalize the path and stamp its ACL (owner = the credential's employee,
- * private) so the storage serving route can authorize reads. Anything else —
- * including inline `data:` URLs — is rejected, so files can never be stored
- * inside the database again.
- */
-async function finalizeStoredFileUrl(
-  rawUrl: string,
-  employeeId: number,
-  actorId: number,
-): Promise<string | null> {
-  // Only storage paths are acceptable — external http(s) or other schemes
-  // must never be persisted as credential files (provenance + phishing risk).
-  if (!rawUrl.startsWith("/objects/")) return null;
-  try {
-    const objectFile = await objectStorageService.getObjectEntityFile(rawUrl);
-    const existingPolicy = await getObjectAclPolicy(objectFile);
-    if (
-      existingPolicy &&
-      existingPolicy.owner !== String(actorId) &&
-      existingPolicy.owner !== String(employeeId)
-    ) {
-      return null;
-    }
-    return await objectStorageService.trySetObjectEntityAclPolicy(rawUrl, {
-      owner: String(employeeId),
-      visibility: "private",
-    });
-  } catch {
-    return null;
-  }
-}
-
-async function canManageLinkedObject(user: User, fileUrl: string): Promise<boolean> {
-  if (!MANAGER_ROLES.includes(user.role)) return false;
+async function canAccessLinkedObject(
+  user: User,
+  fileUrl: string,
+): Promise<boolean> {
   const linked = await db
     .select({ employeeId: credentialsTable.employeeId })
     .from(credentialsTable)
-    .where(eq(credentialsTable.fileUrl, fileUrl));
+    .where(
+      and(
+        eq(credentialsTable.fileUrl, fileUrl),
+        isNull(credentialsTable.deletedAt),
+      ),
+    );
   if (linked.length === 0) return false;
-  const scopedIds = new Set((await getScopedUsers(user)).map((entry) => entry.id));
+  if (linked.some((entry) => entry.employeeId === user.id)) return true;
+  if (!MANAGER_ROLES.includes(user.role)) return false;
+  const scopedIds = new Set(
+    (await getScopedUsers(user)).map((entry) => entry.id),
+  );
   return linked.some((entry) => scopedIds.has(entry.employeeId));
 }
 
@@ -96,7 +88,12 @@ router.get("/credentials/:id/verify", async (req, res) => {
   const rows = await db
     .select()
     .from(credentialsTable)
-    .where(eq(credentialsTable.qrToken, token));
+    .where(
+      and(
+        eq(credentialsTable.qrToken, token),
+        isNull(credentialsTable.deletedAt),
+      ),
+    );
   const cred = rows[0];
   if (!cred || !cred.isVerified) {
     res.status(404).json({ message: "Credential not found" });
@@ -146,7 +143,9 @@ router.get("/credentials/missing", async (req, res) => {
     scoped = scoped.filter((u) => u.departmentId === departmentId);
   scoped = scoped.filter((u) => u.isActive);
   const creds = await getCredentialsFor(scoped.map((u) => u.id));
-  const policies = await getPolicies(user.role === "system_admin" ? null : user.facilityId);
+  const policies = await getPolicies(
+    user.role === "system_admin" ? null : user.facilityId,
+  );
   const result: unknown[] = [];
   for (const u of scoped) {
     for (const t of missingTypesFor(u, creds, policies)) {
@@ -163,15 +162,14 @@ router.get("/credentials/missing", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// AI document reading (OCR) — Gemini vision via Replit AI Integrations
+// AI document reading (OCR) — optional Gemini vision integration
 // ---------------------------------------------------------------------------
 
 const OCR_MODEL = "gemini-2.5-flash";
-// AI Integrations only accepts inline input data, capped at 8 MB.
-const MAX_OCR_BYTES = 8 * 1024 * 1024;
+// The integration accepts inline input data, capped at 8 MB.
+const MAX_OCR_BYTES = MAX_UPLOAD_BYTES;
 // Same explicit allowlist as the upload presign policy in storage.ts.
-const OCR_MIME_ALLOWLIST =
-  /^(image\/(png|jpe?g|webp|gif|avif|heic|heif)|application\/pdf)$/i;
+const OCR_MIME_ALLOWLIST = ALLOWED_UPLOAD_CONTENT_TYPE;
 
 // Cheap in-memory per-user rate limit — every OCR call is a billed AI request.
 const OCR_RATE_LIMIT = 20;
@@ -209,7 +207,9 @@ router.post("/credentials/ocr", async (req, res) => {
     return;
   }
   if (ocrRateLimited(user.id)) {
-    res.status(429).json({ message: "Too many AI reading requests, try again later" });
+    res
+      .status(429)
+      .json({ message: "Too many AI reading requests, try again later" });
     return;
   }
 
@@ -218,6 +218,7 @@ router.post("/credentials/ocr", async (req, res) => {
   let mimeType: string;
   try {
     const objectFile = await objectStorageService.getObjectEntityFile(fileUrl);
+    const pendingGrant = await findActiveUploadGrant(fileUrl, user.id);
 
     // Fresh uploads carry no ACL yet (it is stamped when the credential is
     // saved). If the object already HAS an ACL, apply the same rule as the
@@ -230,11 +231,19 @@ router.post("/credentials/ocr", async (req, res) => {
         objectFile,
         requestedPermission: ObjectPermission.READ,
       });
-      const canManage = isOwner ? false : await canManageLinkedObject(user, fileUrl);
-      if (!isOwner && !canManage) {
+      const canAccessLinked = await canAccessLinkedObject(user, fileUrl);
+      // ACL ownership alone is insufficient after the upload grant has been
+      // consumed: the object must still belong to an active credential. This
+      // keeps retained soft-deleted evidence inaccessible to OCR callers.
+      if (!(isOwner && pendingGrant) && !canAccessLinked) {
         res.status(403).json({ message: "Forbidden" });
         return;
       }
+    } else if (!pendingGrant) {
+      res.status(403).json({
+        message: "Upload grant expired or does not belong to this user",
+      });
+      return;
     }
 
     if (!aclPolicy) {
@@ -247,13 +256,13 @@ router.post("/credentials/ocr", async (req, res) => {
       });
     }
 
-    const [metadata] = await objectFile.getMetadata();
-    mimeType = String(metadata.contentType ?? "application/octet-stream");
+    const metadata = await validateUploadedObject(objectFile, pendingGrant);
+    mimeType = metadata.contentType;
     if (!OCR_MIME_ALLOWLIST.test(mimeType)) {
       res.status(422).json({ message: "Unsupported document type" });
       return;
     }
-    if (Number(metadata.size ?? 0) > MAX_OCR_BYTES) {
+    if (metadata.size > MAX_OCR_BYTES) {
       res.status(422).json({ message: "File too large for AI reading" });
       return;
     }
@@ -264,7 +273,10 @@ router.post("/credentials/ocr", async (req, res) => {
       res.status(404).json({ message: "Document not found" });
       return;
     }
-    req.log.error({ err: error }, "OCR: failed to load stored document");
+    req.log.error(
+      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      "OCR: failed to load stored document",
+    );
     res.status(500).json({ message: "Failed to load stored document" });
     return;
   }
@@ -316,7 +328,7 @@ router.post("/credentials/ocr", async (req, res) => {
       ? (String(raw.detectedType) as CredentialType)
       : "custom";
 
-    res.json({
+    const extracted = {
       detectedType,
       holderName: ocrString(raw.holderName),
       holderNameAr: ocrString(raw.holderNameAr),
@@ -334,9 +346,24 @@ router.post("/credentials/ocr", async (req, res) => {
         issueDate: clamp("issueDate"),
         expiryDate: clamp("expiryDate"),
       },
-    });
+    };
+    await logAudit(
+      user,
+      "Used AI credential extraction",
+      "استخدام الاستخراج الذكي للوثائق",
+      "Credential document",
+      "وثيقة اعتماد",
+      undefined,
+      req.ip,
+    );
+    res.json(extracted);
   } catch (error) {
-    req.log.error({ err: error }, "OCR: AI extraction failed");
+    // SDK errors are deliberately not serialized: provider request objects can
+    // contain the inline Base64 document or authorization metadata.
+    req.log.error(
+      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      "OCR: AI extraction failed",
+    );
     res.status(502).json({ message: "AI document reading failed" });
   }
 });
@@ -361,7 +388,12 @@ router.post("/credentials/check-duplicate", async (req, res) => {
   const rows = await db
     .select()
     .from(credentialsTable)
-    .where(eq(credentialsTable.employeeId, employeeId));
+    .where(
+      and(
+        eq(credentialsTable.employeeId, employeeId),
+        isNull(credentialsTable.deletedAt),
+      ),
+    );
   const existing = rows.find(
     (c) =>
       c.type === type &&
@@ -372,7 +404,10 @@ router.post("/credentials/check-duplicate", async (req, res) => {
     res.json({ isDuplicate: false });
     return;
   }
-  res.json({ isDuplicate: true, existingCredential: serializeCredential(existing) });
+  res.json({
+    isDuplicate: true,
+    existingCredential: serializeCredential(existing),
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -385,11 +420,10 @@ router.get("/credentials", async (req, res) => {
   const byId = new Map(scoped.map((u) => [u.id, u]));
   let creds = await getCredentialsFor(scoped.map((u) => u.id));
 
-  const { status, type, employeeId, departmentId, search } = req.query as Record<
-    string,
-    string | undefined
-  >;
-  if (employeeId) creds = creds.filter((c) => c.employeeId === Number(employeeId));
+  const { status, type, employeeId, departmentId, search } =
+    req.query as Record<string, string | undefined>;
+  if (employeeId)
+    creds = creds.filter((c) => c.employeeId === Number(employeeId));
   if (departmentId) {
     const deptIds = new Set(
       scoped
@@ -399,7 +433,8 @@ router.get("/credentials", async (req, res) => {
     creds = creds.filter((c) => deptIds.has(c.employeeId));
   }
   if (type) creds = creds.filter((c) => c.type === type);
-  if (status) creds = creds.filter((c) => computeStatus(c.expiryDate) === status);
+  if (status)
+    creds = creds.filter((c) => computeStatus(c.expiryDate) === status);
   if (search) {
     const q = search.toLowerCase();
     creds = creds.filter((c) => {
@@ -457,85 +492,173 @@ router.post("/credentials", async (req, res) => {
   const expiryDate = normalizeCalendarDate(body.expiryDate as string);
   if (!issueDate || !expiryDate || issueDate > expiryDate) {
     res.status(400).json({
-      message: "Valid issue and expiry dates are required, and expiry must not precede issue",
+      message:
+        "Valid issue and expiry dates are required, and expiry must not precede issue",
     });
     return;
   }
 
-  let employeeId = Number(body.employeeId ?? user.id);
-  if (user.role === "employee") employeeId = user.id;
-  const scoped = await getScopedUsers(user);
-  const employee = scoped.find((u) => u.id === employeeId);
-  if (!employee) {
-    res.status(403).json({ message: "Employee not in your scope" });
+  const requestedEmployeeId = Number(body.employeeId ?? user.id);
+  if (!Number.isSafeInteger(requestedEmployeeId) || requestedEmployeeId < 1) {
+    res.status(400).json({ message: "A valid employeeId is required" });
     return;
   }
-
-  let fileUrl =
+  const requestedFileUrl =
     typeof body.fileUrl === "string" && body.fileUrl ? body.fileUrl : null;
-  if (fileUrl) {
-    const finalized = await finalizeStoredFileUrl(fileUrl, employeeId, user.id);
-    if (!finalized) {
+
+  let transactionResult;
+  try {
+    transactionResult = await db.transaction(async (tx) => {
+      // Lock the current database actor and candidate owner together. A role
+      // change to employee forces self-ownership even if the request carried a
+      // different employeeId from an earlier, more privileged UI state.
+      const lockedUsers = await tx
+        .select()
+        .from(usersTable)
+        .where(inArray(usersTable.id, [user.id, requestedEmployeeId]))
+        .orderBy(usersTable.id)
+        .for("update");
+      const actor = lockedUsers.find((entry) => entry.id === user.id);
+      if (!actor || !actor.isActive) return { kind: "forbidden" as const };
+      const effectiveEmployeeId =
+        actor.role === "employee" ? actor.id : requestedEmployeeId;
+      const employee = lockedUsers.find(
+        (entry) => entry.id === effectiveEmployeeId,
+      );
+      if (!employee || !isUserInScope(actor, employee)) {
+        return { kind: "forbidden" as const };
+      }
+
+      let fileUrl: string | null = null;
+      if (requestedFileUrl) {
+        if (!requestedFileUrl.startsWith("/objects/")) {
+          throw new InvalidCredentialFileError();
+        }
+        const grant = (
+          await tx
+            .select()
+            .from(uploadGrantsTable)
+            .where(
+              and(
+                eq(uploadGrantsTable.objectPath, requestedFileUrl),
+                eq(uploadGrantsTable.requestedBy, actor.id),
+                isNull(uploadGrantsTable.claimedAt),
+                gt(uploadGrantsTable.expiresAt, new Date()),
+              ),
+            )
+            .for("update")
+        )[0];
+        if (!grant) throw new InvalidCredentialFileError();
+
+        try {
+          const objectFile =
+            await objectStorageService.getObjectEntityFile(requestedFileUrl);
+          const existingPolicy = await getObjectAclPolicy(objectFile);
+          if (
+            existingPolicy &&
+            existingPolicy.owner !== String(actor.id) &&
+            existingPolicy.owner !== String(employee.id)
+          ) {
+            throw new InvalidCredentialFileError();
+          }
+          await validateUploadedObject(objectFile, grant);
+          const consumed = await tx
+            .update(uploadGrantsTable)
+            .set({ claimedAt: new Date() })
+            .where(
+              and(
+                eq(uploadGrantsTable.id, grant.id),
+                isNull(uploadGrantsTable.claimedAt),
+                gt(uploadGrantsTable.expiresAt, new Date()),
+              ),
+            )
+            .returning({ id: uploadGrantsTable.id });
+          if (!consumed[0]) throw new InvalidCredentialFileError();
+          fileUrl = await objectStorageService.trySetObjectEntityAclPolicy(
+            requestedFileUrl,
+            {
+              owner: String(employee.id),
+              visibility: "private",
+            },
+          );
+        } catch (error) {
+          if (error instanceof InvalidCredentialFileError) throw error;
+          throw new InvalidCredentialFileError();
+        }
+      }
+
+      const cred = (
+        await tx
+          .insert(credentialsTable)
+          .values({
+            employeeId: employee.id,
+            type: type as CredentialType,
+            customTypeName: (body.customTypeName as string) ?? null,
+            customTypeNameAr: (body.customTypeNameAr as string) ?? null,
+            holderName: body.holderName as string,
+            holderNameAr: body.holderNameAr as string,
+            issuerName: body.issuerName as string,
+            issuerNameAr: body.issuerNameAr as string,
+            certificateNumber: body.certificateNumber as string,
+            issueDate,
+            expiryDate,
+            fileUrl,
+            fileType: (body.fileType as string) ?? null,
+            qrToken: crypto.randomBytes(16).toString("hex"),
+            tags: Array.isArray(body.tags) ? (body.tags as string[]) : [],
+            notes: (body.notes as string) ?? null,
+            confidence:
+              typeof body.confidence === "number" ? body.confidence : null,
+            isVerified: false,
+          })
+          .returning()
+      )[0];
+      if (!cred) throw new Error("Credential insert returned no row");
+
+      await tx.insert(auditLogsTable).values({
+        userId: actor.id,
+        userName: actor.name,
+        userNameAr: actor.nameAr,
+        action: "Added credential",
+        actionAr: "إضافة وثيقة",
+        target: `${cred.type} · ${cred.certificateNumber}`,
+        targetAr: `${cred.type} · ${cred.certificateNumber}`,
+        details: null,
+        ipAddress: req.ip ?? null,
+      });
+      await tx.insert(notificationsTable).values({
+        userId: employee.id,
+        type: "new_credential",
+        titleAr: "وثيقة جديدة",
+        titleEn: "New credential",
+        messageAr: `تمت إضافة وثيقة «${cred.customTypeNameAr ?? cred.type}» إلى ملفك`,
+        messageEn: `A ${cred.customTypeName ?? cred.type} credential was added to your profile`,
+        credentialId: cred.id,
+        employeeId: employee.id,
+        isRead: false,
+        daysUntilExpiry: daysUntil(cred.expiryDate),
+      });
+      return { kind: "created" as const, cred, employee };
+    });
+  } catch (error) {
+    if (error instanceof InvalidCredentialFileError) {
       res.status(400).json({
         message: "Credential files must be uploaded to object storage first",
       });
       return;
     }
-    fileUrl = finalized;
+    throw error;
   }
 
-  const inserted = await db
-    .insert(credentialsTable)
-    .values({
-      employeeId,
-      type: type as CredentialType,
-      customTypeName: (body.customTypeName as string) ?? null,
-      customTypeNameAr: (body.customTypeNameAr as string) ?? null,
-      holderName: body.holderName as string,
-      holderNameAr: body.holderNameAr as string,
-      issuerName: body.issuerName as string,
-      issuerNameAr: body.issuerNameAr as string,
-      certificateNumber: body.certificateNumber as string,
-      issueDate,
-      expiryDate,
-      fileUrl,
-      fileType: (body.fileType as string) ?? null,
-      qrToken: crypto.randomBytes(16).toString("hex"),
-      tags: Array.isArray(body.tags) ? (body.tags as string[]) : [],
-      notes: (body.notes as string) ?? null,
-      confidence: typeof body.confidence === "number" ? body.confidence : null,
-      isVerified: false,
-    })
-    .returning();
-  const cred = inserted[0];
-  if (!cred) {
-    res.status(500).json({ message: "Insert failed" });
+  if (transactionResult.kind === "forbidden") {
+    res.status(403).json({ message: "Employee not in your scope" });
     return;
   }
-
-  await logAudit(
-    user,
-    "Added credential",
-    "إضافة وثيقة",
-    `${cred.type} · ${cred.certificateNumber}`,
-    `${cred.type} · ${cred.certificateNumber}`,
-    undefined,
-    req.ip,
-  );
-  await db.insert(notificationsTable).values({
-    userId: employeeId,
-    type: "new_credential",
-    titleAr: "وثيقة جديدة",
-    titleEn: "New credential",
-    messageAr: `تمت إضافة وثيقة «${cred.customTypeNameAr ?? cred.type}» إلى ملفك`,
-    messageEn: `A ${cred.customTypeName ?? cred.type} credential was added to your profile`,
-    credentialId: cred.id,
-    employeeId,
-    isRead: false,
-    daysUntilExpiry: daysUntil(cred.expiryDate),
-  });
-
-  res.status(201).json(serializeCredential(cred, employee));
+  res
+    .status(201)
+    .json(
+      serializeCredential(transactionResult.cred, transactionResult.employee),
+    );
 });
 
 // ---------------------------------------------------------------------------
@@ -551,7 +674,9 @@ async function findScopedCredential(
   const rows = await db
     .select()
     .from(credentialsTable)
-    .where(eq(credentialsTable.id, id));
+    .where(
+      and(eq(credentialsTable.id, id), isNull(credentialsTable.deletedAt)),
+    );
   const cred = rows[0];
   if (!cred) return null;
   const scoped = await getScopedUsers(user);
@@ -577,7 +702,26 @@ router.patch("/credentials/:id", async (req, res) => {
     return;
   }
   const body = req.body as Record<string, unknown>;
-  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (
+    !Number.isSafeInteger(body.expectedVersion) ||
+    Number(body.expectedVersion) < 1
+  ) {
+    res.status(428).json({
+      message: "expectedVersion is required for credential updates",
+    });
+    return;
+  }
+  const expectedVersion = Number(body.expectedVersion);
+  if (expectedVersion !== found.cred.rowVersion) {
+    res.status(409).json({
+      message: "Credential changed — reload it before updating",
+    });
+    return;
+  }
+  const patch: Record<string, unknown> = {
+    updatedAt: new Date(),
+    rowVersion: sql`${credentialsTable.rowVersion} + 1`,
+  };
   const stringFields = [
     "customTypeName",
     "customTypeNameAr",
@@ -593,7 +737,10 @@ router.patch("/credentials/:id", async (req, res) => {
   for (const f of stringFields) {
     if (f in body) patch[f] = body[f] as string | null;
   }
-  if (typeof body.type === "string" && CREDENTIAL_TYPES.includes(body.type as CredentialType)) {
+  if (
+    typeof body.type === "string" &&
+    CREDENTIAL_TYPES.includes(body.type as CredentialType)
+  ) {
     patch.type = body.type;
   }
   const nextIssueDate =
@@ -606,13 +753,38 @@ router.patch("/credentials/:id", async (req, res) => {
       : found.cred.expiryDate;
   if (!nextIssueDate || !nextExpiryDate || nextIssueDate > nextExpiryDate) {
     res.status(400).json({
-      message: "Valid issue and expiry dates are required, and expiry must not precede issue",
+      message:
+        "Valid issue and expiry dates are required, and expiry must not precede issue",
     });
     return;
   }
   if (typeof body.issueDate === "string") patch.issueDate = nextIssueDate;
   if (typeof body.expiryDate === "string") patch.expiryDate = nextExpiryDate;
   if (Array.isArray(body.tags)) patch.tags = body.tags;
+
+  // Normalize file removal before comparing evidence. Re-sending the current
+  // path is a no-op and must not require a second, already-consumed grant.
+  if (
+    Object.prototype.hasOwnProperty.call(body, "fileUrl") &&
+    body.fileUrl !== null &&
+    typeof body.fileUrl !== "string"
+  ) {
+    res
+      .status(400)
+      .json({ message: "Credential file path must be a string or null" });
+    return;
+  }
+  if (patch.fileUrl === "") patch.fileUrl = null;
+  const fileChanged =
+    Object.prototype.hasOwnProperty.call(patch, "fileUrl") &&
+    patch.fileUrl !== found.cred.fileUrl;
+  if (!fileChanged) delete patch.fileUrl;
+
+  const verificationChange = evaluateCredentialVerificationChange(
+    found.cred,
+    patch,
+    typeof body.isVerified === "boolean" ? body.isVerified : undefined,
+  );
   if (typeof body.isVerified === "boolean") {
     if (
       !MANAGER_ROLES.includes(user.role) ||
@@ -621,47 +793,183 @@ router.patch("/credentials/:id", async (req, res) => {
       res.status(403).json({ message: "Credentials cannot be self-verified" });
       return;
     }
-    patch.isVerified = body.isVerified;
+    if (verificationChange.conflictsWithVerification) {
+      res.status(400).json({
+        message: "Verify the credential only after saving material changes",
+      });
+      return;
+    }
   }
 
-  // Normalize "remove the file" to null, then require any provided file to
-  // be a real object-storage path — data: URLs can no longer be persisted.
-  if (patch.fileUrl === "") patch.fileUrl = null;
-  if (typeof patch.fileUrl === "string" && patch.fileUrl) {
-    const finalized = await finalizeStoredFileUrl(
-      patch.fileUrl,
-      found.cred.employeeId,
-      user.id,
-    );
-    if (!finalized) {
+  if (verificationChange.nextVerification !== undefined) {
+    patch.isVerified = verificationChange.nextVerification;
+  }
+
+  let transactionResult;
+  try {
+    transactionResult = await db.transaction(async (tx) => {
+      // Lock both the credential evidence and the current actor/owner scope.
+      // This prevents role, facility, department, or supervisor changes from
+      // racing the final write after the preliminary UX-friendly lookup.
+      const current = (
+        await tx
+          .select()
+          .from(credentialsTable)
+          .where(
+            and(
+              eq(credentialsTable.id, found.cred.id),
+              isNull(credentialsTable.deletedAt),
+              eq(credentialsTable.rowVersion, expectedVersion),
+            ),
+          )
+          .for("update")
+      )[0];
+      if (!current) return { kind: "conflict" as const };
+
+      const lockedUsers = await tx
+        .select()
+        .from(usersTable)
+        .where(inArray(usersTable.id, [user.id, current.employeeId]))
+        .orderBy(usersTable.id)
+        .for("update");
+      const actor = lockedUsers.find((entry) => entry.id === user.id);
+      const owner = lockedUsers.find(
+        (entry) => entry.id === current.employeeId,
+      );
+      if (!actor || !owner || !isUserInScope(actor, owner)) {
+        return { kind: "forbidden" as const };
+      }
+      if (
+        typeof body.isVerified === "boolean" &&
+        (!MANAGER_ROLES.includes(actor.role) || current.employeeId === actor.id)
+      ) {
+        return { kind: "forbidden" as const };
+      }
+
+      const transactionPatch = { ...patch };
+      // A changed file is finalized only after the record and scope are
+      // locked. Grant consumption rolls back with the DB transaction if GCS
+      // validation/ACL or the credential update fails.
+      if (
+        typeof transactionPatch.fileUrl === "string" &&
+        transactionPatch.fileUrl
+      ) {
+        const rawUrl = transactionPatch.fileUrl;
+        if (!rawUrl.startsWith("/objects/")) {
+          throw new InvalidCredentialFileError();
+        }
+        const grant = (
+          await tx
+            .select()
+            .from(uploadGrantsTable)
+            .where(
+              and(
+                eq(uploadGrantsTable.objectPath, rawUrl),
+                eq(uploadGrantsTable.requestedBy, actor.id),
+                isNull(uploadGrantsTable.claimedAt),
+                gt(uploadGrantsTable.expiresAt, new Date()),
+              ),
+            )
+            .for("update")
+        )[0];
+        if (!grant) throw new InvalidCredentialFileError();
+
+        let normalized: string;
+        try {
+          const objectFile =
+            await objectStorageService.getObjectEntityFile(rawUrl);
+          const existingPolicy = await getObjectAclPolicy(objectFile);
+          if (
+            existingPolicy &&
+            existingPolicy.owner !== String(actor.id) &&
+            existingPolicy.owner !== String(owner.id)
+          ) {
+            throw new InvalidCredentialFileError();
+          }
+          await validateUploadedObject(objectFile, grant);
+          const consumed = await tx
+            .update(uploadGrantsTable)
+            .set({ claimedAt: new Date() })
+            .where(
+              and(
+                eq(uploadGrantsTable.id, grant.id),
+                isNull(uploadGrantsTable.claimedAt),
+                gt(uploadGrantsTable.expiresAt, new Date()),
+              ),
+            )
+            .returning({ id: uploadGrantsTable.id });
+          if (!consumed[0]) throw new InvalidCredentialFileError();
+          normalized = await objectStorageService.trySetObjectEntityAclPolicy(
+            rawUrl,
+            {
+              owner: String(owner.id),
+              visibility: "private",
+            },
+          );
+        } catch (error) {
+          if (error instanceof InvalidCredentialFileError) throw error;
+          throw new InvalidCredentialFileError();
+        }
+        transactionPatch.fileUrl = normalized;
+      }
+
+      const cred = (
+        await tx
+          .update(credentialsTable)
+          .set(transactionPatch)
+          .where(
+            and(
+              eq(credentialsTable.id, current.id),
+              isNull(credentialsTable.deletedAt),
+              eq(credentialsTable.rowVersion, expectedVersion),
+            ),
+          )
+          .returning()
+      )[0];
+      if (!cred) return { kind: "conflict" as const };
+
+      const verificationChanged = cred.isVerified !== current.isVerified;
+      const auditAction: [string, string] = verificationChanged
+        ? cred.isVerified
+          ? ["Verified credential", "توثيق وثيقة"]
+          : ["Unverified credential", "إلغاء توثيق وثيقة"]
+        : ["Updated credential", "تحديث وثيقة"];
+      await tx.insert(auditLogsTable).values({
+        userId: actor.id,
+        userName: actor.name,
+        userNameAr: actor.nameAr,
+        action: auditAction[0],
+        actionAr: auditAction[1],
+        target: `${cred.type} · ${cred.certificateNumber}`,
+        targetAr: `${cred.type} · ${cred.certificateNumber}`,
+        details: null,
+        ipAddress: req.ip ?? null,
+      });
+      return { kind: "updated" as const, cred, owner };
+    });
+  } catch (error) {
+    if (error instanceof InvalidCredentialFileError) {
       res.status(400).json({
         message: "Credential files must be uploaded to object storage first",
       });
       return;
     }
-    patch.fileUrl = finalized;
+    throw error;
   }
 
-  const updated = await db
-    .update(credentialsTable)
-    .set(patch)
-    .where(eq(credentialsTable.id, found.cred.id))
-    .returning();
-  const cred = updated[0];
-  if (!cred) {
-    res.status(500).json({ message: "Update failed" });
+  if (transactionResult.kind === "forbidden") {
+    res.status(404).json({ message: "Credential not found" });
     return;
   }
-  await logAudit(
-    user,
-    "Updated credential",
-    "تحديث وثيقة",
-    `${cred.type} · ${cred.certificateNumber}`,
-    `${cred.type} · ${cred.certificateNumber}`,
-    undefined,
-    req.ip,
+  if (transactionResult.kind === "conflict") {
+    res.status(409).json({
+      message: "Credential changed — reload it and try again",
+    });
+    return;
+  }
+  res.json(
+    serializeCredential(transactionResult.cred, transactionResult.owner),
   );
-  res.json(serializeCredential(cred, found.owner));
 });
 
 router.delete("/credentials/:id", async (req, res) => {
@@ -671,19 +979,72 @@ router.delete("/credentials/:id", async (req, res) => {
     res.status(404).json({ message: "Credential not found" });
     return;
   }
-  await db
-    .delete(notificationsTable)
-    .where(eq(notificationsTable.credentialId, found.cred.id));
-  await db.delete(credentialsTable).where(eq(credentialsTable.id, found.cred.id));
-  await logAudit(
-    user,
-    "Deleted credential",
-    "حذف وثيقة",
-    `${found.cred.type} · ${found.cred.certificateNumber}`,
-    `${found.cred.type} · ${found.cred.certificateNumber}`,
-    undefined,
-    req.ip,
-  );
+  const deleted = await db.transaction(async (tx) => {
+    const current = (
+      await tx
+        .select()
+        .from(credentialsTable)
+        .where(
+          and(
+            eq(credentialsTable.id, found.cred.id),
+            isNull(credentialsTable.deletedAt),
+          ),
+        )
+        .for("update")
+    )[0];
+    if (!current) return false;
+
+    const lockedUsers = await tx
+      .select()
+      .from(usersTable)
+      .where(inArray(usersTable.id, [user.id, current.employeeId]))
+      .orderBy(usersTable.id)
+      .for("update");
+    const actor = lockedUsers.find((entry) => entry.id === user.id);
+    const owner = lockedUsers.find((entry) => entry.id === current.employeeId);
+    if (!actor || !owner || !isUserInScope(actor, owner)) {
+      return false;
+    }
+
+    const rows = await tx
+      .update(credentialsTable)
+      .set({
+        deletedAt: new Date(),
+        deletedBy: actor.id,
+        updatedAt: new Date(),
+        rowVersion: sql`${credentialsTable.rowVersion} + 1`,
+      })
+      .where(
+        and(
+          eq(credentialsTable.id, current.id),
+          isNull(credentialsTable.deletedAt),
+          eq(credentialsTable.rowVersion, current.rowVersion),
+        ),
+      )
+      .returning({ id: credentialsTable.id });
+    if (!rows[0]) return false;
+
+    await tx
+      .delete(notificationsTable)
+      .where(eq(notificationsTable.credentialId, current.id));
+    await tx.insert(auditLogsTable).values({
+      userId: actor.id,
+      userName: actor.name,
+      userNameAr: actor.nameAr,
+      action: "Deleted credential",
+      actionAr: "حذف وثيقة",
+      target: `${current.type} · ${current.certificateNumber}`,
+      targetAr: `${current.type} · ${current.certificateNumber}`,
+      details:
+        "Credential record and private object retained for the configured retention and cleanup process",
+      ipAddress: req.ip ?? null,
+    });
+    return true;
+  });
+  if (!deleted) {
+    res.status(404).json({ message: "Credential not found" });
+    return;
+  }
   res.status(204).end();
 });
 

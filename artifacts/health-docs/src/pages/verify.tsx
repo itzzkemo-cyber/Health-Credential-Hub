@@ -23,8 +23,8 @@ export default function VerifyQR() {
         <div className="h-16 w-16 bg-primary rounded-2xl flex items-center justify-center mb-4 shadow-lg">
           <ShieldCheck className="h-8 w-8 text-primary-foreground" />
         </div>
-        <h1 className="text-2xl font-bold text-center">HealthDocs Verification</h1>
-        <p className="text-muted-foreground text-sm mt-1">Official Credential Registry</p>
+        <h1 className="text-2xl font-bold text-center">{t('verify_page.title')}</h1>
+        <p className="text-muted-foreground text-sm mt-1">{t('verify_page.registry')}</p>
       </div>
 
       <div className="w-full max-w-md">
@@ -44,9 +44,9 @@ export default function VerifyQR() {
               <div className="mx-auto w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center">
                 <ShieldAlert className="h-8 w-8 text-destructive" />
               </div>
-              <h2 className="text-xl font-bold text-destructive">Invalid or Expired QR</h2>
+              <h2 className="text-xl font-bold text-destructive">{t('verify_page.invalid_title')}</h2>
               <p className="text-muted-foreground text-sm">
-                This credential could not be verified. It may have been revoked, expired, or the QR code is invalid.
+                {t('verify_page.invalid_description')}
               </p>
             </CardContent>
           </Card>
@@ -61,17 +61,17 @@ export default function VerifyQR() {
                 )}
               </div>
               <h2 className={`text-xl font-bold ${isExpired ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>
-                {isExpired ? "Authentic — Expired" : "Verified & Active"}
+                {isExpired ? t('verify_page.authentic_expired') : t('verify_page.verified_active')}
               </h2>
               <p className={`text-sm ${isExpired ? "text-amber-600/80 dark:text-amber-400/80" : "text-emerald-600/80 dark:text-emerald-400/80"} mt-1 font-mono`}>
-                Auth Code: {verData.verificationCode}
+                {t('verify_page.auth_code')}: {verData.verificationCode}
               </p>
             </div>
 
             <CardContent className="p-6 space-y-6">
               <div>
                 <p className="text-sm text-muted-foreground mb-1 flex items-center gap-2">
-                  <FileText className="h-4 w-4" /> Credential Type
+                  <FileText className="h-4 w-4" /> {t('verify_page.credential_type')}
                 </p>
                 <p className="font-semibold text-lg">{verData.type}</p>
               </div>
@@ -80,7 +80,7 @@ export default function VerifyQR() {
 
               <div>
                 <p className="text-sm text-muted-foreground mb-1 flex items-center gap-2">
-                  <Building2 className="h-4 w-4" /> Issuing Authority
+                  <Building2 className="h-4 w-4" /> {t('verify_page.issuing_authority')}
                 </p>
                 <p className="font-medium">{verData.issuerName}</p>
               </div>
@@ -88,7 +88,7 @@ export default function VerifyQR() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm text-muted-foreground mb-1 flex items-center gap-2">
-                    <Calendar className="h-4 w-4" /> Issue Date
+                    <Calendar className="h-4 w-4" /> {t('verify_page.issue_date')}
                   </p>
                   <p className="font-medium">
                     {new Date(verData.issueDate).toLocaleDateString(isRTL ? 'ar-SA' : 'en-US')}
@@ -96,7 +96,7 @@ export default function VerifyQR() {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground mb-1 flex items-center gap-2">
-                    <Calendar className="h-4 w-4" /> Expiry Date
+                    <Calendar className="h-4 w-4" /> {t('verify_page.expiry_date')}
                   </p>
                   <p className="font-medium">
                     {new Date(verData.expiryDate).toLocaleDateString(isRTL ? 'ar-SA' : 'en-US')}
@@ -106,14 +106,14 @@ export default function VerifyQR() {
             </CardContent>
             
             <div className="bg-muted/30 p-4 text-center text-xs text-muted-foreground border-t border-border">
-              Verified on {new Date().toLocaleString()}
+              {t('verify_page.verified_on')} {new Date().toLocaleString(isRTL ? 'ar-SA' : 'en-US')}
             </div>
           </Card>
         )}
       </div>
       
       <div className="mt-8 text-center text-xs text-muted-foreground">
-        Powered by HealthDocs &copy; {new Date().getFullYear()}
+        {t('verify_page.powered_by')} &copy; {new Date().getFullYear()}
       </div>
     </div>
   );

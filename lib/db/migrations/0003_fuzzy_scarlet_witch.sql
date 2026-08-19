@@ -1,0 +1,3 @@
+ALTER TABLE "credentials" ADD COLUMN "row_version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "credentials_active_file_url_unique" ON "credentials" USING btree ("file_url") WHERE "credentials"."deleted_at" is null and "credentials"."file_url" is not null;--> statement-breakpoint
+ALTER TABLE "users" ADD CONSTRAINT "users_totp_enabled_requires_secret" CHECK (not "users"."totp_enabled" or "users"."totp_secret" is not null);

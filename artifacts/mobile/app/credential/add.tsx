@@ -88,7 +88,12 @@ export default function AddCredentialScreen() {
       const presign = await requestUpload.mutateAsync({
         data: { name: file.name, size: blob.size, contentType },
       });
-      await uploadFileToStorage(presign.uploadURL, blob, contentType);
+      await uploadFileToStorage(
+        presign.uploadURL,
+        blob,
+        contentType,
+        presign.requiredHeaders,
+      );
       setFileUrl(presign.objectPath);
       setFileIsPdf(contentType.toLowerCase() === 'application/pdf');
       const res = await extractOcr.mutateAsync({

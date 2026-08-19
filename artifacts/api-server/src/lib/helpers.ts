@@ -11,7 +11,7 @@ import {
   type CredentialPolicyRow,
   type Department,
 } from "@workspace/db";
-import { eq, inArray, and } from "drizzle-orm";
+import { eq, inArray, and, isNull } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
 // Dates & status
@@ -101,9 +101,10 @@ export function serializeCredential(c: CredentialRow, employee?: User | null) {
     qrToken: c.qrToken,
     tags: c.tags ?? [],
     notes: c.notes,
-    verificationUrl: `/health-docs/verify/${c.qrToken}`,
+    verificationUrl: `/verify/${c.qrToken}`,
     confidence: c.confidence,
     isVerified: c.isVerified,
+    version: c.rowVersion,
     createdAt: c.createdAt.toISOString(),
     updatedAt: c.updatedAt.toISOString(),
   };
@@ -112,6 +113,26 @@ export function serializeCredential(c: CredentialRow, employee?: User | null) {
 // ---------------------------------------------------------------------------
 // Scoping
 // ---------------------------------------------------------------------------
+
+export function isUserInScope(current: User, target: User): boolean {
+  if (!current.isActive) return false;
+  if (current.id === target.id || current.role === "system_admin") return true;
+  if (current.role === "hospital_admin") {
+    return current.facilityId === target.facilityId;
+  }
+  if (current.role === "department_manager") {
+    return (
+      current.facilityId === target.facilityId &&
+      current.departmentId != null &&
+      current.departmentId === target.departmentId
+    );
+  }
+  return (
+    current.role === "supervisor" &&
+    current.facilityId === target.facilityId &&
+    target.supervisorId === current.id
+  );
+}
 
 export async function getScopedUsers(current: User): Promise<User[]> {
   if (current.role === "system_admin") {
@@ -148,7 +169,12 @@ export async function getCredentialsFor(
   return db
     .select()
     .from(credentialsTable)
-    .where(inArray(credentialsTable.employeeId, userIds));
+    .where(
+      and(
+        inArray(credentialsTable.employeeId, userIds),
+        isNull(credentialsTable.deletedAt),
+      ),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +198,11 @@ export function missingTypesFor(
   const owned = new Set(
     creds
       .filter(
-        (c) => c.employeeId === u.id && computeStatus(c.expiryDate) !== "expired",
+        (c) =>
+          c.employeeId === u.id &&
+          c.deletedAt == null &&
+          c.isVerified &&
+          computeStatus(c.expiryDate) !== "expired",
       )
       .map((c) => c.type as string),
   );
@@ -198,7 +228,9 @@ export function computeEmployeeStats(
   allCreds: CredentialRow[],
   policies: CredentialPolicyRow[],
 ): EmployeeStats {
-  const creds = allCreds.filter((c) => c.employeeId === u.id);
+  const creds = allCreds.filter(
+    (c) => c.employeeId === u.id && c.deletedAt == null,
+  );
   const expiredCount = creds.filter(
     (c) => computeStatus(c.expiryDate) === "expired",
   ).length;
@@ -207,9 +239,14 @@ export function computeEmployeeStats(
   ).length;
   const missingTypes = missingTypesFor(u, creds, policies);
   const missingCount = missingTypes.length;
-  const ok = creds.length - expiredCount;
-  const denom = creds.length + missingCount;
-  const complianceRate = denom === 0 ? 100 : Math.round((ok / denom) * 100);
+  const requiredTypes = new Set(
+    policies.filter((p) => policyAppliesTo(p, u)).map((p) => p.credentialType),
+  );
+  const satisfiedRequirements = requiredTypes.size - missingCount;
+  const complianceRate =
+    requiredTypes.size === 0
+      ? 100
+      : Math.round((satisfiedRequirements / requiredTypes.size) * 100);
   return {
     complianceRate,
     totalCredentials: creds.length,
@@ -218,6 +255,54 @@ export function computeEmployeeStats(
     missingCount,
     isAtRisk: expiredCount > 0 || missingCount > 0,
     missingTypes,
+  };
+}
+
+/**
+ * Fields whose contents are evidence used to verify a credential. Changing
+ * any of them invalidates an earlier verification decision. Notes and tags
+ * are deliberately excluded because they are internal organization metadata.
+ */
+const MATERIAL_CREDENTIAL_FIELDS = [
+  "type",
+  "customTypeName",
+  "customTypeNameAr",
+  "holderName",
+  "holderNameAr",
+  "issuerName",
+  "issuerNameAr",
+  "certificateNumber",
+  "issueDate",
+  "expiryDate",
+  "fileUrl",
+  "fileType",
+] as const;
+
+export function hasMaterialCredentialChange(
+  current: CredentialRow,
+  patch: Record<string, unknown>,
+): boolean {
+  return MATERIAL_CREDENTIAL_FIELDS.some(
+    (field) =>
+      Object.prototype.hasOwnProperty.call(patch, field) &&
+      patch[field] !== current[field],
+  );
+}
+
+export function evaluateCredentialVerificationChange(
+  current: CredentialRow,
+  patch: Record<string, unknown>,
+  requestedVerification: boolean | undefined,
+): {
+  materialChange: boolean;
+  conflictsWithVerification: boolean;
+  nextVerification: boolean | undefined;
+} {
+  const materialChange = hasMaterialCredentialChange(current, patch);
+  return {
+    materialChange,
+    conflictsWithVerification: materialChange && requestedVerification === true,
+    nextVerification: materialChange ? false : requestedVerification,
   };
 }
 
@@ -277,7 +362,12 @@ export async function syncExpiryNotifications(user: User): Promise<void> {
   const creds = await db
     .select()
     .from(credentialsTable)
-    .where(eq(credentialsTable.employeeId, user.id));
+    .where(
+      and(
+        eq(credentialsTable.employeeId, user.id),
+        isNull(credentialsTable.deletedAt),
+      ),
+    );
 
   if (creds.length === 0) return;
 

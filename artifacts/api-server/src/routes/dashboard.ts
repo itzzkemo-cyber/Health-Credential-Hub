@@ -46,12 +46,12 @@ router.get("/dashboard/stats", async (req, res) => {
 
   let missingCredentials = 0;
   let atRiskEmployees = 0;
-  let okCreds = 0;
+  let complianceRateSum = 0;
   for (const u of scoped) {
     const s = computeEmployeeStats(u, creds, policies);
     missingCredentials += s.missingCount;
     if (s.isAtRisk) atRiskEmployees += 1;
-    okCreds += s.totalCredentials - s.expiredCount;
+    complianceRateSum += s.complianceRate;
   }
   const expiredCredentials = creds.filter(
     (c) => computeStatus(c.expiryDate) === "expired",
@@ -59,8 +59,8 @@ router.get("/dashboard/stats", async (req, res) => {
   const expiringCredentials = creds.filter(
     (c) => computeStatus(c.expiryDate) === "expiring_soon",
   ).length;
-  const denom = creds.length + missingCredentials;
-  const complianceRate = denom === 0 ? 100 : Math.round((okCreds / denom) * 100);
+  const complianceRate =
+    scoped.length === 0 ? 100 : Math.round(complianceRateSum / scoped.length);
 
   const upcoming = creds
     .filter((c) => {

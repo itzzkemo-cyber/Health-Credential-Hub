@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { logger } from "../logger";
 import { syncExpiryNotifications } from "../helpers";
 import { dispatchPendingExpiryEmails, sendWeeklyDigests } from "./dispatch";
+import { isEmailConfigured } from "./sender";
 
 const HOURLY = 60 * 60 * 1000;
 const RIYADH_OFFSET_MS = 3 * 3600_000; // Asia/Riyadh is UTC+3 year-round
@@ -18,8 +19,10 @@ let running = false;
  *    (per-manager weekly gate lives in the ledger).
  */
 export function startEmailScheduler(): void {
-  if (process.env["EMAIL_ALERTS_DISABLED"] === "1") {
-    logger.warn("EMAIL_ALERTS_DISABLED=1 — email scheduler not started");
+  if (!isEmailConfigured()) {
+    logger.warn(
+      "Email delivery is not explicitly enabled and configured — scheduler not started",
+    );
     return;
   }
   setTimeout(() => void tick(), 15_000).unref();

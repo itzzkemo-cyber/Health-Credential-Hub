@@ -7,6 +7,11 @@
  */
 
 export interface CredentialUpdate {
+  /**
+     * Required whole-number version for every update; stale versions return HTTP 409.
+     * @minimum 1
+     */
+  expectedVersion: number;
   type?: string;
   customTypeName?: string;
   customTypeNameAr?: string;
@@ -23,4 +28,5 @@ export interface CredentialUpdate {
   tags?: string[];
   notes?: string;
   verificationUrl?: string;
+  isVerified?: boolean;
 }

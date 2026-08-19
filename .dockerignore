@@ -1,0 +1,17 @@
+.git
+.github
+.agents
+.codex
+.env
+.env.*
+!.env.example
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/.cache
+**/.pnpm-store
+**/*.log
+artifacts/mobile/static-build
+attached_assets
+security_best_practices_report.md

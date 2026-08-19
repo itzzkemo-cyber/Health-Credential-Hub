@@ -63,7 +63,7 @@ export default function Policies() {
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.credentialType || formData.roles.length === 0) {
-      toast.error("Please fill all required fields");
+      toast.error(t('policies.required_fields'));
       return;
     }
 
@@ -134,7 +134,7 @@ export default function Policies() {
                     <div>
                       <Badge variant="outline" className="mb-2 bg-muted/50 font-mono text-xs">{policy.credentialType.replace(/_/g, ' ')}</Badge>
                       <h3 className="font-bold text-lg leading-tight">
-                        {policy.isRequired ? 'إلزامي لـ' : 'اختياري لـ'}
+                        {policy.isRequired ? t('policies.required_for') : t('policies.optional_for')}
                         {' '}
                         {dept ? (language === 'ar' ? dept.nameAr : dept.name) : t('common.all')}
                       </h3>
@@ -170,7 +170,7 @@ export default function Policies() {
                 <Label>{t('policies.type')}</Label>
                 <Select value={formData.credentialType} onValueChange={(v) => setFormData({ ...formData, credentialType: v })}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select type" />
+                    <SelectValue placeholder={t('policies.select_type')} />
                   </SelectTrigger>
                   <SelectContent>
                     {CREDENTIAL_TYPES.map(t => (
@@ -187,7 +187,7 @@ export default function Policies() {
                   onValueChange={(v) => setFormData({ ...formData, departmentId: v === "all" ? null : parseInt(v) })}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="All Departments" />
+                    <SelectValue placeholder={t('policies.all_departments')} />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">{t('common.all')}</SelectItem>

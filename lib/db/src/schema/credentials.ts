@@ -8,7 +8,9 @@ import {
   jsonb,
   real,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -61,6 +63,11 @@ export const credentialsTable = pgTable(
     notes: text("notes"),
     confidence: real("confidence"),
     isVerified: boolean("is_verified").notNull().default(false),
+    rowVersion: integer("row_version").notNull().default(1),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: integer("deleted_by").references(() => usersTable.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -71,11 +78,22 @@ export const credentialsTable = pgTable(
   (table) => [
     index("credentials_employee_idx").on(table.employeeId),
     index("credentials_expiry_idx").on(table.expiryDate),
+    index("credentials_deleted_at_idx").on(table.deletedAt),
+    uniqueIndex("credentials_active_file_url_unique")
+      .on(table.fileUrl)
+      .where(sql`${table.deletedAt} is null and ${table.fileUrl} is not null`),
   ],
 );
 
 export const insertCredentialSchema = createInsertSchema(
   credentialsTable,
-).omit({ id: true, createdAt: true, updatedAt: true });
+).omit({
+  id: true,
+  rowVersion: true,
+  deletedAt: true,
+  deletedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
 export type InsertCredential = z.infer<typeof insertCredentialSchema>;
 export type CredentialRow = typeof credentialsTable.$inferSelect;

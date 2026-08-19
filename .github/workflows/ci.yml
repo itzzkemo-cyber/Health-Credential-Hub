@@ -39,6 +39,7 @@ jobs:
         run: |
           pnpm --filter @workspace/api-spec run codegen
           git diff --exit-code -- lib/api-client-react/src/generated lib/api-zod/src/generated
+          test -z "$(git status --porcelain --untracked-files=all -- lib/api-client-react/src/generated lib/api-zod/src/generated)"
 
       - name: Typecheck
         run: pnpm run typecheck

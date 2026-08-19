@@ -1,20 +1,27 @@
+
 import { Readable } from "stream";
 import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, credentialsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, credentialsTable, uploadGrantsTable } from "@workspace/db";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { requireAuth, getUser, MANAGER_ROLES } from "../lib/auth";
-import { getScopedUsers } from "../lib/helpers";
+import { getScopedUsers, logAudit } from "../lib/helpers";
 import { rateLimit } from "../lib/rateLimit";
 import { ObjectPermission } from "../lib/objectAcl";
 import {
   ObjectNotFoundError,
   ObjectStorageService,
 } from "../lib/objectStorage";
+import {
+  ALLOWED_UPLOAD_CONTENT_TYPE,
+  findActiveUploadGrant,
+  MAX_UPLOAD_BYTES,
+  UPLOAD_GRANT_TTL_MS,
+} from "../lib/uploadSecurity";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -60,14 +67,14 @@ router.post(
 
     // Server-side upload policy, mirroring the client cap: credential
     // documents are images or PDFs, at most 8 MB (the OCR provider cap).
-    const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
     // Explicit subtype allowlist: image/svg+xml is deliberately excluded —
     // SVG can carry scripts, and stored documents are viewable in-browser.
-    const ALLOWED_CONTENT_TYPE =
-      /^(image\/(png|jpe?g|webp|gif|avif|heic|heif)|application\/pdf)$/;
     if (
+      parsed.data.size <= 0 ||
       parsed.data.size > MAX_UPLOAD_BYTES ||
-      !ALLOWED_CONTENT_TYPE.test(parsed.data.contentType)
+      !ALLOWED_UPLOAD_CONTENT_TYPE.test(parsed.data.contentType) ||
+      parsed.data.name.length > 255 ||
+      /[\u0000-\u001f\u007f]/.test(parsed.data.name)
     ) {
       res.status(400).json({ error: "Unsupported file type or size" });
       return;
@@ -76,14 +83,25 @@ router.post(
     try {
       const { name, size, contentType } = parsed.data;
 
-      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      const { uploadURL, requiredHeaders } =
+        await objectStorageService.getObjectEntityUploadURL(contentType.toLowerCase());
       const objectPath =
         objectStorageService.normalizeObjectEntityPath(uploadURL);
+      const user = getUser(req);
+      await db.insert(uploadGrantsTable).values({
+        objectPath,
+        requestedBy: user.id,
+        fileName: name,
+        declaredSize: size,
+        declaredContentType: contentType.toLowerCase(),
+        expiresAt: new Date(Date.now() + UPLOAD_GRANT_TTL_MS),
+      });
 
       res.json(
         RequestUploadUrlResponse.parse({
           uploadURL,
           objectPath,
+          requiredHeaders,
           metadata: { name, size, contentType },
         }),
       );
@@ -153,31 +171,63 @@ router.get(
         await objectStorageService.getObjectEntityFile(objectPath);
 
       const user = getUser(req);
-      const isOwner = await objectStorageService.canAccessObjectEntity({
+      const hasObjectAcl = await objectStorageService.canAccessObjectEntity({
         userId: String(user.id),
         objectFile,
         requestedPermission: ObjectPermission.READ,
       });
+      const linked = await db
+        .select({ employeeId: credentialsTable.employeeId })
+        .from(credentialsTable)
+        .where(
+          and(
+            eq(credentialsTable.fileUrl, objectPath),
+            isNull(credentialsTable.deletedAt),
+          ),
+        );
+      const pendingGrant =
+        linked.length === 0
+          ? await findActiveUploadGrant(objectPath, user.id)
+          : null;
+      const isOwner =
+        hasObjectAcl &&
+        (linked.some((entry) => entry.employeeId === user.id) ||
+          pendingGrant != null);
       let canManage = false;
       if (!isOwner && MANAGER_ROLES.includes(user.role)) {
-        const linked = await db
-          .select({ employeeId: credentialsTable.employeeId })
-          .from(credentialsTable)
-          .where(eq(credentialsTable.fileUrl, objectPath));
         const scopedIds = new Set(
           (await getScopedUsers(user)).map((employee) => employee.id),
         );
         canManage = linked.some((entry) => scopedIds.has(entry.employeeId));
       }
       if (!isOwner && !canManage) {
-        res.status(403).json({ error: "Forbidden" });
+        // Retained objects with no active credential link must not be
+        // distinguishable from absent documents after soft deletion.
+        const notFound = linked.length === 0 && pendingGrant == null;
+        res.status(notFound ? 404 : 403).json({
+          error: notFound ? "Object not found" : "Forbidden",
+        });
         return;
       }
 
       const response = await objectStorageService.downloadObject(objectFile);
 
+      await logAudit(
+        user,
+        "Viewed credential document",
+        "عرض ملف وثيقة",
+        "Private credential document",
+        "ملف وثيقة خاص",
+        undefined,
+        req.ip,
+      );
+
       res.status(response.status);
       response.headers.forEach((value, key) => res.setHeader(key, value));
+      // This route is always authenticated/private even if legacy object
+      // metadata is inconsistent. Never let such a response enter a shared or
+      // reusable browser cache.
+      res.setHeader("Cache-Control", "private, no-store, max-age=0");
       hardenServedObjectHeaders(res);
 
       if (response.body) {

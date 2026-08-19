@@ -8,7 +8,7 @@ import {
   USER_ROLES,
   type User,
 } from "@workspace/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import {
   requireAuth,
   requireRole,
@@ -242,7 +242,12 @@ router.get("/employees/:id", async (req, res) => {
   const creds = await db
     .select()
     .from(credentialsTable)
-    .where(eq(credentialsTable.employeeId, id));
+    .where(
+      and(
+        eq(credentialsTable.employeeId, id),
+        isNull(credentialsTable.deletedAt),
+      ),
+    );
   const policies = await getPolicies(target.facilityId);
   const stats = computeEmployeeStats(target, creds, policies);
   const departments = await getDepartments(target.facilityId);
@@ -372,7 +377,12 @@ router.patch("/employees/:id", requireRole(...MANAGER_ROLES), async (req, res) =
     }
     patch.supervisorId = supervisorId;
   }
-  if (typeof body.isActive === "boolean") patch.isActive = body.isActive;
+  if (typeof body.isActive === "boolean") {
+    patch.isActive = body.isActive;
+    // Revoke unconditionally when an administrator submits an account-state
+    // change. This is safe for idempotent retries and closes stale-write races.
+    patch.sessionVersion = sql`${usersTable.sessionVersion} + 1`;
+  }
   const updated = await db
     .update(usersTable)
     .set(patch)
@@ -443,7 +453,12 @@ async function setActive(
   }
   const updated = await db
     .update(usersTable)
-    .set({ isActive })
+    .set({
+      isActive,
+      // Activation must revoke old tokens too; inactive accounts may still
+      // have an otherwise-valid JWT that must not revive after reactivation.
+      sessionVersion: sql`${usersTable.sessionVersion} + 1`,
+    })
     .where(eq(usersTable.id, id))
     .returning();
   const result = updated[0];

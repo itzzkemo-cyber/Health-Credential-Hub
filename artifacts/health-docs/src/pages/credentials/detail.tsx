@@ -134,7 +134,7 @@ export default function CredentialDetail() {
             size="icon"
             onClick={() => setLocation("/credentials")}
             aria-label={t("common.back")}
-            className="shrink-0"
+            className="h-11 w-11 shrink-0"
           >
             {isRTL ? (
               <ArrowRight className="h-5 w-5" />

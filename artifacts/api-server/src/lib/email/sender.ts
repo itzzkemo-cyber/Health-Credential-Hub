@@ -1,23 +1,18 @@
 /**
- * Email provider adapter — Resend via the Replit-managed connector.
+ * Email provider adapter — Resend's HTTPS API.
  *
- * `connectors.proxy()` injects the managed API credential server-side; this
- * process never handles a token, so there is nothing to configure locally
- * and `isEmailConfigured()` is statically true. If the connector is later
- * detached or revoked, the proxy answers 401/403 and `sendEmail` surfaces
- * that as `EmailNotConfiguredError`.
+ * RESEND_API_KEY is injected at runtime from the hosting secret manager and
+ * is never exposed to the browser or written to application logs.
  *
  * CONTRACT (relied on by dispatch.ts and the forgot-password route):
  * - `EmailNotConfiguredError` = configuration/authorization-class failure
- *   (revoked connector, restricted key, unverified sender domain). Dispatch
+ *   (revoked key, restricted key, unverified sender domain). Dispatch
  *   releases the ledger claim for those, so alerts stay pending and send
  *   normally once the configuration is fixed.
  * - Any other error = genuine delivery failure (invalid recipient, provider
  *   rejection). Those consume the one allowed attempt and are recorded as
  *   `failed` with the error message.
  */
-import { ReplitConnectors } from "@replit/connectors-sdk";
-
 export interface OutgoingEmail {
   to: string;
   subject: string;
@@ -32,12 +27,8 @@ export class EmailNotConfiguredError extends Error {
 }
 
 /**
- * Sender identity. Resend's shared onboarding sender works with the managed
- * connector out of the box; set EMAIL_FROM to switch to a custom verified
- * domain later (e.g. "وثائقي الصحي <no-reply@company.sa>").
+ * Sender identity must use a domain verified in the user's Resend account.
  */
-const FROM = process.env["EMAIL_FROM"] ?? "HealthDocs <onboarding@resend.dev>";
-
 /**
  * Domains used by seeded demo accounts and e2e test users. They must never
  * receive real mail: the addresses are fabricated, would bounce (or land in
@@ -51,29 +42,43 @@ export function isFixtureRecipient(email: string): boolean {
   return FIXTURE_EMAIL_DOMAINS.includes(domain);
 }
 
-const connectors = new ReplitConnectors();
-
 export function isEmailConfigured(): boolean {
-  // The Resend connector is attached; credentials are injected by the proxy.
-  return true;
+  // Delivery is fail-closed: operators must explicitly opt in with `0` in
+  // addition to supplying both secrets. Missing or malformed flags stay off.
+  return Boolean(
+    process.env.EMAIL_ALERTS_DISABLED === "0" &&
+      process.env.RESEND_API_KEY?.trim() &&
+      process.env.EMAIL_FROM?.trim(),
+  );
 }
 
 export async function sendEmail(email: OutgoingEmail): Promise<void> {
-  const res = await connectors.proxy("resend", "/emails", {
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.EMAIL_FROM;
+  if (!isEmailConfigured() || !apiKey || !from) {
+    throw new EmailNotConfiguredError();
+  }
+  const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
-    body: {
-      from: FROM,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from,
       to: [email.to],
       subject: email.subject,
       html: email.html,
-    },
+    }),
+    signal: AbortSignal.timeout(30_000),
   });
   if (res.ok) return;
-  const detail = (await res.text().catch(() => "")).slice(0, 300);
   if (res.status === 401 || res.status === 403) {
     throw new EmailNotConfiguredError(
-      `Resend rejected the sender configuration (HTTP ${res.status}): ${detail}`,
+      `Resend rejected the sender configuration (HTTP ${res.status})`,
     );
   }
-  throw new Error(`Resend delivery failed (HTTP ${res.status}): ${detail}`);
+  // Provider bodies can repeat recipient addresses or internal request detail;
+  // keep persisted/logged failures limited to a status classification.
+  throw new Error(`Resend delivery failed (HTTP ${res.status})`);
 }

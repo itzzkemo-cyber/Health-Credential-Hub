@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { getAuthUser } from "@/lib/auth";
 import { useLanguage } from "@/lib/language-context";
 import { cn } from "@/lib/utils";
@@ -18,10 +19,11 @@ export default function CredentialsList() {
   const [search, setSearch] = useState("");
   const isEmployee = getAuthUser()?.role === "employee";
 
-  const { data: response, isLoading } = useListCredentials({
-    search: search || undefined,
-    pageSize: 50,
-  });
+  const { data: response, error, isError, isLoading, refetch } =
+    useListCredentials({
+      search: search || undefined,
+      pageSize: 50,
+    });
 
   return (
     <div className="space-y-5 animate-in fade-in duration-500 md:space-y-6">
@@ -76,6 +78,8 @@ export default function CredentialsList() {
           Array.from({ length: 4 }).map((_, index) => (
             <Skeleton key={index} className="h-36 w-full rounded-xl sm:h-28" />
           ))
+        ) : isError ? (
+          <QueryErrorState error={error} onRetry={() => void refetch()} />
         ) : response?.data?.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center px-5 py-12 text-center">

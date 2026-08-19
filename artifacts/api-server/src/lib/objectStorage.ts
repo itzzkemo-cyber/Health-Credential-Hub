@@ -10,25 +10,45 @@ import {
   setObjectAclPolicy,
 } from './objectAcl';
 
-const REPLIT_SIDECAR_ENDPOINT = 'http://127.0.0.1:1106';
-
+// Uses Google Application Default Credentials. On Cloud Run this is the
+// attached service account, so no long-lived JSON key is stored or mounted.
 export const objectStorageClient = new Storage({
-  credentials: {
-    audience: 'replit',
-    subject_token_type: 'access_token',
-    token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-    type: 'external_account',
-    credential_source: {
-      url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-      format: {
-        type: 'json',
-        subject_token_field_name: 'access_token',
-      },
-    },
-    universe_domain: 'googleapis.com',
-  },
-  projectId: '',
+  projectId: process.env.GOOGLE_CLOUD_PROJECT,
+  ...(process.env.STORAGE_API_ENDPOINT
+    ? { apiEndpoint: process.env.STORAGE_API_ENDPOINT }
+    : {}),
 });
+
+export const UPLOAD_REQUIRED_HEADERS: Readonly<Record<string, string>> =
+  Object.freeze({
+    'x-goog-if-generation-match': '0',
+  });
+
+function normalizeStorageRoot(path: string): string {
+  return `/${path.trim().replace(/^\/+|\/+$/g, '')}`;
+}
+
+export function validateStoragePathIsolation(): void {
+  const privatePath = process.env.PRIVATE_OBJECT_DIR?.trim();
+  const publicPaths = process.env.PUBLIC_OBJECT_SEARCH_PATHS?.split(',')
+    .map((path) => path.trim())
+    .filter(Boolean) ?? [];
+  if (!privatePath || publicPaths.length === 0) return;
+
+  const privateRoot = normalizeStorageRoot(privatePath);
+  for (const rawPublicPath of publicPaths) {
+    const publicRoot = normalizeStorageRoot(rawPublicPath);
+    if (
+      publicRoot === privateRoot ||
+      publicRoot.startsWith(`${privateRoot}/`) ||
+      privateRoot.startsWith(`${publicRoot}/`)
+    ) {
+      throw new Error(
+        'PUBLIC_OBJECT_SEARCH_PATHS must not overlap PRIVATE_OBJECT_DIR',
+      );
+    }
+  }
+}
 
 export class ObjectNotFoundError extends Error {
   constructor() {
@@ -102,7 +122,9 @@ export class ObjectStorageService {
     const headers: Record<string, string> = {
       'Content-Type':
         (metadata.contentType as string) || 'application/octet-stream',
-      'Cache-Control': `${isPublic ? 'public' : 'private'}, max-age=${cacheTtlSec}`,
+      'Cache-Control': isPublic
+        ? `public, max-age=${cacheTtlSec}`
+        : 'private, no-store, max-age=0',
     };
     if (metadata.size) {
       headers['Content-Length'] = String(metadata.size);
@@ -111,7 +133,10 @@ export class ObjectStorageService {
     return new Response(webStream, { headers });
   }
 
-  async getObjectEntityUploadURL(): Promise<string> {
+  async getObjectEntityUploadURL(contentType: string): Promise<{
+    uploadURL: string;
+    requiredHeaders: Record<string, string>;
+  }> {
     const privateObjectDir = this.getPrivateObjectDir();
     if (!privateObjectDir) {
       throw new Error(
@@ -125,12 +150,18 @@ export class ObjectStorageService {
 
     const { bucketName, objectName } = parseObjectPath(fullPath);
 
-    return signObjectURL({
-      bucketName,
-      objectName,
-      method: 'PUT',
-      ttlSec: 900,
+    const file = objectStorageClient.bucket(bucketName).file(objectName);
+    const [signedUrl] = await file.getSignedUrl({
+      version: 'v4',
+      action: 'write',
+      expires: Date.now() + 15 * 60 * 1000,
+      contentType,
+      extensionHeaders: UPLOAD_REQUIRED_HEADERS,
     });
+    return {
+      uploadURL: signedUrl,
+      requiredHeaders: { ...UPLOAD_REQUIRED_HEADERS },
+    };
   }
 
   async getObjectEntityFile(objectPath: string): Promise<File> {
@@ -160,11 +191,18 @@ export class ObjectStorageService {
   }
 
   normalizeObjectEntityPath(rawPath: string): string {
-    if (!rawPath.startsWith('https://storage.googleapis.com/')) {
+    let url: URL;
+    try {
+      url = new URL(rawPath);
+    } catch {
       return rawPath;
     }
-
-    const url = new URL(rawPath);
+    const isGoogleStorageHost =
+      url.protocol === 'https:' &&
+      (url.hostname === 'storage.googleapis.com' ||
+        url.hostname.endsWith('.storage.googleapis.com') ||
+        /^storage\.[a-z0-9-]+\.rep\.googleapis\.com$/.test(url.hostname));
+    if (!isGoogleStorageHost) return rawPath;
     const rawObjectPath = url.pathname;
 
     let objectEntityDir = this.getPrivateObjectDir();
@@ -230,45 +268,4 @@ function parseObjectPath(path: string): {
     bucketName,
     objectName,
   };
-}
-
-async function signObjectURL({
-  bucketName,
-  objectName,
-  method,
-  ttlSec,
-}: {
-  bucketName: string;
-  objectName: string;
-  method: 'GET' | 'PUT' | 'DELETE' | 'HEAD';
-  ttlSec: number;
-}): Promise<string> {
-  const request = {
-    bucket_name: bucketName,
-    object_name: objectName,
-    method,
-    expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
-  };
-  const response = await fetch(
-    `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-      signal: AbortSignal.timeout(30_000),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`,
-    );
-  }
-
-  const { signed_url: signedURL } = (await response.json()) as {
-    signed_url: string;
-  };
-  return signedURL;
 }

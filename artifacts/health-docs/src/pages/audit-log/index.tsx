@@ -106,7 +106,7 @@ export default function AuditLog() {
                         <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
                           <User className="h-3 w-3 text-primary" />
                         </div>
-                        <span className="font-medium text-sm">{log.userName || `User #${log.userId}`}</span>
+                        <span className="font-medium text-sm">{log.userName || `${t('common.user')} #${log.userId}`}</span>
                       </div>
                     </TableCell>
                     <TableCell>

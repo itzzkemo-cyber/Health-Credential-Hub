@@ -79,6 +79,28 @@ describe("showcase API", () => {
     expect(afterDelete.total).toBe(3);
   });
 
+  it("restores synthetic credentials after the local showcase resets", async () => {
+    const initial = await (await request("/api/credentials")).json();
+    const credentialId = initial.data[0].id;
+
+    const deleteResponse = await request(
+      `/api/credentials/${credentialId}`,
+      "DELETE",
+    );
+    expect(deleteResponse.status).toBe(204);
+    expect((await (await request("/api/credentials")).json()).total).toBe(2);
+
+    resetShowcaseApiState();
+
+    const restored = await (await request("/api/credentials")).json();
+    expect(restored.total).toBe(3);
+    expect(
+      restored.data.some(
+        (item: { id: number }) => item.id === credentialId,
+      ),
+    ).toBe(true);
+  });
+
   it("simulates OCR without contacting an external provider", async () => {
     const response = await request("/api/credentials/ocr", "POST", {
       fileUrl: "/objects/showcase/test",

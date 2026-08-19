@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -24,6 +24,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -70,6 +71,7 @@ export default function CredentialNew() {
   const [fileKind, setFileKind] = useState<"pdf" | "image" | "">("");
   const [fileName, setFileName] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [ocrConsent, setOcrConsent] = useState(false);
 
   const extractOcr = useExtractCredentialOcr();
   const createCredential = useCreateCredential();
@@ -165,7 +167,10 @@ export default function CredentialNew() {
         const upload = await fetch(granted.uploadURL, {
           method: "PUT",
           body: prepared.blob,
-          headers: { "Content-Type": prepared.contentType },
+          headers: {
+            ...granted.requiredHeaders,
+            "Content-Type": prepared.contentType,
+          },
         });
         if (!upload.ok)
           throw new Error(`Storage upload failed (${upload.status})`);
@@ -177,7 +182,13 @@ export default function CredentialNew() {
       setFileName(file.name);
 
       if (!useSmartScan) {
-        toast.success(t("credential.upload_success"));
+        toast.success(
+          t(
+            isShowcaseMode
+              ? "credential.showcase_file_selected"
+              : "credential.upload_success",
+          ),
+        );
         return;
       }
 
@@ -220,13 +231,7 @@ export default function CredentialNew() {
           toast.success(t("credential.create_success"));
           setLocation(`/credentials/${result.id}`);
         },
-        onError: (error) => {
-          toast.error(
-            error instanceof Error
-              ? error.message
-              : t("credential.create_failed"),
-          );
-        },
+        onError: () => toast.error(t("credential.create_failed")),
       },
     );
   };
@@ -242,7 +247,7 @@ export default function CredentialNew() {
           size="icon"
           onClick={() => setLocation("/credentials")}
           aria-label={t("common.back")}
-          className="shrink-0"
+          className="h-11 w-11 shrink-0"
         >
           {isRTL ? (
             <ArrowRight className="h-5 w-5" />
@@ -275,7 +280,13 @@ export default function CredentialNew() {
           className="mt-0.5 h-5 w-5 shrink-0 text-primary"
           aria-hidden="true"
         />
-        <p className="leading-6">{t("credential.private_upload_notice")}</p>
+        <p className="leading-6">
+          {t(
+            isShowcaseMode
+              ? "credential.showcase_upload_notice"
+              : "credential.private_upload_notice",
+          )}
+        </p>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -291,13 +302,45 @@ export default function CredentialNew() {
         </TabsList>
 
         <TabsContent value="smart" className="space-y-4">
-          <div className="flex items-start gap-3 rounded-xl border border-amber-300/60 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200">
+          <div
+            className="flex items-start gap-3 rounded-xl border border-amber-300/60 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200"
+            id="ocr-processing-disclosure"
+          >
             <Info className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
-            <p className="leading-6">{t("credential.ocr_review_notice")}</p>
+            {isShowcaseMode ? (
+              <p className="leading-6">
+                {t("credential.showcase_ocr_review_notice")}
+              </p>
+            ) : (
+              <div className="space-y-2 leading-6">
+                <p className="font-medium">
+                  {t("credential.ocr_external_notice")}
+                </p>
+                <p>{t("credential.ocr_review_notice")}</p>
+              </div>
+            )}
           </div>
+          {!isShowcaseMode && (
+            <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4">
+              <Checkbox
+                id="ocr-processing-consent"
+                checked={ocrConsent}
+                onCheckedChange={(checked) => setOcrConsent(checked === true)}
+                aria-describedby="ocr-processing-disclosure"
+                className="mt-0.5"
+              />
+              <Label
+                htmlFor="ocr-processing-consent"
+                className="cursor-pointer text-sm leading-6"
+              >
+                {t("credential.ocr_consent")}
+              </Label>
+            </div>
+          )}
           <DocumentPicker
             id="smart-document-upload"
             busy={isFileBusy}
+            disabled={!isShowcaseMode && !ocrConsent}
             fileName={fileName}
             onChange={(event) => void handleFileUpload(event, true)}
             t={t}
@@ -378,6 +421,7 @@ export default function CredentialNew() {
                     onChange={(value) =>
                       setFormData({ ...formData, holderName: value })
                     }
+                    dir="ltr"
                     required
                   />
                   <FormField
@@ -396,6 +440,7 @@ export default function CredentialNew() {
                     onChange={(value) =>
                       setFormData({ ...formData, issuerName: value })
                     }
+                    dir="ltr"
                     required
                   />
                   <FormField
@@ -415,6 +460,7 @@ export default function CredentialNew() {
                       setFormData({ ...formData, certificateNumber: value })
                     }
                     required
+                    dir="ltr"
                     className="md:col-span-2"
                   />
                   <FormField
@@ -426,6 +472,7 @@ export default function CredentialNew() {
                       setFormData({ ...formData, issueDate: value })
                     }
                     required
+                    dir="ltr"
                   />
                   <FormField
                     id="expiry-date"
@@ -437,6 +484,7 @@ export default function CredentialNew() {
                       setFormData({ ...formData, expiryDate: value })
                     }
                     required
+                    dir="ltr"
                   />
                   <div className="space-y-2 md:col-span-2">
                     <Label htmlFor="credential-notes">
@@ -490,6 +538,7 @@ export default function CredentialNew() {
 function DocumentPicker({
   id,
   busy,
+  disabled = false,
   fileName,
   compact = false,
   onChange,
@@ -497,25 +546,32 @@ function DocumentPicker({
 }: {
   id: string;
   busy: boolean;
+  disabled?: boolean;
   fileName: string;
   compact?: boolean;
   onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   t: (key: string) => string;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
   return (
     <div
       className={cn(
         "rounded-2xl border-2 border-dashed border-primary/25 bg-primary/5 transition-colors hover:bg-primary/10",
+        disabled && "opacity-70 hover:bg-primary/5",
         compact ? "p-4" : "p-6 sm:p-10",
       )}
     >
       <input
         id={id}
+        ref={inputRef}
         type="file"
         className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
         accept={FILE_ACCEPT}
         onChange={onChange}
-        disabled={busy}
+        disabled={busy || disabled}
       />
       <div
         className={cn(
@@ -556,15 +612,15 @@ function DocumentPicker({
           </p>
         </div>
         <Button
-          asChild
+          type="button"
           variant={fileName ? "outline" : "default"}
           className="min-h-11 shrink-0"
+          disabled={busy || disabled}
+          onClick={() => inputRef.current?.click()}
         >
-          <label htmlFor={id} className={cn(busy && "pointer-events-none")}>
-            {fileName
-              ? t("credential.replace_file")
-              : t("credential.choose_file")}
-          </label>
+          {fileName
+            ? t("credential.replace_file")
+            : t("credential.choose_file")}
         </Button>
       </div>
     </div>

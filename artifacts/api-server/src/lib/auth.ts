@@ -112,24 +112,30 @@ export function getUser(req: Request): User {
 // may instead send the token from the login response as an
 // `Authorization: Bearer` header.
 //
-// SameSite must be "none": the Replit workspace preview embeds the app in a
-// cross-site iframe (replit.com → *.replit.dev), where browsers refuse to
-// store or send Strict/Lax cookies — login/logout would silently break there.
-// The Expo web client on its own dev origin needs cross-origin cookies too.
+// SameSite defaults to Lax in production because the web app and API share an
+// origin. Local cross-origin Expo development can opt into None explicitly.
 // CSRF is instead enforced by csrfOriginGuard (first-party Origin required on
-// cookie-authenticated mutations) plus the CORS allowlist; SameSite=None
-// requires the Secure attribute, which is fine because browsers always reach
-// this API over the HTTPS proxy (and localhost is exempt for dev tooling).
+// cookie-authenticated mutations) plus the CORS allowlist. SameSite=None
+// always requires the Secure attribute.
 
 export const SESSION_COOKIE = "healthdocs_session";
 // Keep in sync with the `expiresIn` used by signToken.
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function sessionCookieOptions(): CookieOptions {
+  const configured = process.env.SESSION_COOKIE_SAME_SITE?.toLowerCase();
+  if (configured && !["strict", "lax", "none"].includes(configured)) {
+    throw new Error("SESSION_COOKIE_SAME_SITE must be strict, lax, or none");
+  }
+  const sameSite = (configured ??
+    (process.env.NODE_ENV === "production" ? "lax" : "none")) as
+    | "strict"
+    | "lax"
+    | "none";
   return {
     httpOnly: true,
-    sameSite: "none",
-    secure: true,
+    sameSite,
+    secure: process.env.NODE_ENV === "production" || sameSite === "none",
     path: "/",
   };
 }

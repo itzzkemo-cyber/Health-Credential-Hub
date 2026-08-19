@@ -377,6 +377,13 @@ export async function customFetch<T = unknown>(
     headers.set("accept", DEFAULT_JSON_ACCEPT);
   }
 
+  // A non-simple marker required by the API on cookie-authenticated writes.
+  // Browsers cannot add it from a cross-site HTML form, which provides a
+  // second CSRF layer in addition to SameSite cookies and Origin checks.
+  if (!headers.has("x-requested-with")) {
+    headers.set("x-requested-with", "HealthCredentialHub");
+  }
+
   // Attach bearer token when an auth getter is configured and no
   // Authorization header has been explicitly provided.
   if (_authTokenGetter && !headers.has("authorization")) {

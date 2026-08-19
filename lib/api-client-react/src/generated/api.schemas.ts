@@ -23,11 +23,18 @@ export interface UploadUrlRequest {
   contentType: string;
 }
 
+/**
+ * Headers that must be included verbatim in the signed PUT request.
+ */
+export type UploadUrlResponseRequiredHeaders = {[key: string]: string};
+
 export interface UploadUrlResponse {
   /** Presigned GCS URL for PUT upload. */
   uploadURL: string;
   /** Normalized object path (e.g. `/objects/uploads/uuid`). Store this in your database. */
   objectPath: string;
+  /** Headers that must be included verbatim in the signed PUT request. */
+  requiredHeaders: UploadUrlResponseRequiredHeaders;
   metadata?: UploadUrlRequest;
 }
 
@@ -37,6 +44,12 @@ export interface ErrorEnvelope {
 
 export interface HealthStatus {
   status: string;
+}
+
+export interface ReadinessStatus {
+  status: string;
+  database: string;
+  objectStorage: string;
 }
 
 export interface LoginInput {
@@ -259,6 +272,11 @@ export interface Credential {
   /** @nullable */
   confidence?: number | null;
   isVerified?: boolean;
+  /**
+     * Monotonic whole-number record version used for verification concurrency control.
+     * @minimum 1
+     */
+  version: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -319,6 +337,11 @@ export interface CredentialInput {
 }
 
 export interface CredentialUpdate {
+  /**
+     * Required whole-number version for every update; stale versions return HTTP 409.
+     * @minimum 1
+     */
+  expectedVersion: number;
   type?: string;
   customTypeName?: string;
   customTypeNameAr?: string;
@@ -335,6 +358,7 @@ export interface CredentialUpdate {
   tags?: string[];
   notes?: string;
   verificationUrl?: string;
+  isVerified?: boolean;
 }
 
 export interface CredentialListResponse {

@@ -5,18 +5,42 @@ import { SESSION_COOKIE } from "./auth";
 // Expo dev origin. Used both by CORS (read permission) and by the CSRF guards
 // below (write permission). Requests without an Origin header (curl, native
 // mobile apps) are not browser CSRF vectors and are never blocked here.
+function normalizeOrigin(value: string): string | null {
+  const candidate = value.trim();
+  if (!candidate) return null;
+  try {
+    const url = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
 export const allowedOrigins = new Set<string>(
   [
-    ...(process.env.REPLIT_DOMAINS ?? "").split(","),
-    process.env.REPLIT_EXPO_DEV_DOMAIN ?? "",
+    ...(process.env.APP_ORIGINS ?? "").split(","),
   ]
-    .map((domain) => domain.trim())
-    .filter(Boolean)
-    .map((domain) => `https://${domain}`),
+    .map(normalizeOrigin)
+    .filter((origin): origin is string => origin !== null),
 );
 
-function isTrustedBrowserOrigin(origin: string): boolean {
+function isSameRequestOrigin(req: Request, origin: string): boolean {
+  const forwardedHost = req.headers["x-forwarded-host"];
+  const host = (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost)
+    ?.split(",", 1)[0]
+    .trim() || req.get("host");
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const protocol = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto)
+    ?.split(",", 1)[0]
+    .trim() || req.protocol;
+  if (!host || (protocol !== "http" && protocol !== "https")) return false;
+  return origin === `${protocol}://${host}`;
+}
+
+function isTrustedBrowserOrigin(req: Request, origin: string): boolean {
   if (allowedOrigins.has(origin)) return true;
+  if (isSameRequestOrigin(req, origin)) return true;
   // Local tooling (screenshots, browser tests) hits the app via localhost in
   // development only; production stays strict.
   if (process.env.NODE_ENV !== "production") {
@@ -43,8 +67,16 @@ function isSafeMethod(method: string): boolean {
 /** Send 403 and return true when a foreign browser Origin is present. */
 function rejectForeignOrigin(req: Request, res: Response): boolean {
   const origin = req.headers.origin;
-  if (origin && !isTrustedBrowserOrigin(origin)) {
+  if (origin && !isTrustedBrowserOrigin(req, origin)) {
     res.status(403).json({ message: "Cross-origin request rejected" });
+    return true;
+  }
+  return false;
+}
+
+function rejectMissingClientMarker(req: Request, res: Response): boolean {
+  if (req.get("X-Requested-With") !== "HealthCredentialHub") {
+    res.status(403).json({ message: "Request verification failed" });
     return true;
   }
   return false;
@@ -75,6 +107,7 @@ export function csrfOriginGuard(
     return;
   }
   if (rejectForeignOrigin(req, res)) return;
+  if (rejectMissingClientMarker(req, res)) return;
   next();
 }
 
@@ -92,5 +125,6 @@ export function sessionIssuanceCsrfGuard(
     return;
   }
   if (rejectForeignOrigin(req, res)) return;
+  if (rejectMissingClientMarker(req, res)) return;
   next();
 }

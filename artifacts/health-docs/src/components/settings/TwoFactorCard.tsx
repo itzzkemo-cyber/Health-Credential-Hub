@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/input-otp";
 import { ShieldCheck, Copy, Download, KeyRound } from "lucide-react";
 import { toast } from "sonner";
+import { QueryErrorState } from "@/components/QueryErrorState";
 
 function apiErrorCode(err: unknown): string | undefined {
   return err instanceof ApiError
@@ -97,7 +98,7 @@ function BackupCodesView({ codes, onDone }: { codes: string[]; onDone: () => voi
 export default function TwoFactorCard() {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const { data: me, isLoading } = useGetMe();
+  const { data: me, error, isError, isLoading, refetch } = useGetMe();
 
   // --- Enable flow ---
   const [enrolling, setEnrolling] = useState<TotpSetupData | null>(null);
@@ -201,8 +202,14 @@ export default function TwoFactorCard() {
         <CardDescription>{t("twofa.description")}</CardDescription>
       </CardHeader>
       <CardContent>
-        {isLoading || !me ? (
+        {isLoading ? (
           <Skeleton className="h-10 w-full" />
+        ) : isError || !me ? (
+          <QueryErrorState
+            error={error}
+            onRetry={() => void refetch()}
+            compact
+          />
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-4">
             <Badge

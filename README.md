@@ -21,7 +21,7 @@
 - Node.js 24
 - pnpm 11.19.0 (Corepack is fine)
 - PostgreSQL for API runtime
-- An object-storage bucket for document uploads
+- A private Google Cloud Storage bucket for document uploads
 
 ## Local setup
 
@@ -81,7 +81,7 @@ pnpm --filter @workspace/mockup-sandbox run build
 EXPO_PUBLIC_DOMAIN=ci.invalid BASE_PATH=/ pnpm --filter @workspace/mobile run build
 ```
 
-The repository has focused automated tests for the browser-only showcase. It still has no lint configuration, so CI does not claim to run lint. Add further commands only with real configuration and tests. Generated API code can be refreshed with:
+The repository has focused automated tests for the API security helpers and browser-only showcase. It still has no lint configuration, so CI does not claim to run lint. Add further commands only with real configuration and tests. Generated API code can be refreshed with:
 
 ```bash
 pnpm --filter @workspace/api-spec run codegen
@@ -89,11 +89,19 @@ pnpm --filter @workspace/api-spec run codegen
 
 ## Production checklist
 
+The supported hosting path is Google Cloud in Dammam: Cloud Run + Cloud SQL
+PostgreSQL + a private Cloud Storage bucket. See
+[docs/GOOGLE_CLOUD_DEPLOYMENT.md](docs/GOOGLE_CLOUD_DEPLOYMENT.md). A reviewed
+Cloud Shell bootstrap is included at `infra/gcp/bootstrap.sh`. Data flows,
+provider setup, retention assumptions, and remaining approval decisions for
+GCS, Gemini, Resend, and Google OAuth are documented in
+[docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+
 - Keep `DEMO_LOGIN_ENABLED`, `ALLOW_DEMO_SEED`, `SELF_REGISTRATION_ENABLED`, and `GOOGLE_AUTO_PROVISION_ENABLED` false unless explicitly required.
 - Use a secret manager and a random `SESSION_SECRET` of at least 32 characters.
 - Apply reviewed Drizzle migrations; do not use `push-force` in production.
 - Provision private object storage and verify retention, malware scanning, file-size quotas, and orphan cleanup.
-- The current storage client authenticates through the Replit sidecar; configure another Google Cloud authentication strategy before deploying outside Replit.
+- Attach a least-privilege Cloud Run service account; the storage client uses Google Application Default Credentials and never needs a committed JSON key.
 - Configure Gemini only after approving the privacy/data-processing terms for uploaded workforce documents.
 - Configure Google OAuth redirect domains and an email provider if those features are enabled.
 - Add a distributed rate limiter and production observability before exposing authentication or OCR publicly at scale.

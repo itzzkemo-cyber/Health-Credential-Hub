@@ -1,3 +1,4 @@
+
 import { Router, type IRouter, type Request, type Response } from "express";
 import { createHash, randomBytes } from "node:crypto";
 import {
@@ -33,6 +34,7 @@ import {
 import QRCode from "qrcode";
 import { serializeUser, logAudit, syncExpiryNotifications } from "../lib/helpers";
 import { sessionIssuanceCsrfGuard } from "../lib/csrf";
+import { decryptTotpSecret, encryptTotpSecret } from "../lib/totpSecret";
 import { logger } from "../lib/logger";
 import { rateLimit } from "../lib/rateLimit";
 import {
@@ -47,12 +49,21 @@ const router: IRouter = Router();
 const loginRateLimit = rateLimit({ name: "login", max: 10, windowMs: 10 * 60_000 });
 const registrationRateLimit = rateLimit({ name: "register", max: 5, windowMs: 60 * 60_000 });
 const recoveryRateLimit = rateLimit({ name: "recovery", max: 5, windowMs: 60 * 60_000 });
+const changePasswordRateLimit = rateLimit({
+  name: "change-password",
+  max: 5,
+  windowMs: 15 * 60_000,
+});
+const totpSensitiveRateLimit = rateLimit({
+  name: "totp-sensitive",
+  max: 10,
+  windowMs: 10 * 60_000,
+});
 
 /**
  * Complete a successful authentication: sync notifications, audit, then issue
- * the session. The token is set as an httpOnly `SameSite=None; Secure` cookie
- * (web — unreadable by JavaScript; None so it survives the cross-site Replit
- * preview iframe) and also returned in the body for native clients that
+ * the session. The token is set as an httpOnly cookie (unreadable by web
+ * JavaScript) and also returned in the body for native clients that
  * authenticate with an Authorization: Bearer header. Every route that calls
  * this MUST be registered with `sessionIssuanceCsrfGuard` (login CSRF).
  */
@@ -98,7 +109,18 @@ router.post("/auth/login", loginRateLimit, sessionIssuanceCsrfGuard, async (req,
     res.status(401).json({ message: "Invalid credentials" });
     return;
   }
-  if (user.totpEnabled && user.totpSecret) {
+  if (user.totpEnabled && !user.totpSecret) {
+    logger.error(
+      { userId: user.id },
+      "Blocked login because the 2FA account state is inconsistent",
+    );
+    res.status(503).json({
+      message: "Account security configuration requires administrator attention",
+      messageAr: "إعدادات أمان الحساب تحتاج إلى مراجعة المسؤول",
+    });
+    return;
+  }
+  if (user.totpEnabled) {
     respondWithTwoFactorChallenge(user, res);
     return;
   }
@@ -108,7 +130,10 @@ router.post("/auth/login", loginRateLimit, sessionIssuanceCsrfGuard, async (req,
 // Correct password, but the account has 2FA enabled: 202 with a challenge
 // token instead of a session (see createTwoFactorChallengeToken).
 function respondWithTwoFactorChallenge(user: User, res: Response): void {
-  res.status(202).json({ pending2fa: true, challengeToken: createTwoFactorChallengeToken(user) });
+  res.status(202).json({
+    pending2fa: true,
+    challengeToken: createTwoFactorChallengeToken(user),
+  });
 }
 
 // Server-side allowlist of showcase accounts. Only the role names are known
@@ -122,10 +147,11 @@ const DEMO_ACCOUNT_EMAILS: Record<string, string> = {
 };
 
 function enabledOutsideProduction(name: string): boolean {
+  if (process.env.NODE_ENV === "production") return false;
   const value = process.env[name];
   if (value === "true") return true;
   if (value === "false") return false;
-  return process.env.NODE_ENV !== "production";
+  return true;
 }
 
 function isDemoAccount(email: string): boolean {
@@ -262,8 +288,18 @@ router.post("/auth/register", registrationRateLimit, sessionIssuanceCsrfGuard, a
 
 router.post("/auth/logout", requireAuth, async (req, res) => {
   const user = getUser(req);
+  const updated = (
+    await db
+      .update(usersTable)
+      .set({ sessionVersion: sql`${usersTable.sessionVersion} + 1` })
+      .where(eq(usersTable.id, user.id))
+      .returning()
+  )[0]!;
+  // Logout is global for this account: revoke every bearer token/cookie, then
+  // clear the current browser cookie as well.
+  clearSessionCookie(res);
   await logAudit(
-    user,
+    updated,
     "Signed out",
     "تسجيل خروج",
     "Session",
@@ -271,7 +307,6 @@ router.post("/auth/logout", requireAuth, async (req, res) => {
     undefined,
     req.ip,
   );
-  clearSessionCookie(res);
   res.json({});
 });
 
@@ -279,7 +314,7 @@ router.get("/auth/me", requireAuth, (req, res) => {
   res.json(serializeUser(getUser(req)));
 });
 
-router.post("/auth/change-password", requireAuth, async (req, res) => {
+router.post("/auth/change-password", requireAuth, changePasswordRateLimit, async (req, res) => {
   const user = getUser(req);
   const { currentPassword, newPassword } = req.body as {
     currentPassword?: string;
@@ -354,7 +389,7 @@ async function consumeSecondFactor(user: User, code: string): Promise<User | nul
       .returning();
     return rows[0] ?? null;
   }
-  const step = verifyOtp(user.totpSecret, code);
+  const step = verifyOtp(decryptTotpSecret(user.totpSecret), code);
   if (step === null) return null;
   // Replay guard: each 30s time-step may only ever be accepted once, and only
   // moving forward. The WHERE clause makes concurrent submissions race safely.
@@ -374,7 +409,7 @@ async function consumeSecondFactor(user: User, code: string): Promise<User | nul
 // Step 1 of enabling: generate a secret and hand it back WITHOUT persisting.
 // The signed setup token carries the secret so verify-setup can trust it
 // unmodified; nothing touches the DB until the user proves their app works.
-router.post("/auth/totp/setup", requireAuth, async (req, res) => {
+router.post("/auth/totp/setup", requireAuth, totpSensitiveRateLimit, async (req, res) => {
   const user = getUser(req);
   if (user.totpEnabled) {
     res.status(400).json({
@@ -391,7 +426,7 @@ router.post("/auth/totp/setup", requireAuth, async (req, res) => {
 });
 
 // Step 2 of enabling: first valid OTP activates 2FA and issues backup codes.
-router.post("/auth/totp/verify-setup", requireAuth, async (req, res) => {
+router.post("/auth/totp/verify-setup", requireAuth, totpSensitiveRateLimit, async (req, res) => {
   const user = getUser(req);
   const body = req.body as { setupToken?: unknown; code?: unknown };
   const setupToken = typeof body.setupToken === "string" ? body.setupToken : "";
@@ -426,7 +461,7 @@ router.post("/auth/totp/verify-setup", requireAuth, async (req, res) => {
   await db
     .update(usersTable)
     .set({
-      totpSecret: secret,
+      totpSecret: encryptTotpSecret(secret),
       totpEnabled: true,
       backupCodes: codes.hashes,
       totpLastUsedStep: step,
@@ -530,7 +565,7 @@ router.post("/auth/totp/challenge", loginRateLimit, sessionIssuanceCsrfGuard, as
 
 // Disabling requires password AND a second factor — a stolen password alone
 // must never be enough to switch the protection off.
-router.delete("/auth/totp/disable", requireAuth, async (req, res) => {
+router.delete("/auth/totp/disable", requireAuth, totpSensitiveRateLimit, async (req, res) => {
   const user = getUser(req);
   const body = req.body as { currentPassword?: unknown; code?: unknown };
   const currentPassword =
@@ -583,7 +618,7 @@ router.delete("/auth/totp/disable", requireAuth, async (req, res) => {
 
 // Fresh batch of backup codes (invalidates all previous ones). Requires
 // password + second factor, same bar as disabling.
-router.post("/auth/totp/regenerate-backup", requireAuth, async (req, res) => {
+router.post("/auth/totp/regenerate-backup", requireAuth, totpSensitiveRateLimit, async (req, res) => {
   const user = getUser(req);
   const body = req.body as { currentPassword?: unknown; code?: unknown };
   const currentPassword =
@@ -636,6 +671,7 @@ router.post(
   "/auth/totp/admin-disable",
   requireAuth,
   requireRole(...ADMIN_ROLES),
+  totpSensitiveRateLimit,
   async (req, res) => {
     const admin = getUser(req);
     const body = req.body as { userId?: unknown };
@@ -696,6 +732,9 @@ router.post(
         totpEnabled: false,
         backupCodes: null,
         totpLastUsedStep: null,
+        // Administrative recovery is a high-impact account change. Revoke
+        // every target session and any outstanding 2FA challenge token.
+        sessionVersion: sql`${usersTable.sessionVersion} + 1`,
       })
       .where(eq(usersTable.id, target.id));
     await logAudit(
@@ -848,7 +887,18 @@ router.post("/auth/reset-password", recoveryRateLimit, sessionIssuanceCsrfGuard,
   );
   // A password reset proves email control, not the second factor — 2FA
   // accounts still have to pass the OTP challenge before getting a session.
-  if (updated.totpEnabled && updated.totpSecret) {
+  if (updated.totpEnabled && !updated.totpSecret) {
+    logger.error(
+      { userId: updated.id },
+      "Blocked post-reset login because the 2FA account state is inconsistent",
+    );
+    res.status(503).json({
+      message: "Account security configuration requires administrator attention",
+      messageAr: "إعدادات أمان الحساب تحتاج إلى مراجعة المسؤول",
+    });
+    return;
+  }
+  if (updated.totpEnabled) {
     respondWithTwoFactorChallenge(updated, res);
     return;
   }

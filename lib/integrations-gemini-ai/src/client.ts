@@ -14,7 +14,12 @@ export function getAi(): GoogleGenAI {
   }
   client = new GoogleGenAI({
     apiKey,
-    httpOptions: { apiVersion: "", baseUrl },
+    httpOptions: {
+      apiVersion: "",
+      baseUrl,
+      timeout: 45_000,
+      retryOptions: { attempts: 2 },
+    },
   });
   return client;
 }

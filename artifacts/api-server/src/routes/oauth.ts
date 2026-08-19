@@ -13,6 +13,7 @@ import {
 import { logAudit, syncExpiryNotifications } from "../lib/helpers";
 import { logger } from "../lib/logger";
 import { rateLimit } from "../lib/rateLimit";
+import { getPublicAppUrl } from "../lib/publicUrl";
 
 const router: IRouter = Router();
 const oauthRateLimit = rateLimit({ name: "google-oauth", max: 20, windowMs: 10 * 60_000 });
@@ -36,22 +37,13 @@ function googleConfig(): { clientId: string; clientSecret: string } | null {
   return clientId && clientSecret ? { clientId, clientSecret } : null;
 }
 
-/** First entry of REPLIT_DOMAINS: dev domain in the workspace, the published
- *  domain in production — so the same code yields the right URLs in both. */
-function externalDomain(): string | null {
-  const first = process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
-  return first || null;
-}
-
 export function googleRedirectUri(): string | null {
-  const domain = externalDomain();
-  return domain ? `https://${domain}/api/auth/google/callback` : null;
+  const appUrl = getPublicAppUrl();
+  return appUrl ? `${appUrl}/api/auth/google/callback` : null;
 }
 
-/** Web app base (no trailing slash), e.g. https://<domain>/health-docs */
 function webBaseUrl(): string {
-  const domain = externalDomain();
-  return domain ? `https://${domain}/health-docs` : "/health-docs";
+  return getPublicAppUrl() ?? "";
 }
 
 function loginErrorRedirect(res: Response, code: string): void {
@@ -112,6 +104,7 @@ async function fetchGoogleProfile(
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
     }),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!tokenResp.ok) {
     throw new Error(`token exchange failed with status ${tokenResp.status}`);
@@ -123,6 +116,7 @@ async function fetchGoogleProfile(
   // Userinfo over TLS straight from Google — no id_token signature dance.
   const infoResp = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
     headers: { Authorization: `Bearer ${tokens.access_token}` },
+    signal: AbortSignal.timeout(15_000),
   });
   if (!infoResp.ok) {
     throw new Error(`userinfo failed with status ${infoResp.status}`);
@@ -170,9 +164,8 @@ async function upsertGoogleUser(
   }
 
   const autoProvisionEnabled =
-    process.env.GOOGLE_AUTO_PROVISION_ENABLED === "true" ||
-    (process.env.NODE_ENV !== "production" &&
-      process.env.GOOGLE_AUTO_PROVISION_ENABLED !== "false");
+    process.env.NODE_ENV !== "production" &&
+    process.env.GOOGLE_AUTO_PROVISION_ENABLED !== "false";
   if (!autoProvisionEnabled) {
     throw new Error("Google account auto-provisioning is disabled");
   }
@@ -297,7 +290,15 @@ router.get("/auth/google/callback", oauthRateLimit, async (req, res) => {
   // Local 2FA still applies — Google only replaces the password factor
   // (mirrors the reset-password flow, which is also 2FA-gated). The token
   // rides the URL fragment: never sent to servers, absent from logs/Referer.
-  if (user.totpEnabled && user.totpSecret) {
+  if (user.totpEnabled && !user.totpSecret) {
+    logger.error(
+      { userId: user.id },
+      "Blocked OAuth login because the 2FA account state is inconsistent",
+    );
+    loginErrorRedirect(res, "oauth_account_security");
+    return;
+  }
+  if (user.totpEnabled) {
     const challengeToken = createTwoFactorChallengeToken(user);
     res.redirect(`${webBaseUrl()}/2fa-challenge#ct=${encodeURIComponent(challengeToken)}`);
     return;

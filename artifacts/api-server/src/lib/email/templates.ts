@@ -4,6 +4,8 @@
  * Inline styles only — email clients strip <style> blocks.
  */
 
+import { getPublicAppUrl } from "../publicUrl";
+
 const BRAND = {
   primary: "#0E7C75",
   primaryDark: "#0A5F5A",
@@ -16,10 +18,8 @@ const BRAND = {
 };
 
 export function getAppBaseUrl(): string | null {
-  const domains = process.env["REPLIT_DOMAINS"];
-  if (!domains) return null;
-  const first = domains.split(",")[0]?.trim();
-  return first ? `https://${first}/health-docs/` : null;
+  const appUrl = getPublicAppUrl();
+  return appUrl ? `${appUrl}/` : null;
 }
 
 function esc(s: string): string {

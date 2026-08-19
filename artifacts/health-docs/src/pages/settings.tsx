@@ -17,18 +17,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
 import { Globe, Moon, Bell, ShieldCheck } from "lucide-react";
 import { isShowcaseMode } from "@/demo/showcase";
 
 export default function Settings() {
   const { t, language, setLanguage } = useLanguage();
   const { theme, setTheme } = useTheme();
-
-  const handleSave = () => {
-    toast.success(t("settings_page.saved"));
-  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500">
@@ -69,7 +63,9 @@ export default function Settings() {
           <CardContent className="space-y-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-0.5">
-                <Label>{t("settings_page.interface_language")}</Label>
+                <Label htmlFor="interface-language">
+                  {t("settings_page.interface_language")}
+                </Label>
                 <p className="text-sm text-muted-foreground">
                   {t("settings_page.interface_language_desc")}
                 </p>
@@ -78,7 +74,10 @@ export default function Settings() {
                 value={language}
                 onValueChange={(v) => setLanguage(v as "ar" | "en")}
               >
-                <SelectTrigger className="min-h-11 w-full sm:w-[180px]">
+                <SelectTrigger
+                  id="interface-language"
+                  className="min-h-11 w-full sm:w-[180px]"
+                >
                   <SelectValue
                     placeholder={t("settings_page.interface_language")}
                   />
@@ -92,12 +91,23 @@ export default function Settings() {
 
             <div className="flex items-center justify-between gap-4">
               <div className="space-y-0.5">
-                <Label>{t("settings_page.calendar")}</Label>
-                <p className="text-sm text-muted-foreground">
+                <Label htmlFor="hijri-calendar">
+                  {t("settings_page.calendar")}
+                </Label>
+                <p
+                  id="hijri-calendar-description"
+                  className="text-sm text-muted-foreground"
+                >
                   {t("settings_page.calendar_desc")}
+                  {" "}
+                  {t("settings_page.not_available")}
                 </p>
               </div>
-              <Switch />
+              <Switch
+                id="hijri-calendar"
+                disabled
+                aria-describedby="hijri-calendar-description"
+              />
             </div>
           </CardContent>
         </Card>
@@ -115,13 +125,18 @@ export default function Settings() {
           <CardContent className="space-y-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="space-y-0.5">
-                <Label>{t("settings_page.theme")}</Label>
+                <Label htmlFor="interface-theme">
+                  {t("settings_page.theme")}
+                </Label>
                 <p className="text-sm text-muted-foreground">
                   {t("settings_page.theme_desc")}
                 </p>
               </div>
               <Select value={theme} onValueChange={(v) => setTheme(v as any)}>
-                <SelectTrigger className="min-h-11 w-full sm:w-[180px]">
+                <SelectTrigger
+                  id="interface-theme"
+                  className="min-h-11 w-full sm:w-[180px]"
+                >
                   <SelectValue placeholder={t("settings_page.theme")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -153,40 +168,34 @@ export default function Settings() {
           <CardContent className="space-y-6">
             <div className="flex items-center justify-between gap-4">
               <div className="space-y-0.5">
-                <Label>{t("settings_page.expiry_warnings")}</Label>
-                <p className="text-sm text-muted-foreground">
+                <Label htmlFor="expiry-email-warnings">
+                  {t("settings_page.expiry_warnings")}
+                </Label>
+                <p
+                  id="expiry-email-warnings-description"
+                  className="text-sm text-muted-foreground"
+                >
                   {t("settings_page.expiry_warnings_desc")}
                 </p>
               </div>
-              <Switch defaultChecked />
+              <Switch
+                id="expiry-email-warnings"
+                disabled
+                aria-describedby="expiry-email-warnings-description"
+              />
             </div>
 
             <div className="space-y-3 pt-4 border-t border-border">
-              <Label>{t("settings_page.thresholds")}</Label>
-              <div className="flex flex-wrap gap-4">
-                {["90", "60", "30", "15", "7", "1"].map((days) => (
-                  <label key={days} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      defaultChecked={["60", "30", "7"].includes(days)}
-                      className="rounded border-input text-primary focus:ring-primary"
-                    />
-                    {days} {t("settings_page.days")}
-                  </label>
-                ))}
-              </div>
+              <p className="text-sm leading-6 text-muted-foreground">
+                {t("settings_page.alerts_managed_by_admin")}
+              </p>
             </div>
           </CardContent>
         </Card>
 
-        <div className="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-          <Button variant="outline" className="min-h-11">
-            {t("settings_page.reset")}
-          </Button>
-          <Button onClick={handleSave} className="min-h-11">
-            {t("common.save")}
-          </Button>
-        </div>
+        <p className="text-sm leading-6 text-muted-foreground">
+          {t("settings_page.applies_immediately")}
+        </p>
       </div>
     </div>
   );

@@ -81,11 +81,12 @@ export async function uploadFileToStorage(
   uploadURL: string,
   blob: Blob,
   contentType: string,
+  requiredHeaders: Record<string, string>,
 ): Promise<void> {
   const res = await fetch(uploadURL, {
     method: 'PUT',
     body: blob,
-    headers: { 'Content-Type': contentType },
+    headers: { 'Content-Type': contentType, ...requiredHeaders },
   });
   if (!res.ok) {
     throw new Error(`Upload failed (${res.status})`);

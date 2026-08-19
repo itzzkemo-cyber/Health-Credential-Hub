@@ -60,7 +60,7 @@ export function AppHeader() {
           <Button
             variant="ghost"
             size="icon"
-            className="lg:hidden"
+            className="h-11 w-11 lg:hidden"
             aria-label={t("common.menu")}
           >
             <Menu className="h-5 w-5" />
@@ -94,7 +94,7 @@ export function AppHeader() {
           variant="ghost"
           size="icon"
           onClick={() => setLanguage(language === "ar" ? "en" : "ar")}
-          className="rounded-full"
+          className="h-11 w-11 rounded-full"
           title={t("mobile.change_language")}
           aria-label={t("mobile.change_language")}
         >
@@ -106,7 +106,7 @@ export function AppHeader() {
           variant="ghost"
           size="icon"
           onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-          className="hidden rounded-full sm:inline-flex"
+          className="hidden h-11 w-11 rounded-full sm:inline-flex"
           aria-label={t("mobile.change_theme")}
         >
           {theme === "light" ? (
@@ -120,7 +120,7 @@ export function AppHeader() {
         <Button
           variant="ghost"
           size="icon"
-          className="relative hidden rounded-full sm:inline-flex"
+          className="relative hidden h-11 w-11 rounded-full sm:inline-flex"
           onClick={() => setLocation("/notifications")}
           aria-label={t("common.notifications")}
         >
@@ -135,7 +135,7 @@ export function AppHeader() {
             <Button
               variant="ghost"
               size="icon"
-              className="rounded-full bg-primary/10 hover:bg-primary/20"
+              className="h-11 w-11 rounded-full bg-primary/10 hover:bg-primary/20"
             >
               <span className="text-primary text-xs font-semibold">
                 {initials}

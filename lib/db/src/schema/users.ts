@@ -6,7 +6,9 @@ import {
   boolean,
   timestamp,
   jsonb,
+  check,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { facilitiesTable } from "./facilities";
@@ -58,7 +60,12 @@ export const usersTable = pgTable("users", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
-});
+}, (table) => [
+  check(
+    "users_totp_enabled_requires_secret",
+    sql`not ${table.totpEnabled} or ${table.totpSecret} is not null`,
+  ),
+]);
 
 export const insertUserSchema = createInsertSchema(usersTable).omit({
   id: true,

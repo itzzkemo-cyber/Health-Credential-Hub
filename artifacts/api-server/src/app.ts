@@ -1,21 +1,82 @@
+
 import express, {
   type Express,
   type Request,
   type Response,
   type NextFunction,
 } from "express";
+import fs from "node:fs";
+import path from "node:path";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import helmet from "helmet";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { allowedOrigins, csrfOriginGuard } from "./lib/csrf";
+import { validateTotpEncryptionConfig } from "./lib/totpSecret";
+import { validateStoragePathIsolation } from "./lib/objectStorage";
 
 const app: Express = express();
+const isProduction = process.env.NODE_ENV === "production";
 
-// Behind the Replit proxy: trust the first hop so req.ip (audit logs) and
-// req.secure reflect the real client instead of the proxy.
+function getStorageConnectSources(): string[] {
+  const sources = new Set(["https://storage.googleapis.com"]);
+  const configuredEndpoint = process.env.STORAGE_API_ENDPOINT?.trim();
+  if (!configuredEndpoint) return [...sources];
+
+  let endpoint: URL;
+  try {
+    endpoint = new URL(configuredEndpoint);
+  } catch {
+    throw new Error("STORAGE_API_ENDPOINT must be a valid URL");
+  }
+  const isApprovedGoogleStorageHost =
+    endpoint.protocol === "https:" &&
+    (endpoint.hostname === "storage.googleapis.com" ||
+      /^storage\.[a-z0-9-]+\.rep\.googleapis\.com$/.test(endpoint.hostname));
+  if (isProduction && !isApprovedGoogleStorageHost) {
+    throw new Error(
+      "Production STORAGE_API_ENDPOINT must use an approved HTTPS Google Storage host",
+    );
+  }
+  if (endpoint.protocol === "https:") sources.add(endpoint.origin);
+  return [...sources];
+}
+
+const storageConnectSources = getStorageConnectSources();
+
+validateTotpEncryptionConfig();
+validateStoragePathIsolation();
+app.disable("x-powered-by");
+
+// Behind Cloud Run's managed proxy: trust the first hop so req.ip (audit logs)
+// and req.secure reflect the real client instead of the proxy.
 app.set("trust proxy", 1);
+
+app.use(
+  helmet({
+    crossOriginEmbedderPolicy: false,
+    contentSecurityPolicy: isProduction
+      ? {
+          directives: {
+            defaultSrc: ["'self'"],
+            baseUri: ["'self'"],
+            connectSrc: ["'self'", ...storageConnectSources],
+            fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
+            formAction: ["'self'"],
+            frameAncestors: ["'none'"],
+            imgSrc: ["'self'", "data:", "blob:", "https:"],
+            objectSrc: ["'self'", "blob:"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            upgradeInsecureRequests: [],
+          },
+        }
+      : false,
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+  }),
+);
 
 app.use(
   pinoHttp({
@@ -52,14 +113,57 @@ app.use(
   }),
 );
 app.use(cookieParser());
-// The web client downscales images before upload and caps payloads at ~15 MB
-// of file content (≈20 MB once base64-encoded); 25 MB here leaves headroom so
-// legitimate uploads never race the limit.
-app.use(express.json({ limit: "25mb" }));
+// Files upload directly to private object storage. Keep the shared JSON parser
+// small so ordinary API routes cannot be used for oversized request bodies.
+app.use(express.json({ limit: "1mb" }));
 
 // csrfOriginGuard (lib/csrf.ts) protects cookie-authenticated mutations;
 // the session-issuing login routes carry their own guard route-side.
 app.use("/api", csrfOriginGuard, router);
+
+// Never let unknown API paths fall through to the SPA's HTML entry point.
+app.use("/api", (_req, res) => {
+  res.status(404).json({ message: "API endpoint not found" });
+});
+
+// A published deployment is intentionally one same-origin service: Express
+// serves the built React application and the API from the same HTTPS domain.
+// This removes cross-site cookies from the production architecture.
+if (isProduction || process.env.SERVE_WEB === "true") {
+  const candidates = process.env.WEB_DIST_DIR
+    ? [path.resolve(process.cwd(), process.env.WEB_DIST_DIR)]
+    : [
+        path.resolve(process.cwd(), "artifacts/health-docs/dist/public"),
+        path.resolve(process.cwd(), "../health-docs/dist/public"),
+      ];
+  const webDist = candidates.find((candidate) =>
+    fs.existsSync(path.join(candidate, "index.html")),
+  );
+  if (!webDist) {
+    throw new Error(`Built web application not found (checked: ${candidates.join(", ")})`);
+  }
+  app.use(
+    express.static(webDist, {
+      index: false,
+      setHeaders(res, filePath) {
+        res.setHeader(
+          "Cache-Control",
+          filePath.endsWith("index.html")
+            ? "no-cache"
+            : "public, max-age=31536000, immutable",
+        );
+      },
+    }),
+  );
+  app.use((req, res, next) => {
+    if (req.method !== "GET" || !req.accepts("html")) {
+      next();
+      return;
+    }
+    res.setHeader("Cache-Control", "no-cache");
+    res.sendFile(path.join(webDist, "index.html"));
+  });
+}
 
 // JSON error responses instead of Express's default HTML error page, so the
 // web/mobile clients can show a localized message. Body-parser rejects
@@ -73,8 +177,8 @@ app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
   const status = (err as { status?: number } | null)?.status;
   if (status === 413) {
     res.status(413).json({
-      message: "File too large — the maximum upload size is 15 MB",
-      messageAr: "الملف كبير جداً — الحد الأقصى للرفع 15 ميغابايت",
+      message: "Request body too large — the maximum size is 1 MB",
+      messageAr: "حجم جسم الطلب كبير جداً — الحد الأقصى 1 ميغابايت",
     });
     return;
   }

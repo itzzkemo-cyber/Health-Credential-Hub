@@ -6,7 +6,7 @@ import {
   emailLogTable,
   type User,
 } from "@workspace/db";
-import { and, desc, eq, inArray, notExists, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
 import { logger } from "../logger";
 import {
   computeEmployeeStats,
@@ -48,9 +48,12 @@ export async function dispatchPendingExpiryEmails(): Promise<void> {
     })
     .from(notificationsTable)
     .innerJoin(usersTable, eq(notificationsTable.userId, usersTable.id))
-    .leftJoin(
+    .innerJoin(
       credentialsTable,
-      eq(notificationsTable.credentialId, credentialsTable.id),
+      and(
+        eq(notificationsTable.credentialId, credentialsTable.id),
+        isNull(credentialsTable.deletedAt),
+      ),
     )
     .where(
       and(
@@ -184,6 +187,7 @@ async function getTeamMembers(manager: User): Promise<User[]> {
       .where(
         and(
           eq(usersTable.supervisorId, manager.id),
+          eq(usersTable.facilityId, manager.facilityId),
           eq(usersTable.isActive, true),
         ),
       );
@@ -288,7 +292,10 @@ async function attemptSend(input: {
       .set({ status: "failed", error: message.slice(0, 500) })
       .where(eq(emailLogTable.id, claim.id));
     logger.error(
-      { err, kind: input.kind, recipient: input.recipient },
+      {
+        errorName: err instanceof Error ? err.name : "UnknownError",
+        kind: input.kind,
+      },
       "Email send failed",
     );
   }

@@ -148,7 +148,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
           </div>
           <div className="flex flex-col overflow-hidden">
             <span className="text-sm font-medium truncate">
-              {localizedName || "User"}
+              {localizedName || t("common.user")}
             </span>
             <span className="text-xs text-muted-foreground truncate">
               {t(`roles.${role}`)}

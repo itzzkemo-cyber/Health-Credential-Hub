@@ -81,8 +81,8 @@ export default function Login() {
       toast.info(t("showcase.external_disabled"));
       return;
     }
-    // Google refuses to render its consent screen inside an iframe (the
-    // Replit preview pane) — open a tab there; navigate in place otherwise.
+    // Google refuses to render its consent screen inside an iframe. Open a
+    // separate tab for embedded previews; navigate in place otherwise.
     const url = "/api/auth/google";
     if (window.self !== window.top) window.open(url, "_blank");
     else window.location.assign(url);

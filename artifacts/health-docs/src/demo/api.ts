@@ -171,6 +171,7 @@ export function createShowcaseRequestHandler(): RequestHandler {
         verificationUrl: null,
         confidence: data.confidence ?? null,
         isVerified: false,
+        version: 1,
         createdAt: now,
         updatedAt: now,
       };
@@ -320,6 +321,7 @@ function credentialSeed(
     notes: null,
     verificationUrl: null,
     confidence: null,
+    version: 1,
     createdAt: shiftedIso(-240),
     updatedAt: shiftedIso(-30),
   };

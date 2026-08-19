@@ -39,7 +39,9 @@ paths:
       summary: Request a presigned URL for file upload
       description: |
         Returns a presigned GCS URL for direct upload. The client sends JSON
-        metadata here, then uploads the file directly to the returned URL.
+        metadata here, then uploads the file directly to the returned URL with
+        every returned required header. The overwrite precondition makes each
+        URL create one new object generation only.
       requestBody:
         required: true
         content:
@@ -155,6 +157,24 @@ paths:
       responses:
         "200":
           description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /readyz:
+    get:
+      operationId: readinessCheck
+      tags: [health]
+      summary: Check whether persistent dependencies are ready
+      responses:
+        "200":
+          description: Ready to serve traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+        "503":
+          description: A required persistent dependency is unavailable
           content:
             application/json:
               schema:
@@ -667,6 +687,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Credential"
+        "409":
+          description: Credential changed after it was read; reload before retrying
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "428":
+          description: Credential update is missing its expected record version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 
     delete:
       operationId: deleteCredential
@@ -1170,7 +1202,7 @@ components:
           description: MIME type of the file (e.g. `image/jpeg`).
     UploadUrlResponse:
       type: object
-      required: [uploadURL, objectPath]
+      required: [uploadURL, objectPath, requiredHeaders]
       properties:
         uploadURL:
           type: string
@@ -1178,6 +1210,11 @@ components:
         objectPath:
           type: string
           description: Normalized object path (e.g. `/objects/uploads/uuid`). Store this in your database.
+        requiredHeaders:
+          type: object
+          description: Headers that must be included verbatim in the signed PUT request.
+          additionalProperties:
+            type: string
         metadata:
           $ref: '#/components/schemas/UploadUrlRequest'
     ErrorEnvelope:
@@ -1192,6 +1229,16 @@ components:
         status:
           type: string
       required: [status]
+    ReadinessStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        database:
+          type: string
+        objectStorage:
+          type: string
+      required: [status, database, objectStorage]
 
     # Auth
     LoginInput:
@@ -1396,7 +1443,7 @@ components:
     # Credential
     Credential:
       type: object
-      required: [id, employeeId, type, holderName, holderNameAr, issuerName, issuerNameAr, certificateNumber, issueDate, expiryDate, status, qrToken, createdAt, updatedAt]
+      required: [id, employeeId, type, holderName, holderNameAr, issuerName, issuerNameAr, certificateNumber, issueDate, expiryDate, status, qrToken, version, createdAt, updatedAt]
       properties:
         id:
           type: number
@@ -1447,6 +1494,11 @@ components:
           type: ["number", "null"]
         isVerified:
           type: boolean
+        version:
+          type: number
+          minimum: 1
+          multipleOf: 1
+          description: Monotonic whole-number record version used for verification concurrency control.
         createdAt:
           type: string
         updatedAt:
@@ -1500,7 +1552,13 @@ components:
 
     CredentialUpdate:
       type: object
+      required: [expectedVersion]
       properties:
+        expectedVersion:
+          type: number
+          minimum: 1
+          multipleOf: 1
+          description: Required whole-number version for every update; stale versions return HTTP 409.
         type:
           type: string
         customTypeName:
@@ -1537,6 +1595,8 @@ components:
           type: string
         verificationUrl:
           type: string
+        isVerified:
+          type: boolean
 
     CredentialListResponse:
       type: object
