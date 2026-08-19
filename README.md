@@ -49,6 +49,12 @@ pnpm --filter @workspace/health-docs run dev
 
 ## Stakeholder showcase
 
+النسخة التجريبية المنشورة متاحة على:
+[https://itzzkemo-cyber.github.io/Health-Credential-Hub/](https://itzzkemo-cyber.github.io/Health-Credential-Hub/)
+
+> هذه معاينة ببيانات صناعية داخل ذاكرة المتصفح، وليست بيئة الإنتاج ذات
+> قاعدة البيانات والتخزين الخاص.
+
 لتجربة الموقع فورًا دون قاعدة بيانات أو خدمات خارجية:
 
 ```bash
