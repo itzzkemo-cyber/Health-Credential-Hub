@@ -8,6 +8,7 @@ import {
   Info,
   Loader2,
   ShieldCheck,
+  Sparkles,
   UploadCloud,
 } from "lucide-react";
 import {
@@ -25,15 +26,23 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { getAuthUser } from "@/lib/auth";
 import { useLanguage } from "@/lib/language-context";
 import { prepareUploadFile, UploadTooLargeError } from "@/lib/upload";
+import { isShowcaseMode, retainShowcaseFile } from "@/demo/showcase";
 import { cn } from "@/lib/utils";
 
-const FILE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif,application/pdf";
+const FILE_ACCEPT =
+  "image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif,application/pdf";
 
 export default function CredentialNew() {
   const { t, isRTL } = useLanguage();
@@ -87,6 +96,50 @@ export default function CredentialNew() {
     }));
   }, [targetEmployee]);
 
+  const runSmartScan = (objectPath: string, name: string) => {
+    extractOcr.mutate(
+      { data: { fileUrl: objectPath, fileName: name } },
+      {
+        onSuccess: (result) => {
+          toast.success(t("credential.scan_success"));
+          setFormData((previous) => ({
+            ...previous,
+            type: (result.detectedType as CredentialInputType) || "BLS",
+            holderName: result.holderName || previous.holderName,
+            holderNameAr: result.holderNameAr || previous.holderNameAr,
+            issuerName: result.issuerName || "",
+            issuerNameAr: result.issuerNameAr || "",
+            certificateNumber: result.certificateNumber || "",
+            issueDate: result.issueDate ? result.issueDate.split("T")[0] : "",
+            expiryDate: result.expiryDate
+              ? result.expiryDate.split("T")[0]
+              : "",
+          }));
+          setActiveTab("manual");
+        },
+        onError: () => {
+          toast.error(t("credential.scan_failed"));
+          setActiveTab("manual");
+        },
+      },
+    );
+  };
+
+  const handleShowcaseSample = () => {
+    const sample = new Blob(
+      [
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><rect width="100%" height="100%" fill="white"/><rect x="40" y="40" width="1120" height="720" rx="24" fill="none" stroke="#0f766e" stroke-width="8"/><text x="600" y="280" text-anchor="middle" font-family="sans-serif" font-size="72" fill="#0f172a">BLS Certificate</text><text x="600" y="390" text-anchor="middle" font-family="sans-serif" font-size="44" fill="#334155">Noura Alqahtani</text><text x="600" y="500" text-anchor="middle" font-family="sans-serif" font-size="34" fill="#475569">Synthetic showcase document</text></svg>',
+      ],
+      { type: "image/svg+xml" },
+    );
+    const objectPath = retainShowcaseFile(sample);
+    const name = "sample-bls-certificate.svg";
+    setFileUrl(objectPath);
+    setFileKind("image");
+    setFileName(name);
+    runSmartScan(objectPath, name);
+  };
+
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>,
     useSmartScan: boolean,
@@ -98,21 +151,28 @@ export default function CredentialNew() {
     setIsUploading(true);
     try {
       const prepared = await prepareUploadFile(file);
-      const granted = await requestUploadUrl.mutateAsync({
-        data: {
-          name: file.name,
-          size: prepared.blob.size,
-          contentType: prepared.contentType,
-        },
-      });
-      const upload = await fetch(granted.uploadURL, {
-        method: "PUT",
-        body: prepared.blob,
-        headers: { "Content-Type": prepared.contentType },
-      });
-      if (!upload.ok) throw new Error(`Storage upload failed (${upload.status})`);
+      let objectPath: string;
+      if (isShowcaseMode) {
+        objectPath = retainShowcaseFile(prepared.blob);
+      } else {
+        const granted = await requestUploadUrl.mutateAsync({
+          data: {
+            name: file.name,
+            size: prepared.blob.size,
+            contentType: prepared.contentType,
+          },
+        });
+        const upload = await fetch(granted.uploadURL, {
+          method: "PUT",
+          body: prepared.blob,
+          headers: { "Content-Type": prepared.contentType },
+        });
+        if (!upload.ok)
+          throw new Error(`Storage upload failed (${upload.status})`);
+        objectPath = granted.objectPath;
+      }
 
-      setFileUrl(granted.objectPath);
+      setFileUrl(objectPath);
       setFileKind(prepared.kind);
       setFileName(file.name);
 
@@ -121,30 +181,7 @@ export default function CredentialNew() {
         return;
       }
 
-      extractOcr.mutate(
-        { data: { fileUrl: granted.objectPath, fileName: file.name } },
-        {
-          onSuccess: (result) => {
-            toast.success(t("credential.scan_success"));
-            setFormData((previous) => ({
-              ...previous,
-              type: (result.detectedType as CredentialInputType) || "BLS",
-              holderName: result.holderName || previous.holderName,
-              holderNameAr: result.holderNameAr || previous.holderNameAr,
-              issuerName: result.issuerName || "",
-              issuerNameAr: result.issuerNameAr || "",
-              certificateNumber: result.certificateNumber || "",
-              issueDate: result.issueDate ? result.issueDate.split("T")[0] : "",
-              expiryDate: result.expiryDate ? result.expiryDate.split("T")[0] : "",
-            }));
-            setActiveTab("manual");
-          },
-          onError: () => {
-            toast.error(t("credential.scan_failed"));
-            setActiveTab("manual");
-          },
-        },
-      );
+      runSmartScan(objectPath, file.name);
     } catch (error) {
       toast.error(
         t(
@@ -184,7 +221,11 @@ export default function CredentialNew() {
           setLocation(`/credentials/${result.id}`);
         },
         onError: (error) => {
-          toast.error(error instanceof Error ? error.message : t("credential.create_failed"));
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : t("credential.create_failed"),
+          );
         },
       },
     );
@@ -203,10 +244,16 @@ export default function CredentialNew() {
           aria-label={t("common.back")}
           className="shrink-0"
         >
-          {isRTL ? <ArrowRight className="h-5 w-5" /> : <ArrowLeft className="h-5 w-5" />}
+          {isRTL ? (
+            <ArrowRight className="h-5 w-5" />
+          ) : (
+            <ArrowLeft className="h-5 w-5" />
+          )}
         </Button>
         <div>
-          <p className="text-sm font-medium text-primary">{t("employee_portal.dashboard_eyebrow")}</p>
+          <p className="text-sm font-medium text-primary">
+            {t("employee_portal.dashboard_eyebrow")}
+          </p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
             {t("credential.add_new")}
           </h1>
@@ -224,7 +271,10 @@ export default function CredentialNew() {
       )}
 
       <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+        <ShieldCheck
+          className="mt-0.5 h-5 w-5 shrink-0 text-primary"
+          aria-hidden="true"
+        />
         <p className="leading-6">{t("credential.private_upload_notice")}</p>
       </div>
 
@@ -252,13 +302,28 @@ export default function CredentialNew() {
             onChange={(event) => void handleFileUpload(event, true)}
             t={t}
           />
+          {isShowcaseMode && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleShowcaseSample}
+              disabled={isFileBusy}
+              className="min-h-12 w-full gap-2 border-primary/30 bg-card"
+            >
+              <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
+              {t("showcase.use_sample_document")}
+            </Button>
+          )}
         </TabsContent>
 
         <TabsContent value="manual">
           <Card>
             <CardContent className="p-4 sm:p-6">
               <form onSubmit={handleSubmit} className="space-y-6">
-                <section className="space-y-3" aria-labelledby="manual-attachment-title">
+                <section
+                  className="space-y-3"
+                  aria-labelledby="manual-attachment-title"
+                >
                   <div>
                     <h2 id="manual-attachment-title" className="font-semibold">
                       {t("credential.file")}
@@ -279,15 +344,22 @@ export default function CredentialNew() {
 
                 <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">
                   <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="credential-type">{t("credential.type")}</Label>
+                    <Label htmlFor="credential-type">
+                      {t("credential.type")}
+                    </Label>
                     <Select
                       value={formData.type}
                       onValueChange={(value) =>
-                        setFormData({ ...formData, type: value as CredentialInputType })
+                        setFormData({
+                          ...formData,
+                          type: value as CredentialInputType,
+                        })
                       }
                     >
                       <SelectTrigger id="credential-type" className="min-h-11">
-                        <SelectValue placeholder={t("credential.select_type")} />
+                        <SelectValue
+                          placeholder={t("credential.select_type")}
+                        />
                       </SelectTrigger>
                       <SelectContent>
                         {types.map((type) => (
@@ -303,28 +375,36 @@ export default function CredentialNew() {
                     id="holder-name"
                     label={`${t("credential.holder_name")} — ${t("credential.english")}`}
                     value={formData.holderName}
-                    onChange={(value) => setFormData({ ...formData, holderName: value })}
+                    onChange={(value) =>
+                      setFormData({ ...formData, holderName: value })
+                    }
                     required
                   />
                   <FormField
                     id="holder-name-ar"
                     label={`${t("credential.holder_name")} — ${t("credential.arabic")}`}
                     value={formData.holderNameAr}
-                    onChange={(value) => setFormData({ ...formData, holderNameAr: value })}
+                    onChange={(value) =>
+                      setFormData({ ...formData, holderNameAr: value })
+                    }
                     dir="rtl"
                   />
                   <FormField
                     id="issuer-name"
                     label={`${t("credential.issuer")} — ${t("credential.english")}`}
                     value={formData.issuerName}
-                    onChange={(value) => setFormData({ ...formData, issuerName: value })}
+                    onChange={(value) =>
+                      setFormData({ ...formData, issuerName: value })
+                    }
                     required
                   />
                   <FormField
                     id="issuer-name-ar"
                     label={`${t("credential.issuer")} — ${t("credential.arabic")}`}
                     value={formData.issuerNameAr}
-                    onChange={(value) => setFormData({ ...formData, issuerNameAr: value })}
+                    onChange={(value) =>
+                      setFormData({ ...formData, issuerNameAr: value })
+                    }
                     dir="rtl"
                   />
                   <FormField
@@ -342,7 +422,9 @@ export default function CredentialNew() {
                     label={t("credential.issue_date")}
                     type="date"
                     value={formData.issueDate}
-                    onChange={(value) => setFormData({ ...formData, issueDate: value })}
+                    onChange={(value) =>
+                      setFormData({ ...formData, issueDate: value })
+                    }
                     required
                   />
                   <FormField
@@ -351,11 +433,15 @@ export default function CredentialNew() {
                     type="date"
                     min={formData.issueDate || undefined}
                     value={formData.expiryDate}
-                    onChange={(value) => setFormData({ ...formData, expiryDate: value })}
+                    onChange={(value) =>
+                      setFormData({ ...formData, expiryDate: value })
+                    }
                     required
                   />
                   <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="credential-notes">{t("credential.notes")}</Label>
+                    <Label htmlFor="credential-notes">
+                      {t("credential.notes")}
+                    </Label>
                     <Textarea
                       id="credential-notes"
                       value={formData.notes}
@@ -382,7 +468,10 @@ export default function CredentialNew() {
                     className="min-h-12 w-full gap-2 sm:w-auto"
                   >
                     {createCredential.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      <Loader2
+                        className="h-4 w-4 animate-spin"
+                        aria-hidden="true"
+                      />
                     ) : (
                       <Check className="h-4 w-4" aria-hidden="true" />
                     )}
@@ -428,7 +517,12 @@ function DocumentPicker({
         onChange={onChange}
         disabled={busy}
       />
-      <div className={cn("flex gap-4", compact ? "items-center" : "flex-col items-center text-center")}>
+      <div
+        className={cn(
+          "flex gap-4",
+          compact ? "items-center" : "flex-col items-center text-center",
+        )}
+      >
         <span
           className={cn(
             "flex shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary",
@@ -454,12 +548,22 @@ function DocumentPicker({
               ? t("credential.scanning_hint")
               : fileName
                 ? t("credential.file_ready")
-                : t(compact ? "credential.manual_upload_hint" : "credential.upload_zone_hint")}
+                : t(
+                    compact
+                      ? "credential.manual_upload_hint"
+                      : "credential.upload_zone_hint",
+                  )}
           </p>
         </div>
-        <Button asChild variant={fileName ? "outline" : "default"} className="min-h-11 shrink-0">
+        <Button
+          asChild
+          variant={fileName ? "outline" : "default"}
+          className="min-h-11 shrink-0"
+        >
           <label htmlFor={id} className={cn(busy && "pointer-events-none")}>
-            {fileName ? t("credential.replace_file") : t("credential.choose_file")}
+            {fileName
+              ? t("credential.replace_file")
+              : t("credential.choose_file")}
           </label>
         </Button>
       </div>

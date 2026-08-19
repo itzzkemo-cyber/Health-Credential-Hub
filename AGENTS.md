@@ -6,6 +6,7 @@
 - `lib/api-spec/openapi.yaml` is the API contract source of truth. After contract changes, run `pnpm --filter @workspace/api-spec run codegen`; do not hand-edit generated clients.
 - Drizzle schemas live in `lib/db/src/schema`. Generate reviewed migrations for production changes; never use `push-force` on shared data.
 - Preserve the web, mobile, mockup, API, and role-based Demo unless a task explicitly changes product scope.
+- Treat `artifacts/health-docs` as the primary product UI. New employee journeys must work at 390px width before optional native-app work.
 
 ## Required checks
 
@@ -29,4 +30,4 @@
 - Prefer accessible controls, keyboard navigation, mobile layouts, and RTL/LTR parity.
 - Add or update `.env.example` with empty/safe placeholders when introducing configuration; never commit real secrets.
 - Document remaining production dependencies honestly rather than simulating unavailable services.
-
+- Use `$health-credential-release` and the release engineer for showcase or delivery work. Showcase mode is synthetic and in-memory; it is never a substitute for production infrastructure.

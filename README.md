@@ -6,15 +6,15 @@
 
 ## Workspace
 
-| Package | Purpose |
-| --- | --- |
-| `artifacts/health-docs` | React/Vite web application |
-| `artifacts/mobile` | Expo mobile application |
-| `artifacts/api-server` | Express API, authentication, RBAC, OCR and storage |
-| `artifacts/mockup-sandbox` | UI mockup/reference application |
-| `lib/db` | Drizzle schema and migrations |
-| `lib/api-spec` | OpenAPI source of truth |
-| `lib/api-client-react` / `lib/api-zod` | Generated clients and validators |
+| Package                                | Purpose                                            |
+| -------------------------------------- | -------------------------------------------------- |
+| `artifacts/health-docs`                | React/Vite web application                         |
+| `artifacts/mobile`                     | Expo mobile application                            |
+| `artifacts/api-server`                 | Express API, authentication, RBAC, OCR and storage |
+| `artifacts/mockup-sandbox`             | UI mockup/reference application                    |
+| `lib/db`                               | Drizzle schema and migrations                      |
+| `lib/api-spec`                         | OpenAPI source of truth                            |
+| `lib/api-client-react` / `lib/api-zod` | Generated clients and validators                   |
 
 ## Requirements
 
@@ -47,6 +47,16 @@ pnpm --filter @workspace/health-docs run dev
 
 اختبر مسار الموظف على عرض جوال أيضًا: تسجيل الدخول، فتح «وثائقي»، رفع ملف، تعبئة البيانات، ومراجعة حالة الوثيقة. الرفع اليدوي لا يرسل الملف إلى OCR؛ خيار «القراءة الذكية» وحده يستدعي خدمة المعالجة الخارجية.
 
+## Stakeholder showcase
+
+لتجربة الموقع فورًا دون قاعدة بيانات أو خدمات خارجية:
+
+```bash
+pnpm demo:web
+```
+
+افتح `http://localhost:4173` واختر حساب الموظف بنقرة واحدة. وضع العرض يستخدم بيانات صناعية فقط، ويحفظ الملفات المختارة في ذاكرة المتصفح إلى أن تُحدّث الصفحة، ويتضمن وثيقة نموذجية لتجربة القراءة الذكية المحاكية. التفاصيل الكاملة في [docs/SHOWCASE.md](docs/SHOWCASE.md).
+
 The API reads the root `.env` only in its `dev` command. Production `start` expects environment variables from the deployment platform.
 
 ## Demo data
@@ -63,13 +73,15 @@ Enable role-based one-click demo login locally with `DEMO_LOGIN_ENABLED=true`. B
 
 ```bash
 pnpm run typecheck
+pnpm run test
 pnpm --filter @workspace/api-server run build
 pnpm --filter @workspace/health-docs run build
+pnpm --filter @workspace/health-docs run build:showcase
 pnpm --filter @workspace/mockup-sandbox run build
 EXPO_PUBLIC_DOMAIN=ci.invalid BASE_PATH=/ pnpm --filter @workspace/mobile run build
 ```
 
-The repository currently has no lint configuration or automated test suite, so CI does not claim to run them. Add those commands only with real configuration and tests. Generated API code can be refreshed with:
+The repository has focused automated tests for the browser-only showcase. It still has no lint configuration, so CI does not claim to run lint. Add further commands only with real configuration and tests. Generated API code can be refreshed with:
 
 ```bash
 pnpm --filter @workspace/api-spec run codegen

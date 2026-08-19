@@ -27,7 +27,9 @@ export function AppHeader() {
   const [, setLocation] = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const user = getAuthUser();
-  const initials = (user?.nameAr || user?.name || "U")
+  const localizedName =
+    language === "ar" ? user?.nameAr || user?.name : user?.name || user?.nameAr;
+  const initials = (localizedName || "U")
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
@@ -55,24 +57,33 @@ export function AppHeader() {
     <header className="flex h-16 shrink-0 items-center gap-1 border-b border-border bg-card px-3 shadow-sm sm:gap-4 sm:px-6">
       <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
         <SheetTrigger asChild>
-          <Button variant="ghost" size="icon" className="lg:hidden" aria-label={t('common.menu')}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden"
+            aria-label={t("common.menu")}
+          >
             <Menu className="h-5 w-5" />
           </Button>
         </SheetTrigger>
-        <SheetContent
-          side={isRTL ? "right" : "left"}
-          className="w-64 p-0"
-        >
-          <SheetTitle className="sr-only">{t('common.menu')}</SheetTitle>
+        <SheetContent side={isRTL ? "right" : "left"} className="w-64 p-0">
+          <SheetTitle className="sr-only">{t("common.menu")}</SheetTitle>
           <AppSidebar onNavigate={() => setMobileMenuOpen(false)} />
         </SheetContent>
       </Sheet>
-      <span className="text-base font-bold text-primary sm:hidden">HealthDocs</span>
+      <span className="text-base font-bold text-primary sm:hidden">
+        HealthDocs
+      </span>
       <div className="hidden flex-1 items-center gap-4 sm:flex">
         <div className="relative w-full max-w-md">
-          <Search className={cn("absolute top-2.5 h-4 w-4 text-muted-foreground", isRTL ? "right-3" : "left-3")} />
-          <Input 
-            placeholder={t('common.search')} 
+          <Search
+            className={cn(
+              "absolute top-2.5 h-4 w-4 text-muted-foreground",
+              isRTL ? "right-3" : "left-3",
+            )}
+          />
+          <Input
+            placeholder={t("common.search")}
             className={cn("bg-muted/50 h-9", isRTL ? "pr-9" : "pl-9")}
           />
         </div>
@@ -82,7 +93,7 @@ export function AppHeader() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
+          onClick={() => setLanguage(language === "ar" ? "en" : "ar")}
           className="rounded-full"
           title={t("mobile.change_language")}
           aria-label={t("mobile.change_language")}
@@ -98,7 +109,11 @@ export function AppHeader() {
           className="hidden rounded-full sm:inline-flex"
           aria-label={t("mobile.change_theme")}
         >
-          {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+          {theme === "light" ? (
+            <Moon className="h-5 w-5" />
+          ) : (
+            <Sun className="h-5 w-5" />
+          )}
           <span className="sr-only">{t("mobile.change_theme")}</span>
         </Button>
 
@@ -106,7 +121,7 @@ export function AppHeader() {
           variant="ghost"
           size="icon"
           className="relative hidden rounded-full sm:inline-flex"
-          onClick={() => setLocation('/notifications')}
+          onClick={() => setLocation("/notifications")}
           aria-label={t("common.notifications")}
         >
           <Bell className="h-5 w-5" />
@@ -117,17 +132,26 @@ export function AppHeader() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="rounded-full bg-primary/10 hover:bg-primary/20">
-              <span className="text-primary text-xs font-semibold">{initials}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full bg-primary/10 hover:bg-primary/20"
+            >
+              <span className="text-primary text-xs font-semibold">
+                {initials}
+              </span>
               <span className="sr-only">{t("mobile.open_account_menu")}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem onClick={() => setLocation('/settings')}>
-              {t('common.settings')}
+            <DropdownMenuItem onClick={() => setLocation("/settings")}>
+              {t("common.settings")}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleLogout} className="text-destructive">
-              {t('common.logout')}
+            <DropdownMenuItem
+              onClick={handleLogout}
+              className="text-destructive"
+            >
+              {t("common.logout")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

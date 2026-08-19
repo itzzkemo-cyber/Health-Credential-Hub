@@ -2,6 +2,7 @@ import { ReactNode } from "react";
 import { AppSidebar } from "./Sidebar";
 import { AppHeader } from "./Header";
 import { MobileBottomNav } from "./MobileBottomNav";
+import { ShowcaseBanner } from "./ShowcaseBanner";
 import { isAuthenticated } from "@/lib/auth";
 import { Redirect, useLocation } from "wouter";
 
@@ -24,7 +25,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // Hide shell for login and verify
   if (location === "/login" || location.startsWith("/verify/")) {
-    return <div className="min-h-[100dvh] bg-background w-full">{children}</div>;
+    return (
+      <div className="min-h-[100dvh] bg-background w-full">{children}</div>
+    );
   }
 
   return (
@@ -34,10 +37,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">
         <AppHeader />
+        <ShowcaseBanner compact />
         <main className="mobile-main-padding flex-1 overflow-y-auto bg-slate-50 p-4 dark:bg-slate-900 md:p-6 lg:pb-6">
-          <div className="mx-auto max-w-6xl w-full">
-            {children}
-          </div>
+          <div className="mx-auto max-w-6xl w-full">{children}</div>
         </main>
         <MobileBottomNav />
       </div>

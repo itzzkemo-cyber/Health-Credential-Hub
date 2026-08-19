@@ -30,7 +30,7 @@ export const en = {
     coming_soon: "Coming Soon",
     not_connected: "Not Connected",
     all: "All",
-    loading: "Loading…"
+    loading: "Loading…",
   },
   mobile: {
     home: "Home",
@@ -41,10 +41,22 @@ export const en = {
     navigation: "Primary navigation",
     change_language: "Change language",
     change_theme: "Change theme",
-    open_account_menu: "Open account menu"
+    open_account_menu: "Open account menu",
+  },
+  showcase: {
+    label: "Showcase mode",
+    notice:
+      "Synthetic showcase — selected files stay in this device's memory and reset when the page reloads.",
+    reset: "Reset demo",
+    employee_demo: "Start the employee journey in one click",
+    external_disabled: "External integrations are disabled in the showcase",
+    use_sample_document: "Use a sample document and try smart capture",
+    security_settings_disabled:
+      "Two-factor authentication setup is disabled in the showcase because it requires a real account and server. It remains available in the full deployment.",
   },
   settings_page: {
-    subtitle: "Manage account security and how the site appears on your device.",
+    subtitle:
+      "Manage account security and how the site appears on your device.",
     language_region: "Language & Region",
     language_region_desc: "Configure the interface language and date display.",
     interface_language: "Interface Language",
@@ -65,15 +77,26 @@ export const en = {
     thresholds: "Alert Times Before Expiry",
     days: "Days",
     reset: "Reset Defaults",
-    saved: "Settings saved"
+    saved: "Settings saved",
   },
   auth: {
+    brand_name: "HealthDocs",
     login: "Login",
     email: "Email Address",
     password: "Password",
     remember_me: "Remember Me",
     forgot_password: "Forgot Password?",
     demo_accounts: "Demo Accounts — one-click sign in",
+    feature_compliance: "Instant compliance",
+    feature_compliance_desc:
+      "Track credential and license validity in one place.",
+    feature_ocr: "Smart capture",
+    feature_ocr_desc: "Extract document data and review it before saving.",
+    feature_qr: "QR verification",
+    feature_qr_desc: "A clear verification link for every approved document.",
+    feature_alerts: "Proactive alerts",
+    feature_alerts_desc:
+      "Get an early reminder before important documents expire.",
     system_title: "Healthcare Credential Management Platform",
     login_button: "Sign In",
     welcome_back: "Welcome Back",
@@ -82,15 +105,20 @@ export const en = {
     create_account: "Create account",
     google_or: "or",
     google_button: "Continue with Google",
-    google_error_config: "Google sign-in isn't configured yet — contact your system administrator",
-    google_error_failed: "Google sign-in could not be completed — please try again",
+    google_error_config:
+      "Google sign-in isn't configured yet — contact your system administrator",
+    google_error_failed:
+      "Google sign-in could not be completed — please try again",
     google_error_denied: "Google sign-in was cancelled",
-    google_error_unverified: "Your Google email address is unverified and can't be used",
-    google_error_inactive: "This account is deactivated — contact your facility administrator"
+    google_error_unverified:
+      "Your Google email address is unverified and can't be used",
+    google_error_inactive:
+      "This account is deactivated — contact your facility administrator",
   },
   twofa: {
     title: "Two-Factor Authentication (2FA)",
-    description: "An extra layer of protection: a rotating code from an authenticator app (Google Authenticator, Authy…) is required at login.",
+    description:
+      "An extra layer of protection: a rotating code from an authenticator app (Google Authenticator, Authy…) is required at login.",
     status_on: "Enabled",
     status_off: "Not enabled",
     enable: "Enable two-factor authentication",
@@ -102,13 +130,15 @@ export const en = {
     setup_code_label: "Then enter the 6-digit code shown in the app",
     activate: "Verify & enable",
     codes_title: "Backup codes",
-    codes_hint: "Store these codes somewhere safe — they are shown only once and each works a single time. They are your only way in if you lose your phone.",
+    codes_hint:
+      "Store these codes somewhere safe — they are shown only once and each works a single time. They are your only way in if you lose your phone.",
     codes_copy: "Copy codes",
     codes_copied: "Codes copied",
     codes_download: "Download as file",
     codes_saved: "I saved the codes — close",
     disable_title: "Disable two-factor authentication",
-    disable_hint: "To confirm, enter your current password and a code from your authenticator app or a backup code.",
+    disable_hint:
+      "To confirm, enter your current password and a code from your authenticator app or a backup code.",
     regen_title: "Generate new backup codes",
     regen_hint: "All previous backup codes will be invalidated immediately.",
     current_password: "Current password",
@@ -130,9 +160,11 @@ export const en = {
     regen_success: "New backup codes generated",
     admin_badge: "Two-factor authentication enabled",
     admin_disable: "Disable employee's 2FA",
-    admin_disable_hint: "Use only when the employee lost access to their authenticator app and backup codes. They will be able to sign in with password only and re-enable it.",
+    admin_disable_hint:
+      "Use only when the employee lost access to their authenticator app and backup codes. They will be able to sign in with password only and re-enable it.",
     admin_disable_confirm: "Yes, disable it",
-    admin_disabled_success: "Two-factor authentication disabled for this employee",
+    admin_disabled_success:
+      "Two-factor authentication disabled for this employee",
   },
   register: {
     title: "Create account",
@@ -148,7 +180,7 @@ export const en = {
     email_taken: "This email is already in use.",
     failed: "Could not create the account — check your details and try again.",
     have_account: "Already have an account?",
-    back_to_login: "Back to login"
+    back_to_login: "Back to login",
   },
   reset_password: {
     title: "Set a new password",
@@ -159,15 +191,16 @@ export const en = {
     submit: "Save password",
     success: "Password updated — you are now signed in.",
     invalid_link: "This reset link is invalid or has expired",
-    invalid_link_hint: "Links are valid for one hour and can be used once. Request a new link to continue.",
-    request_new: "Request a new link"
+    invalid_link_hint:
+      "Links are valid for one hour and can be used once. Request a new link to continue.",
+    request_new: "Request a new link",
   },
   roles: {
     employee: "Employee / Nurse",
     supervisor: "Supervisor",
     department_manager: "Department Manager",
     hospital_admin: "Hospital Admin",
-    system_admin: "System Admin"
+    system_admin: "System Admin",
   },
   stats: {
     total_credentials: "Total Credentials",
@@ -176,34 +209,42 @@ export const en = {
     expired_credentials: "Expired Credentials",
     missing_credentials: "Missing Credentials",
     compliance_rate: "Compliance Rate",
-    at_risk_employees: "At-Risk Employees"
+    at_risk_employees: "At-Risk Employees",
   },
   employee_portal: {
     dashboard_eyebrow: "Employee Portal",
-    dashboard_subtitle: "Upload your professional certificates and licenses from your phone, then track their status and expiry dates in one place.",
-    private_upload: "Your files are private and visible only to you and authorized staff within your facility.",
+    dashboard_subtitle:
+      "Upload your professional certificates and licenses from your phone, then track their status and expiry dates in one place.",
+    private_upload:
+      "Your files are private and visible only to you and authorized staff within your facility.",
     upload_action: "Upload New Document",
     document_summary: "Document summary",
     upcoming_expirations: "Upcoming Expirations",
     no_upcoming_expirations: "No documents are expiring soon.",
     my_compliance: "My File Completion",
-    compliance_hint: "Add required documents and replace expired ones to improve your file completion.",
-    facility_compliance_hint: "Calculated from required and valid documents within your authorized scope.",
+    compliance_hint:
+      "Add required documents and replace expired ones to improve your file completion.",
+    facility_compliance_hint:
+      "Calculated from required and valid documents within your authorized scope.",
     review_documents: "Review My Documents",
-    dashboard_error: "We could not load your data. Check your connection and try again.",
+    dashboard_error:
+      "We could not load your data. Check your connection and try again.",
     retry: "Try Again",
     my_documents: "My Data & Documents",
-    my_documents_subtitle: "Add certificates and licenses and track their status easily from your phone.",
-    manage_documents_subtitle: "Manage professional documents and verify their status.",
+    my_documents_subtitle:
+      "Add certificates and licenses and track their status easily from your phone.",
+    manage_documents_subtitle:
+      "Manage professional documents and verify their status.",
     search_documents: "Search documents...",
     no_search_results: "No matching results",
     try_another_search: "Try a different search term.",
     no_documents: "You have not uploaded any documents yet",
-    no_documents_hint: "Start with a clear photo or PDF of your professional certificate or license.",
+    no_documents_hint:
+      "Start with a clear photo or PDF of your professional certificate or license.",
     holder: "Document holder",
     issuer: "Issuer",
     expires: "Expires",
-    verify: "Verify"
+    verify: "Verify",
   },
   credential: {
     add_new: "Add Credential",
@@ -220,27 +261,37 @@ export const en = {
     upload_hint: "Drag and drop file here or click to browse",
     scan_success: "Document scanned — review the details, then save",
     scan_failed: "Failed to extract data. Please enter manually",
-    file_too_large: "File too large — the maximum is 8 MB. Try a smaller image or a compressed PDF",
+    file_too_large:
+      "File too large — the maximum is 8 MB. Try a smaller image or a compressed PDF",
     document_preview: "Document Preview",
     open_file: "Open File",
     no_document: "No document attached",
-    pdf_open_hint: "Inline PDF preview isn't supported in this browser — use \"Open File\" to view it",
-    ocr_review_notice: "Smart scan is powered by AI: the system reads the document and fills the fields automatically — review and correct them before saving.",
-    upload_failed: "Could not upload the file — check your connection and try again",
+    pdf_open_hint:
+      'Inline PDF preview isn\'t supported in this browser — use "Open File" to view it',
+    ocr_review_notice:
+      "Smart scan is powered by AI: the system reads the document and fills the fields automatically — review and correct them before saving.",
+    upload_failed:
+      "Could not upload the file — check your connection and try again",
     add_subtitle: "Upload a new professional certificate or license.",
     scanning_title: "Processing document...",
     scanning_hint: "The fields will be filled automatically for your review",
     upload_zone_title: "Click or drag your document here",
-    upload_zone_hint: "Upload your certificate (image or PDF) and the fields will be filled for you to review before saving.",
-    duplicate_warning: "A matching credential was already found. Do you want to proceed?",
+    upload_zone_hint:
+      "Upload your certificate (image or PDF) and the fields will be filled for you to review before saving.",
+    duplicate_warning:
+      "A matching credential was already found. Do you want to proceed?",
     upload_success: "File uploaded successfully",
     employee_required: "The employee for this document could not be identified",
     date_order_error: "The expiry date must be after the issue date",
+    invalid_date: "Invalid date",
     create_success: "Document saved successfully",
-    create_failed: "Could not save the document — check the details and try again",
+    create_failed:
+      "Could not save the document — check the details and try again",
     uploading_for: "Uploading for employee",
-    private_upload_notice: "The document is uploaded to private encrypted storage. Do not share upload links or document images outside the platform.",
-    manual_upload_hint: "Optional: attach an image or PDF without sending it to smart scan.",
+    private_upload_notice:
+      "The document is uploaded to private encrypted storage. Do not share upload links or document images outside the platform.",
+    manual_upload_hint:
+      "Optional: attach an image or PDF without sending it to smart scan.",
     select_type: "Select document type",
     english: "English",
     arabic: "Arabic",
@@ -258,7 +309,7 @@ export const en = {
     status_timeline: "Status Timeline",
     issued: "Issued",
     system_entry: "Added to System",
-    expiry: "Expiry"
+    expiry: "Expiry",
   },
   departments: {
     title: "Departments",
@@ -275,7 +326,7 @@ export const en = {
     update_success: "Department updated successfully",
     delete_success: "Department deleted successfully",
     delete_confirm: "Are you sure you want to delete this department?",
-    no_departments: "No departments added yet."
+    no_departments: "No departments added yet.",
   },
   notifications: {
     title: "Notifications",
@@ -285,7 +336,7 @@ export const en = {
     today: "Today",
     yesterday: "Yesterday",
     older: "Older",
-    read_success: "Notification updated"
+    read_success: "Notification updated",
   },
   audit_log: {
     title: "Audit Log",
@@ -297,7 +348,7 @@ export const en = {
     ip: "IP Address",
     filter_action: "Filter by Action",
     filter_date: "Filter by Date",
-    empty: "No matching logs found"
+    empty: "No matching logs found",
   },
   reports: {
     title: "Reports & Analytics",
@@ -311,7 +362,7 @@ export const en = {
     employee_name: "Employee Name",
     role: "Role",
     status: "Compliance Status",
-    missing_docs: "Missing/Expired Docs"
+    missing_docs: "Missing/Expired Docs",
   },
   policies: {
     title: "Policies & Requirements",
@@ -323,21 +374,23 @@ export const en = {
     is_required: "Required",
     create_success: "Policy added successfully",
     delete_success: "Policy deleted successfully",
-    delete_confirm: "Are you sure you want to delete this policy? This may affect employee compliance calculations.",
-    empty: "No policies defined yet."
+    delete_confirm:
+      "Are you sure you want to delete this policy? This may affect employee compliance calculations.",
+    empty: "No policies defined yet.",
   },
   integrations: {
     title: "Integrations",
     subtitle: "Manage system integrations with external platforms",
     connected: "Connected",
-    configure: "Configure"
+    configure: "Configure",
   },
   forgot_password: {
     title: "Reset Password",
     subtitle: "Enter your email to receive a reset link",
     send_link: "Send Reset Link",
     success_title: "Link Sent",
-    success_message: "Check your email for instructions to reset your password.",
-    back_to_login: "Back to Login"
-  }
+    success_message:
+      "Check your email for instructions to reset your password.",
+    back_to_login: "Back to Login",
+  },
 };
