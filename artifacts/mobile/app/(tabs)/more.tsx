@@ -37,7 +37,7 @@ export default function MoreScreen() {
     { icon: 'settings', label: t('more.settings'), route: '/settings' },
     { icon: 'git-network', label: t('more.integrations'), route: '/integrations' },
     { icon: 'download', label: t('more.export'), action: () => showMessage(t('more.comingSoon')) },
-    { icon: 'information-circle', label: t('more.about'), action: () => showMessage('MedCreds', 'v1.0.0\n© 2026') },
+    { icon: 'information-circle', label: t('more.about'), action: () => showMessage(t('brand.name'), 'v1.0.0\n© 2026') },
   ];
 
   return (

@@ -55,13 +55,13 @@ function BackupCodesView({ codes, onDone }: { codes: string[]; onDone: () => voi
   };
   const download = () => {
     const blob = new Blob(
-      [`HealthDocs — Backup codes (${new Date().toISOString().slice(0, 10)})\n\n${codes.join("\n")}\n`],
+      [`${t("auth.brand_name")} — Backup codes (${new Date().toISOString().slice(0, 10)})\n\n${codes.join("\n")}\n`],
       { type: "text/plain" },
     );
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "healthdocs-backup-codes.txt";
+    a.download = "wathaiqi-health-backup-codes.txt";
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };

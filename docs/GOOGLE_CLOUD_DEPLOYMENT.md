@@ -17,12 +17,20 @@ Storage bucket. All three resources should use `me-central2` (Dammam).
 
 ## First deployment
 
-Open Google Cloud Shell, clone this repository at the reviewed commit, and run:
+Open Google Cloud Shell, clone this repository at the reviewed commit, and run
+the read-only preflight before provisioning:
 
 ```bash
 export GOOGLE_CLOUD_PROJECT="your-project-id"
+bash infra/gcp/preflight.sh
 bash infra/gcp/bootstrap.sh
 ```
+
+The preflight verifies an active CLI account, project visibility/lifecycle,
+billing, and the fixed Dammam region without enabling an API or creating a
+resource. It intentionally does not print the active user or billing-account
+identifier. If it cannot read billing metadata, have a project/billing
+administrator perform this check instead of bypassing it.
 
 The script provisions a regional PostgreSQL instance with backups and
 point-in-time recovery, a private versioned bucket with seven-day soft delete,
@@ -172,6 +180,22 @@ that IP. Update these values after the certificate is active:
   `https://your-domain/api/auth/google/callback` as an authorized redirect URI.
 - Resend, if enabled: verify the sending domain, store `RESEND_API_KEY` in
   Secret Manager, set `EMAIL_FROM`, then change `EMAIL_ALERTS_DISABLED=0`.
+
+After the load balancer, certificate, DNS, CORS, and custom-domain readiness
+check all succeed, prevent clients from bypassing the load balancer:
+
+```bash
+gcloud run services update "health-credential-hub" \
+  --project="${GOOGLE_CLOUD_PROJECT}" \
+  --region="me-central2" \
+  --ingress="internal-and-cloud-load-balancing" \
+  --no-default-url
+```
+
+Run this only after the custom-domain smoke test succeeds; otherwise it removes
+the generated `run.app` acceptance URL. Keep the service's application-level
+authentication and tenant authorization in place—the load balancer is an
+additional network boundary, not a replacement.
 
 Do not use Cloud Run's preview domain-mapping feature for a production domain;
 use the load balancer so the certificate and TLS policy are production-grade.

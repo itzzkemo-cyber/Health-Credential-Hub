@@ -34,7 +34,7 @@ describe("showcase API", () => {
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.user).toMatchObject({
-      email: "employee@healthdocs.sa",
+      email: "employee@demo.wathaiqi.invalid",
       role: "employee",
     });
   });

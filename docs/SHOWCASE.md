@@ -1,4 +1,4 @@
-# Health Credential Hub — Showcase handoff
+# وثائقي الصحية | Watha'iqi Health — Showcase handoff
 
 هذه نسخة عرض للواجهة الأساسية على الويب، مهيأة لتجربة مساري الموظف والمدير
 من الجوال دون قاعدة بيانات أو تخزين أو مفاتيح API.

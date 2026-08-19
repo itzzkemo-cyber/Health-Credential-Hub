@@ -94,7 +94,7 @@ export const en = {
       "Language and appearance changes apply immediately on this device; there is no separate Save step.",
   },
   auth: {
-    brand_name: "HealthDocs",
+    brand_name: "Watha'iqi Health",
     login: "Login",
     email: "Email Address",
     password: "Password",
@@ -308,7 +308,7 @@ export const en = {
     no_active_credentials: "No active credentials.",
   },
   verify_page: {
-    title: "HealthDocs Verification",
+    title: "Watha'iqi Health Verification",
     registry: "Official Credential Registry",
     invalid_title: "Invalid or Expired QR",
     invalid_description:
@@ -321,7 +321,7 @@ export const en = {
     issue_date: "Issue Date",
     expiry_date: "Expiry Date",
     verified_on: "Verified on",
-    powered_by: "Powered by HealthDocs",
+    powered_by: "Powered by Watha'iqi Health",
   },
   credential: {
     add_new: "Add Credential",

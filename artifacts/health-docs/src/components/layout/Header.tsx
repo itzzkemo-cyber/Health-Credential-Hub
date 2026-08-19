@@ -72,7 +72,7 @@ export function AppHeader() {
         </SheetContent>
       </Sheet>
       <span className="text-base font-bold text-primary sm:hidden">
-        HealthDocs
+        {t("auth.brand_name")}
       </span>
       <div className="hidden flex-1 items-center gap-4 sm:flex">
         <div className="relative w-full max-w-md">

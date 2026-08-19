@@ -93,7 +93,7 @@ export const ar = {
       "تُطبّق تغييرات اللغة والمظهر فورًا على هذا الجهاز؛ ولا توجد خطوة حفظ منفصلة.",
   },
   auth: {
-    brand_name: "وثائقي الصحي",
+    brand_name: "وثائقي الصحية",
     login: "تسجيل الدخول",
     email: "البريد الإلكتروني",
     password: "كلمة المرور",
@@ -297,7 +297,7 @@ export const ar = {
     no_active_credentials: "لا توجد وثائق نشطة.",
   },
   verify_page: {
-    title: "التحقق من HealthDocs",
+    title: "التحقق من وثائقي الصحية",
     registry: "السجل الرسمي للوثائق المهنية",
     invalid_title: "رمز QR غير صالح أو منتهي",
     invalid_description:
@@ -310,7 +310,7 @@ export const ar = {
     issue_date: "تاريخ الإصدار",
     expiry_date: "تاريخ الانتهاء",
     verified_on: "تم التحقق في",
-    powered_by: "بدعم من HealthDocs",
+    powered_by: "بدعم من وثائقي الصحية",
   },
   credential: {
     add_new: "إضافة وثيقة",

@@ -24,7 +24,7 @@ export default function IntegrationsScreen() {
           {isRTL ? 'التكاملات المستقبلية' : 'Future Integrations'}
         </Text>
         <Text style={{ color: colors.mutedForeground, textAlign: 'center', marginTop: 8 }}>
-          {isRTL ? 'نعمل على ربط MedCreds بالأنظمة الرئيسية' : 'We are working on connecting MedCreds to major systems'}
+          {isRTL ? 'نعمل على ربط وثائقي الصحية بالأنظمة الرئيسية' : "We are working on connecting Watha'iqi Health to major systems"}
         </Text>
       </View>
 

@@ -121,8 +121,8 @@ export default function LoginScreen() {
           <View style={{ width: 80, height: 80, borderRadius: 40, backgroundColor: 'white', alignItems: 'center', justifyContent: 'center', marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10 }}>
             <Ionicons name="shield-checkmark" size={48} color={colors.primary} />
           </View>
-          <Text style={{ fontSize: 32, fontWeight: 'bold', color: 'white' }}>MedCreds</Text>
-          <Text style={{ fontSize: 16, color: 'rgba(255,255,255,0.8)', marginTop: 4 }}>إدارة الاعتمادات الصحية</Text>
+          <Text style={{ fontSize: 32, fontWeight: 'bold', color: 'white', textAlign: 'center' }}>{t('brand.name')}</Text>
+          <Text style={{ fontSize: 16, color: 'rgba(255,255,255,0.8)', marginTop: 4, textAlign: 'center' }}>{t('brand.subtitle')}</Text>
         </View>
 
         {challengeToken ? (

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run from Google Cloud Shell after selecting a CNTXT-backed KSA project.
+# Run from Google Cloud Shell after selecting the approved production project.
 # Required input: GOOGLE_CLOUD_PROJECT. Optional: REGION and resource names.
 PROJECT_ID="${GOOGLE_CLOUD_PROJECT:?Set GOOGLE_CLOUD_PROJECT to the target project id}"
 REGION="${REGION:-me-central2}"
@@ -71,9 +71,16 @@ if [[ "${AUTOMATION_OUTBOX_ENABLED}" == "true" ]]; then
   }
 fi
 
-command -v gcloud >/dev/null || { echo "gcloud is required" >&2; exit 1; }
-command -v openssl >/dev/null || { echo "openssl is required" >&2; exit 1; }
-command -v git >/dev/null || { echo "git is required" >&2; exit 1; }
+for required_command in gcloud openssl git grep tail tr curl mktemp; do
+  command -v "${required_command}" >/dev/null || {
+    echo "${required_command} is required" >&2
+    exit 1
+  }
+done
+
+# This is intentionally read-only and runs before enabling services or creating
+# paid resources. It also avoids leaking the active account or billing account.
+bash infra/gcp/preflight.sh
 
 RELEASE_SHA="${RELEASE_SHA:-$(git rev-parse HEAD)}"
 if [[ ! "${RELEASE_SHA}" =~ ^[0-9a-f]{7,40}$ ]] || \
@@ -287,7 +294,7 @@ if [[ ! "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
 fi
 IMAGE_REF="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
 
-COMMON_ENV="^|^NODE_ENV=production|DB_POOL_MAX=10|PRIVATE_OBJECT_DIR=/${BUCKET}/private|STORAGE_API_ENDPOINT=https://storage.${REGION}.rep.googleapis.com|SESSION_COOKIE_SAME_SITE=lax|DEMO_LOGIN_ENABLED=false|ALLOW_DEMO_SEED=false|SELF_REGISTRATION_ENABLED=false|GOOGLE_AUTO_PROVISION_ENABLED=false|EMAIL_ALERTS_DISABLED=1|AUTOMATION_OUTBOX_ENABLED=${AUTOMATION_OUTBOX_ENABLED}|AUTOMATION_FACILITY_ALLOWLIST=${AUTOMATION_FACILITY_ALLOWLIST}"
+COMMON_ENV="^|^NODE_ENV=production|GOOGLE_CLOUD_PROJECT=${PROJECT_ID}|DB_POOL_MAX=10|PRIVATE_OBJECT_DIR=/${BUCKET}/private|STORAGE_API_ENDPOINT=https://storage.${REGION}.rep.googleapis.com|SESSION_COOKIE_SAME_SITE=lax|DEMO_LOGIN_ENABLED=false|ALLOW_DEMO_SEED=false|SELF_REGISTRATION_ENABLED=false|GOOGLE_AUTO_PROVISION_ENABLED=false|EMAIL_ALERTS_DISABLED=1|AUTOMATION_OUTBOX_ENABLED=${AUTOMATION_OUTBOX_ENABLED}|AUTOMATION_FACILITY_ALLOWLIST=${AUTOMATION_FACILITY_ALLOWLIST}"
 
 gcloud run jobs deploy "${SERVICE}-migrate" \
   --image="${IMAGE_REF}" \

@@ -112,7 +112,9 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   return (
     <div className="flex h-full w-64 flex-col bg-sidebar border-x border-sidebar-border shadow-sm">
       <div className="flex h-16 items-center px-6 border-b border-sidebar-border bg-sidebar-primary text-sidebar-primary-foreground">
-        <h1 className="text-xl font-bold tracking-tight">HealthDocs</h1>
+        <h1 className="text-xl font-bold tracking-tight">
+          {t("auth.brand_name")}
+        </h1>
       </div>
 
       <div className="flex-1 overflow-y-auto py-4">

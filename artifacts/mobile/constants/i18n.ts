@@ -1,5 +1,9 @@
 export const translations = {
   ar: {
+    brand: {
+      name: 'وثائقي الصحية',
+      subtitle: 'إدارة وثائق واعتمادات الكوادر الصحية',
+    },
     auth: {
       login: 'تسجيل الدخول',
       email: 'البريد الإلكتروني',
@@ -194,6 +198,10 @@ export const translations = {
     }
   },
   en: {
+    brand: {
+      name: "Watha'iqi Health",
+      subtitle: 'Health workforce credentials',
+    },
     auth: {
       login: 'Login',
       email: 'Email',

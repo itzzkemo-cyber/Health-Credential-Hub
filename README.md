@@ -1,4 +1,4 @@
-# Health Credential Hub
+# وثائقي الصحية | Watha'iqi Health
 
 منصة عربية/إنجليزية لإدارة وثائق واعتمادات الكوادر الصحية، مع لوحة ويب، تطبيق Expo، API، تخزين ملفات خاص، قراءة OCR اختيارية، تنبيهات، وتقارير امتثال. يتضمن المستودع Demo متكاملًا للأدوار الخمسة، لكنه مغلق تلقائيًا في الإنتاج.
 
@@ -114,9 +114,9 @@ GCS, Gemini, Resend, and Google OAuth are documented in
 outbox وعاملًا منفصلًا يوقع أحداثًا مصغرة قبل إرسالها إلى مستلم مركزي معتمد؛
 راجع [docs/PRODUCTION_AUTOMATION.md](docs/PRODUCTION_AUTOMATION.md) قبل ربط n8n.
 
-اقتراح الاسم التجاري الحالي هو **CredArabia | كريد أرابيا**، والدومين المرشح
-هو `credarabia.com`. لا تغيّر هوية المنتج قبل شراء الدومين وإجراء بحث العلامة
-التجارية؛ القرار والبدائل موثقة في
+اسم المنتج المعتمد للواجهة هو **Watha'iqi Health | وثائقي الصحية**، والدومين
+المرشح هو `wathaiqihealth.com`. حالة الدومين وقت الفحص ليست حجزًا ولا موافقة
+على العلامة التجارية؛ خطوات الشراء وفحص SaudiNIC وSAIP موثقة في
 [docs/BRAND_AND_DOMAIN.md](docs/BRAND_AND_DOMAIN.md).
 
 - Keep `DEMO_LOGIN_ENABLED`, `ALLOW_DEMO_SEED`, `SELF_REGISTRATION_ENABLED`, and `GOOGLE_AUTO_PROVISION_ENABLED` false unless explicitly required.

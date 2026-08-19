@@ -17,7 +17,7 @@ import {
 
 const employee: User = {
   id: 5,
-  email: "employee@healthdocs.sa",
+  email: "employee@demo.wathaiqi.invalid",
   name: "Noura Alqahtani",
   nameAr: "نورة القحطاني",
   role: "employee",
@@ -37,7 +37,7 @@ const employee: User = {
 const supervisor: User = {
   ...employee,
   id: 4,
-  email: "supervisor@healthdocs.sa",
+  email: "supervisor@demo.wathaiqi.invalid",
   name: "Omar Alharbi",
   nameAr: "عمر الحربي",
   role: "supervisor",
@@ -50,7 +50,7 @@ const supervisor: User = {
 const departmentManager: User = {
   ...employee,
   id: 3,
-  email: "dept@healthdocs.sa",
+  email: "dept@demo.wathaiqi.invalid",
   name: "Sara Alotaibi",
   nameAr: "سارة العتيبي",
   role: "department_manager",
@@ -63,7 +63,7 @@ const departmentManager: User = {
 const hospitalAdmin: User = {
   ...employee,
   id: 2,
-  email: "hospital@healthdocs.sa",
+  email: "hospital@demo.wathaiqi.invalid",
   name: "Khalid Alqahtani",
   nameAr: "خالد القحطاني",
   role: "hospital_admin",
@@ -77,9 +77,9 @@ const hospitalAdmin: User = {
 const systemAdmin: User = {
   ...hospitalAdmin,
   id: 1,
-  email: "admin@healthdocs.sa",
-  name: "HealthDocs Admin",
-  nameAr: "مسؤول وثائقي الصحي",
+  email: "admin@demo.wathaiqi.invalid",
+  name: "Watha'iqi Health Admin",
+  nameAr: "مسؤول وثائقي الصحية",
   role: "system_admin",
   employeeNumber: "SYS-1001",
 };
@@ -87,7 +87,7 @@ const systemAdmin: User = {
 const secondEmployee: User = {
   ...employee,
   id: 6,
-  email: "fahad@healthdocs.sa",
+  email: "fahad@demo.wathaiqi.invalid",
   name: "Fahad Almutairi",
   nameAr: "فهد المطيري",
   jobTitle: "Emergency Nurse",
@@ -98,7 +98,7 @@ const secondEmployee: User = {
 const pharmacyEmployee: User = {
   ...employee,
   id: 7,
-  email: "reem@healthdocs.sa",
+  email: "reem@demo.wathaiqi.invalid",
   name: "Reem Alzahrani",
   nameAr: "ريم الزهراني",
   departmentId: 2,
@@ -149,7 +149,7 @@ export function createShowcaseRequestHandler(): RequestHandler {
         : input instanceof URL
           ? input.toString()
           : input.url;
-    const url = new URL(rawUrl, "https://showcase.healthdocs.invalid");
+    const url = new URL(rawUrl, "https://showcase.wathaiqi.invalid");
     const path = url.pathname;
     const method = (init.method ?? "GET").toUpperCase();
 
@@ -480,8 +480,8 @@ function createSeedCredentials(): Credential[] {
     credentialSeed({
       id: 103,
       type: "infection_control",
-      issuerName: "HealthDocs Training Center",
-      issuerNameAr: "مركز وثائقي الصحي للتدريب",
+      issuerName: "Watha'iqi Health Training Center",
+      issuerNameAr: "مركز وثائقي الصحية للتدريب",
       certificateNumber: "IPC-19042",
       issueDate: shiftedDate(-420),
       expiryDate: shiftedDate(-55),

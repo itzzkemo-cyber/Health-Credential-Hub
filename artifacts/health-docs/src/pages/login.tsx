@@ -131,31 +131,31 @@ export default function Login() {
     ? [
         {
           role: "system_admin",
-          email: "admin@healthdocs.sa",
+          email: "admin@demo.wathaiqi.invalid",
           icon: ShieldCheck,
           color: "text-red-500",
         },
         {
           role: "hospital_admin",
-          email: "hospital@healthdocs.sa",
+          email: "hospital@demo.wathaiqi.invalid",
           icon: Activity,
           color: "text-blue-500",
         },
         {
           role: "department_manager",
-          email: "dept@healthdocs.sa",
+          email: "dept@demo.wathaiqi.invalid",
           icon: Users,
           color: "text-amber-500",
         },
         {
           role: "supervisor",
-          email: "supervisor@healthdocs.sa",
+          email: "supervisor@demo.wathaiqi.invalid",
           icon: HeartPulse,
           color: "text-green-500",
         },
         {
           role: "employee",
-          email: "employee@healthdocs.sa",
+          email: "employee@demo.wathaiqi.invalid",
           icon: UserCircle,
           color: "text-primary",
         },
