@@ -5,13 +5,15 @@
  * HealthDocs - Healthcare Credential Management Platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { CredentialPolicyCredentialType } from './credentialPolicyCredentialType';
+import type { CredentialPolicyRolesItem } from './credentialPolicyRolesItem';
 
 export interface CredentialPolicy {
   id: number;
-  credentialType: string;
+  credentialType: CredentialPolicyCredentialType;
   /** @nullable */
   departmentId?: number | null;
-  roles: string[];
+  roles: CredentialPolicyRolesItem[];
   isRequired: boolean;
   createdAt: string;
 }

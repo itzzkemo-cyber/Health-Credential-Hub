@@ -12,6 +12,7 @@ import {
   type Department,
 } from "@workspace/db";
 import { eq, inArray, and, isNull } from "drizzle-orm";
+import { canAccessCredentialOwner } from "./roleHierarchy";
 
 // ---------------------------------------------------------------------------
 // Dates & status
@@ -114,26 +115,6 @@ export function serializeCredential(c: CredentialRow, employee?: User | null) {
 // Scoping
 // ---------------------------------------------------------------------------
 
-export function isUserInScope(current: User, target: User): boolean {
-  if (!current.isActive) return false;
-  if (current.id === target.id || current.role === "system_admin") return true;
-  if (current.role === "hospital_admin") {
-    return current.facilityId === target.facilityId;
-  }
-  if (current.role === "department_manager") {
-    return (
-      current.facilityId === target.facilityId &&
-      current.departmentId != null &&
-      current.departmentId === target.departmentId
-    );
-  }
-  return (
-    current.role === "supervisor" &&
-    current.facilityId === target.facilityId &&
-    target.supervisorId === current.id
-  );
-}
-
 export async function getScopedUsers(current: User): Promise<User[]> {
   if (current.role === "system_admin") {
     return db.select().from(usersTable);
@@ -160,6 +141,11 @@ export async function getScopedUsers(current: User): Promise<User[]> {
     default:
       return all;
   }
+}
+
+export async function getCredentialScopedUsers(current: User): Promise<User[]> {
+  const scoped = await getScopedUsers(current);
+  return scoped.filter((target) => canAccessCredentialOwner(current, target));
 }
 
 export async function getCredentialsFor(
@@ -338,9 +324,11 @@ export async function logAudit(
   targetAr: string,
   details?: string,
   ipAddress?: string,
+  facilityId: number = user.facilityId,
 ): Promise<void> {
   await db.insert(auditLogsTable).values({
     userId: user.id,
+    facilityId,
     userName: user.name,
     userNameAr: user.nameAr,
     action,

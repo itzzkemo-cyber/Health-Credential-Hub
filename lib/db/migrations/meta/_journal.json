@@ -29,6 +29,13 @@
       "when": 1787135310007,
       "tag": "0003_fuzzy_scarlet_witch",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787137717320,
+      "tag": "0004_audit_facility_scope",
+      "breakpoints": true
     }
   ]
 }

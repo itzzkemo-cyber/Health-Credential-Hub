@@ -3,7 +3,7 @@ import { db, facilitiesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { requireAuth, getUser } from "../lib/auth";
 import {
-  getScopedUsers,
+  getCredentialScopedUsers,
   getCredentialsFor,
   getPolicies,
   getDepartments,
@@ -27,7 +27,7 @@ router.get("/reports/compliance", async (req, res) => {
     ? Number(req.query.departmentId)
     : null;
 
-  let scoped = (await getScopedUsers(user)).filter(
+  let scoped = (await getCredentialScopedUsers(user)).filter(
     (u) => u.isActive && u.facilityId === facilityId,
   );
   if (departmentId != null) {

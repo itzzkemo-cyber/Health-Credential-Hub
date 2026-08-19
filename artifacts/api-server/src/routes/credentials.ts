@@ -18,14 +18,14 @@ import {
   daysUntil,
   dateStr,
   serializeCredential,
-  getScopedUsers,
+  getCredentialScopedUsers,
   getCredentialsFor,
   getPolicies,
   missingTypesFor,
   evaluateCredentialVerificationChange,
-  isUserInScope,
   logAudit,
 } from "../lib/helpers";
+import { canAccessCredentialOwner } from "../lib/roleHierarchy";
 import {
   getObjectAclPolicy,
   setObjectAclPolicy,
@@ -58,10 +58,10 @@ function normalizeCalendarDate(value: string): string | null {
     : date;
 }
 
-async function canAccessLinkedObject(
+async function findLinkedObjectFacility(
   user: User,
   fileUrl: string,
-): Promise<boolean> {
+): Promise<number | null> {
   const linked = await db
     .select({ employeeId: credentialsTable.employeeId })
     .from(credentialsTable)
@@ -71,13 +71,12 @@ async function canAccessLinkedObject(
         isNull(credentialsTable.deletedAt),
       ),
     );
-  if (linked.length === 0) return false;
-  if (linked.some((entry) => entry.employeeId === user.id)) return true;
-  if (!MANAGER_ROLES.includes(user.role)) return false;
-  const scopedIds = new Set(
-    (await getScopedUsers(user)).map((entry) => entry.id),
+  if (linked.length === 0) return null;
+  const linkedIds = new Set(linked.map((entry) => entry.employeeId));
+  const owner = (await getCredentialScopedUsers(user)).find((entry) =>
+    linkedIds.has(entry.id),
   );
-  return linked.some((entry) => scopedIds.has(entry.employeeId));
+  return owner?.facilityId ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +117,7 @@ router.use("/credentials", requireAuth);
 router.get("/credentials/expiring", async (req, res) => {
   const user = getUser(req);
   const days = Number(req.query.days ?? 90);
-  const scoped = await getScopedUsers(user);
+  const scoped = await getCredentialScopedUsers(user);
   const byId = new Map(scoped.map((u) => [u.id, u]));
   const creds = await getCredentialsFor(scoped.map((u) => u.id));
   const result = creds
@@ -137,7 +136,7 @@ router.get("/credentials/missing", async (req, res) => {
   const departmentId = req.query.departmentId
     ? Number(req.query.departmentId)
     : null;
-  let scoped = await getScopedUsers(user);
+  let scoped = await getCredentialScopedUsers(user);
   if (employeeId != null) scoped = scoped.filter((u) => u.id === employeeId);
   if (departmentId != null)
     scoped = scoped.filter((u) => u.departmentId === departmentId);
@@ -216,14 +215,15 @@ router.post("/credentials/ocr", async (req, res) => {
   // Load the uploaded document from object storage.
   let buffer: Buffer;
   let mimeType: string;
+  let auditFacilityId = user.facilityId;
   try {
     const objectFile = await objectStorageService.getObjectEntityFile(fileUrl);
     const pendingGrant = await findActiveUploadGrant(fileUrl, user.id);
 
     // Fresh uploads carry no ACL yet (it is stamped when the credential is
     // saved). If the object already HAS an ACL, apply the same rule as the
-    // file-serving route: managers may read any document, everyone else only
-    // their own — so this endpoint cannot be used to read someone else's file.
+    // file-serving route: managers may read documents in their server-side
+    // facility/team scope, everyone else only their own.
     const aclPolicy = await getObjectAclPolicy(objectFile);
     if (aclPolicy) {
       const isOwner = await objectStorageService.canAccessObjectEntity({
@@ -231,7 +231,8 @@ router.post("/credentials/ocr", async (req, res) => {
         objectFile,
         requestedPermission: ObjectPermission.READ,
       });
-      const canAccessLinked = await canAccessLinkedObject(user, fileUrl);
+      const linkedFacilityId = await findLinkedObjectFacility(user, fileUrl);
+      const canAccessLinked = linkedFacilityId != null;
       // ACL ownership alone is insufficient after the upload grant has been
       // consumed: the object must still belong to an active credential. This
       // keeps retained soft-deleted evidence inaccessible to OCR callers.
@@ -239,6 +240,7 @@ router.post("/credentials/ocr", async (req, res) => {
         res.status(403).json({ message: "Forbidden" });
         return;
       }
+      if (linkedFacilityId != null) auditFacilityId = linkedFacilityId;
     } else if (!pendingGrant) {
       res.status(403).json({
         message: "Upload grant expired or does not belong to this user",
@@ -355,6 +357,7 @@ router.post("/credentials/ocr", async (req, res) => {
       "وثيقة اعتماد",
       undefined,
       req.ip,
+      auditFacilityId,
     );
     res.json(extracted);
   } catch (error) {
@@ -380,7 +383,7 @@ router.post("/credentials/check-duplicate", async (req, res) => {
   }
   // Scope check: caller may only probe employees they are authorized to see.
   const user = getUser(req);
-  const scopedUsers = await getScopedUsers(user);
+  const scopedUsers = await getCredentialScopedUsers(user);
   if (!scopedUsers.some((u) => u.id === employeeId)) {
     res.status(403).json({ message: "Not authorized for this employee" });
     return;
@@ -416,7 +419,7 @@ router.post("/credentials/check-duplicate", async (req, res) => {
 
 router.get("/credentials", async (req, res) => {
   const user = getUser(req);
-  const scoped = await getScopedUsers(user);
+  const scoped = await getCredentialScopedUsers(user);
   const byId = new Map(scoped.map((u) => [u.id, u]));
   let creds = await getCredentialsFor(scoped.map((u) => u.id));
 
@@ -525,7 +528,7 @@ router.post("/credentials", async (req, res) => {
       const employee = lockedUsers.find(
         (entry) => entry.id === effectiveEmployeeId,
       );
-      if (!employee || !isUserInScope(actor, employee)) {
+      if (!employee || !canAccessCredentialOwner(actor, employee)) {
         return { kind: "forbidden" as const };
       }
 
@@ -617,6 +620,7 @@ router.post("/credentials", async (req, res) => {
 
       await tx.insert(auditLogsTable).values({
         userId: actor.id,
+        facilityId: employee.facilityId,
         userName: actor.name,
         userNameAr: actor.nameAr,
         action: "Added credential",
@@ -679,7 +683,7 @@ async function findScopedCredential(
     );
   const cred = rows[0];
   if (!cred) return null;
-  const scoped = await getScopedUsers(user);
+  const scoped = await getCredentialScopedUsers(user);
   const owner = scoped.find((u) => u.id === cred.employeeId);
   if (!owner) return null;
   return { cred, owner };
@@ -836,7 +840,7 @@ router.patch("/credentials/:id", async (req, res) => {
       const owner = lockedUsers.find(
         (entry) => entry.id === current.employeeId,
       );
-      if (!actor || !owner || !isUserInScope(actor, owner)) {
+      if (!actor || !owner || !canAccessCredentialOwner(actor, owner)) {
         return { kind: "forbidden" as const };
       }
       if (
@@ -936,6 +940,7 @@ router.patch("/credentials/:id", async (req, res) => {
         : ["Updated credential", "تحديث وثيقة"];
       await tx.insert(auditLogsTable).values({
         userId: actor.id,
+        facilityId: owner.facilityId,
         userName: actor.name,
         userNameAr: actor.nameAr,
         action: auditAction[0],
@@ -1002,7 +1007,7 @@ router.delete("/credentials/:id", async (req, res) => {
       .for("update");
     const actor = lockedUsers.find((entry) => entry.id === user.id);
     const owner = lockedUsers.find((entry) => entry.id === current.employeeId);
-    if (!actor || !owner || !isUserInScope(actor, owner)) {
+    if (!actor || !owner || !canAccessCredentialOwner(actor, owner)) {
       return false;
     }
 
@@ -1029,6 +1034,7 @@ router.delete("/credentials/:id", async (req, res) => {
       .where(eq(notificationsTable.credentialId, current.id));
     await tx.insert(auditLogsTable).values({
       userId: actor.id,
+      facilityId: owner.facilityId,
       userName: actor.name,
       userNameAr: actor.nameAr,
       action: "Deleted credential",

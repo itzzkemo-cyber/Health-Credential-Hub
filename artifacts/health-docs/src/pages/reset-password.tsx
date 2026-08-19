@@ -7,6 +7,7 @@ import {
 } from "@workspace/api-client-react";
 import { useLanguage } from "@/lib/language-context";
 import { setAuthSession } from "@/lib/auth";
+import { consumeResetToken } from "@/lib/reset-token";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,15 +17,10 @@ import { toast } from "sonner";
 export default function ResetPassword() {
   const { t } = useLanguage();
   const [, setLocation] = useLocation();
-  // The raw token only ever travels inside the emailed link's query string.
-  const [token] = useState(
-    () => {
-      const url = new URL(window.location.href);
-      const value = url.searchParams.get("token") ?? "";
-      url.searchParams.delete("token");
-      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-      return value;
-    },
+  // Consume the secret into component memory and scrub it from the address
+  // bar before any user interaction, render effect, or API request.
+  const [token] = useState(() =>
+    consumeResetToken(window.location, window.history),
   );
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");

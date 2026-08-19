@@ -22,6 +22,17 @@ export function getAppBaseUrl(): string | null {
   return appUrl ? `${appUrl}/` : null;
 }
 
+/**
+ * Build a reset link whose bearer token is confined to the URL fragment.
+ * Fragments never reach the HTTP server or intermediary request logs.
+ */
+export function getPasswordResetUrl(rawToken: string): string | null {
+  const base = getAppBaseUrl();
+  return base
+    ? `${base}reset-password#token=${encodeURIComponent(rawToken)}`
+    : null;
+}
+
 function esc(s: string): string {
   return s
     .replaceAll("&", "&amp;")

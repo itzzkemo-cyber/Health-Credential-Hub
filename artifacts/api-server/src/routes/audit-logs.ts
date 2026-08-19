@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, auditLogsTable, usersTable } from "@workspace/db";
+import { db, auditLogsTable } from "@workspace/db";
 import { desc, eq } from "drizzle-orm";
 import { requireAuth, requireRole, getUser, ADMIN_ROLES } from "../lib/auth";
 
@@ -21,14 +21,12 @@ router.get("/audit-logs", requireRole(...ADMIN_ROLES), async (req, res) => {
       .orderBy(desc(auditLogsTable.createdAt))
       .limit(2000);
   } else {
-    const scopedRows = await db
-      .select({ audit: auditLogsTable })
+    rows = await db
+      .select()
       .from(auditLogsTable)
-      .innerJoin(usersTable, eq(auditLogsTable.userId, usersTable.id))
-      .where(eq(usersTable.facilityId, current.facilityId))
+      .where(eq(auditLogsTable.facilityId, current.facilityId))
       .orderBy(desc(auditLogsTable.createdAt))
       .limit(2000);
-    rows = scopedRows.map(({ audit }) => audit);
   }
 
   if (userId) rows = rows.filter((r) => r.userId === Number(userId));

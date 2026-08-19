@@ -22,9 +22,9 @@ import {
   computeEmployeeStats,
   evaluateCredentialVerificationChange,
   hasMaterialCredentialChange,
-  isUserInScope,
   missingTypesFor,
 } from "./helpers";
+import { isUserInScope } from "./roleHierarchy";
 
 const employee = {
   id: 7,

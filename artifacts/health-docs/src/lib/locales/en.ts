@@ -331,7 +331,7 @@ export const en = {
     scanning_hint: "The fields will be filled automatically for your review",
     upload_zone_title: "Choose a document to scan",
     upload_zone_hint:
-      "Upload your certificate (image or PDF) and the fields will be filled for you to review before saving.",
+      "Upload your certificate (image or PDF, maximum 8 MB) and the fields will be filled for you to review before saving.",
     duplicate_warning:
       "A matching credential was already found. Do you want to proceed?",
     upload_success: "File uploaded successfully",
@@ -351,7 +351,7 @@ export const en = {
     showcase_file_selected:
       "File selected and retained temporarily in this device's memory until the page reloads.",
     manual_upload_hint:
-      "Optional: attach an image or PDF without sending it to smart scan.",
+      "Optional: attach an image or PDF (maximum 8 MB) without sending it to smart scan.",
     select_type: "Select document type",
     english: "English",
     arabic: "Arabic",

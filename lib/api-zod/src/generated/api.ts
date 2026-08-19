@@ -359,7 +359,7 @@ export const TotpRegenerateBackupResponse = zod.object({
 
 
 /**
- * @summary Admin recovery — disable 2FA for a locked-out employee (hospital/system admins)
+ * @summary Admin recovery — disable 2FA for a lower-ranked account in scope
  */
 export const TotpAdminDisableBody = zod.object({
   "userId": zod.number()
@@ -463,7 +463,7 @@ export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem
 
 
 /**
- * @summary List credentials
+ * @summary List self-owned or strictly lower-ranked in-scope credentials
  */
 export const listCredentialsQueryPageDefault = 1;
 export const listCredentialsQueryPageSizeDefault = 20;
@@ -524,7 +524,7 @@ export const ListCredentialsResponse = zod.object({
 
 
 /**
- * @summary Create credential
+ * @summary Create a self-owned or strictly lower-ranked in-scope credential
  */
 export const CreateCredentialBody = zod.object({
   "employeeId": zod.number(),
@@ -684,7 +684,7 @@ export const ExtractCredentialOcrResponse = zod.object({
 
 
 /**
- * @summary Get credential by ID
+ * @summary Get a self-owned or strictly lower-ranked in-scope credential by ID
  */
 export const GetCredentialParams = zod.object({
   "id": zod.coerce.number()
@@ -731,7 +731,7 @@ export const GetCredentialResponse = zod.object({
 
 
 /**
- * @summary Update credential
+ * @summary Update a self-owned or strictly lower-ranked in-scope credential
  */
 export const UpdateCredentialParams = zod.object({
   "id": zod.coerce.number()
@@ -802,7 +802,7 @@ export const UpdateCredentialResponse = zod.object({
 
 
 /**
- * @summary Delete credential
+ * @summary Delete a self-owned or strictly lower-ranked in-scope credential
  */
 export const DeleteCredentialParams = zod.object({
   "id": zod.coerce.number()
@@ -1335,9 +1335,9 @@ export const ListAuditLogsResponse = zod.object({
  */
 export const ListPoliciesResponseItem = zod.object({
   "id": zod.number(),
-  "credentialType": zod.string(),
+  "credentialType": zod.enum(['BLS', 'ACLS', 'PALS', 'NRP', 'TNCC', 'TCRN', 'code_red', 'code_blue', 'fire_safety', 'infection_control', 'SCFHS_license', 'SCFHS_classification', 'malpractice_insurance', 'employment_id', 'passport', 'iqama', 'visa', 'driving_license', 'medical_license', 'custom']),
   "departmentId": zod.number().nullish(),
-  "roles": zod.array(zod.string()),
+  "roles": zod.array(zod.enum(['employee', 'supervisor', 'department_manager', 'hospital_admin', 'system_admin'])),
   "isRequired": zod.boolean(),
   "createdAt": zod.string()
 })
@@ -1348,17 +1348,17 @@ export const ListPoliciesResponse = zod.array(ListPoliciesResponseItem)
  * @summary Create credential requirement policy
  */
 export const CreatePolicyBody = zod.object({
-  "credentialType": zod.string(),
+  "credentialType": zod.enum(['BLS', 'ACLS', 'PALS', 'NRP', 'TNCC', 'TCRN', 'code_red', 'code_blue', 'fire_safety', 'infection_control', 'SCFHS_license', 'SCFHS_classification', 'malpractice_insurance', 'employment_id', 'passport', 'iqama', 'visa', 'driving_license', 'medical_license', 'custom']),
   "departmentId": zod.number().nullish(),
-  "roles": zod.array(zod.string()),
+  "roles": zod.array(zod.enum(['employee', 'supervisor', 'department_manager', 'hospital_admin', 'system_admin'])),
   "isRequired": zod.boolean()
 })
 
 export const CreatePolicyResponse = zod.object({
   "id": zod.number(),
-  "credentialType": zod.string(),
+  "credentialType": zod.enum(['BLS', 'ACLS', 'PALS', 'NRP', 'TNCC', 'TCRN', 'code_red', 'code_blue', 'fire_safety', 'infection_control', 'SCFHS_license', 'SCFHS_classification', 'malpractice_insurance', 'employment_id', 'passport', 'iqama', 'visa', 'driving_license', 'medical_license', 'custom']),
   "departmentId": zod.number().nullish(),
-  "roles": zod.array(zod.string()),
+  "roles": zod.array(zod.enum(['employee', 'supervisor', 'department_manager', 'hospital_admin', 'system_admin'])),
   "isRequired": zod.boolean(),
   "createdAt": zod.string()
 })

@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, departmentsTable, usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { requireAuth, requireRole, getUser, ADMIN_ROLES } from "../lib/auth";
 import {
   getCredentialsFor,
@@ -11,6 +11,25 @@ import {
 } from "../lib/helpers";
 
 const router: IRouter = Router();
+
+async function validateDepartmentHead(
+  headId: number | null,
+  facilityId: number,
+): Promise<boolean> {
+  if (headId == null) return true;
+  if (!Number.isSafeInteger(headId) || headId < 1) return false;
+  const head = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(
+      and(
+        eq(usersTable.id, headId),
+        eq(usersTable.facilityId, facilityId),
+        eq(usersTable.isActive, true),
+      ),
+    );
+  return head.length === 1;
+}
 
 router.use("/departments", requireAuth);
 
@@ -64,13 +83,20 @@ router.post("/departments", requireRole(...ADMIN_ROLES), async (req, res) => {
     res.status(400).json({ message: "name and nameAr are required" });
     return;
   }
+  const normalizedHeadId = headId == null ? null : Number(headId);
+  if (!(await validateDepartmentHead(normalizedHeadId, user.facilityId))) {
+    res.status(400).json({
+      message: "Department head not found in this facility",
+    });
+    return;
+  }
   const inserted = await db
     .insert(departmentsTable)
     .values({
       name,
       nameAr,
       facilityId: user.facilityId,
-      headId: headId ?? null,
+      headId: normalizedHeadId,
     })
     .returning();
   const dept = inserted[0];
@@ -125,9 +151,24 @@ router.patch("/departments/:id", requireRole(...ADMIN_ROLES), async (req, res) =
   }
   const body = req.body as Record<string, unknown>;
   const patch: Record<string, unknown> = {};
-  if (typeof body.name === "string") patch.name = body.name;
-  if (typeof body.nameAr === "string") patch.nameAr = body.nameAr;
-  if ("headId" in body) patch.headId = body.headId != null ? Number(body.headId) : null;
+  if (typeof body.name === "string" && body.name.trim())
+    patch.name = body.name.trim();
+  if (typeof body.nameAr === "string" && body.nameAr.trim())
+    patch.nameAr = body.nameAr.trim();
+  if ("headId" in body) {
+    const headId = body.headId == null ? null : Number(body.headId);
+    if (!(await validateDepartmentHead(headId, dept.facilityId))) {
+      res.status(400).json({
+        message: "Department head not found in this facility",
+      });
+      return;
+    }
+    patch.headId = headId;
+  }
+  if (Object.keys(patch).length === 0) {
+    res.status(400).json({ message: "No valid department fields supplied" });
+    return;
+  }
   const updated = await db
     .update(departmentsTable)
     .set(patch)

@@ -1,6 +1,14 @@
 import { Router, type IRouter } from "express";
-import { db, credentialPoliciesTable, CREDENTIAL_TYPES, type CredentialType } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import {
+  db,
+  credentialPoliciesTable,
+  departmentsTable,
+  CREDENTIAL_TYPES,
+  USER_ROLES,
+  type CredentialType,
+  type UserRole,
+} from "@workspace/db";
+import { and, eq } from "drizzle-orm";
 import { requireAuth, requireRole, getUser, ADMIN_ROLES } from "../lib/auth";
 import { logAudit } from "../lib/helpers";
 
@@ -40,13 +48,53 @@ router.post("/policies", requireRole(...ADMIN_ROLES), async (req, res) => {
     res.status(400).json({ message: "Invalid credentialType" });
     return;
   }
+  if (isRequired !== undefined && typeof isRequired !== "boolean") {
+    res.status(400).json({ message: "isRequired must be a boolean" });
+    return;
+  }
+  const normalizedDepartmentId =
+    departmentId == null ? null : Number(departmentId);
+  if (
+    normalizedDepartmentId != null &&
+    (!Number.isSafeInteger(normalizedDepartmentId) ||
+      normalizedDepartmentId < 1)
+  ) {
+    res.status(400).json({ message: "Invalid departmentId" });
+    return;
+  }
+  if (normalizedDepartmentId != null) {
+    const department = await db
+      .select({ id: departmentsTable.id })
+      .from(departmentsTable)
+      .where(
+        and(
+          eq(departmentsTable.id, normalizedDepartmentId),
+          eq(departmentsTable.facilityId, user.facilityId),
+        ),
+      );
+    if (department.length !== 1) {
+      res.status(400).json({ message: "Department not found in this facility" });
+      return;
+    }
+  }
+  const normalizedRoles = Array.isArray(roles) ? roles : [];
+  if (
+    !normalizedRoles.every(
+      (role): role is UserRole =>
+        typeof role === "string" &&
+        USER_ROLES.includes(role as UserRole),
+    )
+  ) {
+    res.status(400).json({ message: "Invalid policy role" });
+    return;
+  }
   const inserted = await db
     .insert(credentialPoliciesTable)
     .values({
       facilityId: user.facilityId,
       credentialType,
-      departmentId: departmentId ?? null,
-      roles: Array.isArray(roles) ? roles : [],
+      departmentId: normalizedDepartmentId,
+      roles: normalizedRoles,
       isRequired: isRequired ?? true,
     })
     .returning();

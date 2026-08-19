@@ -454,7 +454,7 @@ paths:
     post:
       operationId: totpAdminDisable
       tags: [auth]
-      summary: Admin recovery — disable 2FA for a locked-out employee (hospital/system admins)
+      summary: Admin recovery — disable 2FA for a lower-ranked account in scope
       requestBody:
         required: true
         content:
@@ -467,9 +467,9 @@ paths:
         "400":
           description: 2FA not enabled for this account
         "403":
-          description: Not an admin
+          description: Not an admin, or attempted self-disable through the recovery route
         "404":
-          description: Employee not found or outside your facility
+          description: Employee not found, outside your scope, or equal/higher-ranked
 
   # Dashboard
   /dashboard/stats:
@@ -520,7 +520,7 @@ paths:
     get:
       operationId: listCredentials
       tags: [credentials]
-      summary: List credentials
+      summary: List self-owned or strictly lower-ranked in-scope credentials
       parameters:
         - name: status
           in: query
@@ -564,7 +564,7 @@ paths:
     post:
       operationId: createCredential
       tags: [credentials]
-      summary: Create credential
+      summary: Create a self-owned or strictly lower-ranked in-scope credential
       requestBody:
         required: true
         content:
@@ -647,7 +647,7 @@ paths:
     get:
       operationId: getCredential
       tags: [credentials]
-      summary: Get credential by ID
+      summary: Get a self-owned or strictly lower-ranked in-scope credential by ID
       parameters:
         - name: id
           in: path
@@ -667,7 +667,7 @@ paths:
     patch:
       operationId: updateCredential
       tags: [credentials]
-      summary: Update credential
+      summary: Update a self-owned or strictly lower-ranked in-scope credential
       parameters:
         - name: id
           in: path
@@ -703,7 +703,7 @@ paths:
     delete:
       operationId: deleteCredential
       tags: [credentials]
-      summary: Delete credential
+      summary: Delete a self-owned or strictly lower-ranked in-scope credential
       parameters:
         - name: id
           in: path
@@ -2083,12 +2083,14 @@ components:
           type: number
         credentialType:
           type: string
+          enum: [BLS, ACLS, PALS, NRP, TNCC, TCRN, code_red, code_blue, fire_safety, infection_control, SCFHS_license, SCFHS_classification, malpractice_insurance, employment_id, passport, iqama, visa, driving_license, medical_license, custom]
         departmentId:
           type: ["number", "null"]
         roles:
           type: array
           items:
             type: string
+            enum: [employee, supervisor, department_manager, hospital_admin, system_admin]
         isRequired:
           type: boolean
         createdAt:
@@ -2100,12 +2102,14 @@ components:
       properties:
         credentialType:
           type: string
+          enum: [BLS, ACLS, PALS, NRP, TNCC, TCRN, code_red, code_blue, fire_safety, infection_control, SCFHS_license, SCFHS_classification, malpractice_insurance, employment_id, passport, iqama, visa, driving_license, medical_license, custom]
         departmentId:
           type: ["number", "null"]
         roles:
           type: array
           items:
             type: string
+            enum: [employee, supervisor, department_manager, hospital_admin, system_admin]
         isRequired:
           type: boolean
 

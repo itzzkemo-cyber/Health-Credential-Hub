@@ -628,21 +628,95 @@ export interface DepartmentCompliance {
   expiringCount: number;
 }
 
+export type CredentialPolicyCredentialType = typeof CredentialPolicyCredentialType[keyof typeof CredentialPolicyCredentialType];
+
+
+export const CredentialPolicyCredentialType = {
+  BLS: 'BLS',
+  ACLS: 'ACLS',
+  PALS: 'PALS',
+  NRP: 'NRP',
+  TNCC: 'TNCC',
+  TCRN: 'TCRN',
+  code_red: 'code_red',
+  code_blue: 'code_blue',
+  fire_safety: 'fire_safety',
+  infection_control: 'infection_control',
+  SCFHS_license: 'SCFHS_license',
+  SCFHS_classification: 'SCFHS_classification',
+  malpractice_insurance: 'malpractice_insurance',
+  employment_id: 'employment_id',
+  passport: 'passport',
+  iqama: 'iqama',
+  visa: 'visa',
+  driving_license: 'driving_license',
+  medical_license: 'medical_license',
+  custom: 'custom',
+} as const;
+
+export type CredentialPolicyRolesItem = typeof CredentialPolicyRolesItem[keyof typeof CredentialPolicyRolesItem];
+
+
+export const CredentialPolicyRolesItem = {
+  employee: 'employee',
+  supervisor: 'supervisor',
+  department_manager: 'department_manager',
+  hospital_admin: 'hospital_admin',
+  system_admin: 'system_admin',
+} as const;
+
 export interface CredentialPolicy {
   id: number;
-  credentialType: string;
+  credentialType: CredentialPolicyCredentialType;
   /** @nullable */
   departmentId?: number | null;
-  roles: string[];
+  roles: CredentialPolicyRolesItem[];
   isRequired: boolean;
   createdAt: string;
 }
 
+export type CredentialPolicyInputCredentialType = typeof CredentialPolicyInputCredentialType[keyof typeof CredentialPolicyInputCredentialType];
+
+
+export const CredentialPolicyInputCredentialType = {
+  BLS: 'BLS',
+  ACLS: 'ACLS',
+  PALS: 'PALS',
+  NRP: 'NRP',
+  TNCC: 'TNCC',
+  TCRN: 'TCRN',
+  code_red: 'code_red',
+  code_blue: 'code_blue',
+  fire_safety: 'fire_safety',
+  infection_control: 'infection_control',
+  SCFHS_license: 'SCFHS_license',
+  SCFHS_classification: 'SCFHS_classification',
+  malpractice_insurance: 'malpractice_insurance',
+  employment_id: 'employment_id',
+  passport: 'passport',
+  iqama: 'iqama',
+  visa: 'visa',
+  driving_license: 'driving_license',
+  medical_license: 'medical_license',
+  custom: 'custom',
+} as const;
+
+export type CredentialPolicyInputRolesItem = typeof CredentialPolicyInputRolesItem[keyof typeof CredentialPolicyInputRolesItem];
+
+
+export const CredentialPolicyInputRolesItem = {
+  employee: 'employee',
+  supervisor: 'supervisor',
+  department_manager: 'department_manager',
+  hospital_admin: 'hospital_admin',
+  system_admin: 'system_admin',
+} as const;
+
 export interface CredentialPolicyInput {
-  credentialType: string;
+  credentialType: CredentialPolicyInputCredentialType;
   /** @nullable */
   departmentId?: number | null;
-  roles: string[];
+  roles: CredentialPolicyInputRolesItem[];
   isRequired: boolean;
 }
 

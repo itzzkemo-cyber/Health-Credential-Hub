@@ -33,6 +33,7 @@ import {
 } from "../lib/totp";
 import QRCode from "qrcode";
 import { serializeUser, logAudit, syncExpiryNotifications } from "../lib/helpers";
+import { canManageTarget } from "../lib/roleHierarchy";
 import { sessionIssuanceCsrfGuard } from "../lib/csrf";
 import { decryptTotpSecret, encryptTotpSecret } from "../lib/totpSecret";
 import { logger } from "../lib/logger";
@@ -43,7 +44,10 @@ import {
   isFixtureRecipient,
   sendEmail,
 } from "../lib/email/sender";
-import { getAppBaseUrl, passwordResetEmail } from "../lib/email/templates";
+import {
+  getPasswordResetUrl,
+  passwordResetEmail,
+} from "../lib/email/templates";
 
 const router: IRouter = Router();
 const loginRateLimit = rateLimit({ name: "login", max: 10, windowMs: 10 * 60_000 });
@@ -688,11 +692,7 @@ router.post(
     const target = (
       await db.select().from(usersTable).where(eq(usersTable.id, targetId))
     )[0];
-    // Hospital admins act within their own facility; system admins anywhere.
-    if (
-      !target ||
-      (admin.role !== "system_admin" && target.facilityId !== admin.facilityId)
-    ) {
+    if (!target) {
       res.status(404).json({
         message: "Employee not found",
         messageAr: "الموظف غير موجود",
@@ -710,8 +710,9 @@ router.post(
       });
       return;
     }
-    // Rank guard: only a system admin may reset another system admin.
-    if (target.role === "system_admin" && admin.role !== "system_admin") {
+    // Do not reveal whether an out-of-scope or equal/higher-ranked account
+    // exists. System admins remain the only global recovery authority.
+    if (!canManageTarget(admin, target)) {
       res.status(404).json({
         message: "Employee not found",
         messageAr: "الموظف غير موجود",
@@ -745,6 +746,7 @@ router.post(
       "الحساب",
       undefined,
       req.ip,
+      target.facilityId,
     );
     res.json({});
   },
@@ -791,8 +793,8 @@ router.post("/auth/forgot-password", recoveryRateLimit, async (req, res) => {
       req.ip,
     );
 
-    const base = getAppBaseUrl();
-    if (!base || !isEmailConfigured() || isFixtureRecipient(user.email)) {
+    const resetUrl = getPasswordResetUrl(rawToken);
+    if (!resetUrl || !isEmailConfigured() || isFixtureRecipient(user.email)) {
       logger.warn(
         { userId: user.id },
         "Password reset link created but not emailed (provider unavailable or fixture recipient)",
@@ -805,7 +807,7 @@ router.post("/auth/forgot-password", recoveryRateLimit, async (req, res) => {
       html: passwordResetEmail({
         nameAr: user.nameAr,
         name: user.name,
-        resetUrl: `${base}reset-password?token=${rawToken}`,
+        resetUrl,
       }),
     });
     logger.info({ userId: user.id }, "Password reset email sent");

@@ -132,10 +132,10 @@ async function fetchGoogleProfile(
   };
 }
 
-/** Match by googleId, else link by verified email, else create an employee. */
+/** Match by an explicitly linked googleId, else create a non-production employee. */
 async function upsertGoogleUser(
   profile: GoogleProfile,
-): Promise<{ user: User; action: "signin" | "linked" | "created" }> {
+): Promise<{ user: User; action: "signin" | "created" }> {
   const byGoogleId = (
     await db.select().from(usersTable).where(eq(usersTable.googleId, profile.sub))
   )[0];
@@ -145,22 +145,12 @@ async function upsertGoogleUser(
     await db.select().from(usersTable).where(eq(usersTable.email, profile.email))
   )[0];
   if (byEmail) {
-    // A different googleId on the row would mean this verified email moved
-    // between Google accounts — refuse rather than silently re-link.
-    if (byEmail.googleId && byEmail.googleId !== profile.sub) {
-      throw new Error("email already linked to a different Google account");
-    }
-    const linked = (
-      await db
-        .update(usersTable)
-        .set({
-          googleId: profile.sub,
-          avatarUrl: byEmail.avatarUrl ?? profile.picture,
-        })
-        .where(eq(usersTable.id, byEmail.id))
-        .returning()
-    )[0]!;
-    return { user: linked, action: "linked" };
+    // Verified mailbox ownership is not sufficient consent to attach a new
+    // identity provider to an existing local account—especially an admin
+    // account. Linking requires a future authenticated/re-authenticated flow;
+    // until then operators must pre-provision googleId through a reviewed
+    // process. This also refuses a Google identity already linked elsewhere.
+    throw new Error("automatic Google account linking is disabled");
   }
 
   const autoProvisionEnabled =
@@ -216,11 +206,10 @@ async function upsertGoogleUser(
 }
 
 const AUDIT_BY_ACTION: Record<
-  "signin" | "linked" | "created",
+  "signin" | "created",
   { en: string; ar: string }
 > = {
   signin: { en: "Signed in (Google)", ar: "تسجيل دخول عبر Google" },
-  linked: { en: "Linked Google account and signed in", ar: "ربط حساب Google وتسجيل دخول" },
   created: { en: "Created account (Google)", ar: "إنشاء حساب عبر Google" },
 };
 
@@ -274,7 +263,7 @@ router.get("/auth/google/callback", oauthRateLimit, async (req, res) => {
   }
 
   let user: User;
-  let action: "signin" | "linked" | "created";
+  let action: "signin" | "created";
   try {
     ({ user, action } = await upsertGoogleUser(profile));
   } catch (err) {

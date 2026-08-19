@@ -72,6 +72,7 @@ export default function CredentialNew() {
   const [fileName, setFileName] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [ocrConsent, setOcrConsent] = useState(false);
+  const manualTabRef = useRef<HTMLButtonElement>(null);
 
   const extractOcr = useExtractCredentialOcr();
   const createCredential = useCreateCredential();
@@ -88,6 +89,11 @@ export default function CredentialNew() {
     expiryDate: "",
     notes: "",
   });
+
+  const openManualEntry = () => {
+    setActiveTab("manual");
+    requestAnimationFrame(() => manualTabRef.current?.focus());
+  };
 
   useEffect(() => {
     if (!targetEmployee) return;
@@ -117,11 +123,11 @@ export default function CredentialNew() {
               ? result.expiryDate.split("T")[0]
               : "",
           }));
-          setActiveTab("manual");
+          openManualEntry();
         },
         onError: () => {
           toast.error(t("credential.scan_failed"));
-          setActiveTab("manual");
+          openManualEntry();
         },
       },
     );
@@ -295,7 +301,11 @@ export default function CredentialNew() {
             <UploadCloud className="h-4 w-4" aria-hidden="true" />
             <span className="truncate">{t("credential.smart_scan")}</span>
           </TabsTrigger>
-          <TabsTrigger value="manual" className="min-h-11 gap-2 px-2">
+          <TabsTrigger
+            ref={manualTabRef}
+            value="manual"
+            className="min-h-11 gap-2 px-2"
+          >
             <FileText className="h-4 w-4" aria-hidden="true" />
             <span className="truncate">{t("credential.manual")}</span>
           </TabsTrigger>
@@ -321,21 +331,21 @@ export default function CredentialNew() {
             )}
           </div>
           {!isShowcaseMode && (
-            <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4">
+            <Label
+              htmlFor="ocr-processing-consent"
+              className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-border bg-card p-4 text-sm"
+            >
               <Checkbox
                 id="ocr-processing-consent"
                 checked={ocrConsent}
                 onCheckedChange={(checked) => setOcrConsent(checked === true)}
                 aria-describedby="ocr-processing-disclosure"
-                className="mt-0.5"
+                className="mt-0.5 shrink-0"
               />
-              <Label
-                htmlFor="ocr-processing-consent"
-                className="cursor-pointer text-sm leading-6"
-              >
+              <span className="min-w-0 flex-1 leading-6">
                 {t("credential.ocr_consent")}
-              </Label>
-            </div>
+              </span>
+            </Label>
           )}
           <DocumentPicker
             id="smart-document-upload"
@@ -512,7 +522,11 @@ export default function CredentialNew() {
                   </Button>
                   <Button
                     type="submit"
-                    disabled={createCredential.isPending || isUploading}
+                    disabled={
+                      createCredential.isPending ||
+                      isUploading ||
+                      extractOcr.isPending
+                    }
                     className="min-h-12 w-full gap-2 sm:w-auto"
                   >
                     {createCredential.isPending ? (
@@ -556,6 +570,7 @@ function DocumentPicker({
 
   return (
     <div
+      aria-busy={busy}
       className={cn(
         "rounded-2xl border-2 border-dashed border-primary/25 bg-primary/5 transition-colors hover:bg-primary/10",
         disabled && "opacity-70 hover:bg-primary/5",
@@ -575,8 +590,10 @@ function DocumentPicker({
       />
       <div
         className={cn(
-          "flex gap-4",
-          compact ? "items-center" : "flex-col items-center text-center",
+          "flex min-w-0 gap-4",
+          compact
+            ? "flex-wrap items-center sm:flex-nowrap"
+            : "flex-col items-center text-center",
         )}
       >
         <span
@@ -594,7 +611,14 @@ function DocumentPicker({
           )}
         </span>
         <div className={cn("min-w-0", compact && "flex-1")}>
-          <p className={cn("font-semibold", !compact && "text-lg")}>
+          <p
+            className={cn(
+              "font-semibold",
+              compact ? "truncate" : "text-lg",
+            )}
+            role="status"
+            aria-live="polite"
+          >
             {busy
               ? t("credential.scanning_title")
               : fileName || t("credential.upload_zone_title")}
@@ -614,7 +638,10 @@ function DocumentPicker({
         <Button
           type="button"
           variant={fileName ? "outline" : "default"}
-          className="min-h-11 shrink-0"
+          className={cn(
+            "min-h-11 shrink-0",
+            compact && "w-full sm:w-auto",
+          )}
           disabled={busy || disabled}
           onClick={() => inputRef.current?.click()}
         >

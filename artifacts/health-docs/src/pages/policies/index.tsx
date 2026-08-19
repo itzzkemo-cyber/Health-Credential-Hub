@@ -1,5 +1,16 @@
 import { useState } from "react";
-import { useListPolicies, useCreatePolicy, useDeletePolicy, getListPoliciesQueryKey, useListDepartments } from "@workspace/api-client-react";
+import {
+  CredentialPolicyInputCredentialType,
+  CredentialPolicyInputRolesItem,
+  getListPoliciesQueryKey,
+  useCreatePolicy,
+  useDeletePolicy,
+  useListDepartments,
+  useListPolicies,
+  type CredentialPolicyInput,
+  type CredentialPolicyInputCredentialType as CredentialPolicyType,
+  type CredentialPolicyInputRolesItem as CredentialPolicyRole,
+} from "@workspace/api-client-react";
 import { useLanguage } from "@/lib/language-context";
 import { getAuthUser } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -15,31 +26,12 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 
-const CREDENTIAL_TYPES = [
-  "Saudi_License",
-  "BLS",
-  "ACLS",
-  "PALS",
-  "NRP",
-  "Degree",
-  "Specialty_Certificate",
-  "Iqama",
-  "National_ID",
-  "Passport",
-  "Malpractice_Insurance",
-  "Health_Fitness",
-  "Vaccination_Record",
-  "Data_Flow",
-  "CME_Hours",
-  "Fire_Safety",
-  "Infection_Control",
-  "Quality_Management",
-  "Risk_Management",
-  "Patient_Safety",
-  "Other"
-];
+const CREDENTIAL_TYPES = Object.values(CredentialPolicyInputCredentialType);
+const ROLES = Object.values(CredentialPolicyInputRolesItem);
 
-const ROLES = ['employee', 'supervisor', 'department_manager', 'hospital_admin', 'system_admin'];
+type PolicyFormData = Omit<CredentialPolicyInput, "credentialType"> & {
+  credentialType: CredentialPolicyType | "";
+};
 
 export default function Policies() {
   const { t, language } = useLanguage();
@@ -53,10 +45,10 @@ export default function Policies() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [selectedPolicy, setSelectedPolicy] = useState<any>(null);
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<PolicyFormData>({
     credentialType: "",
     departmentId: null as number | null,
-    roles: [] as string[],
+    roles: [],
     isRequired: true
   });
 
@@ -67,7 +59,12 @@ export default function Policies() {
       return;
     }
 
-    createPolicy.mutate({ data: formData }, {
+    const data: CredentialPolicyInput = {
+      ...formData,
+      credentialType: formData.credentialType,
+    };
+
+    createPolicy.mutate({ data }, {
       onSuccess: () => {
         toast.success(t('policies.create_success'));
         setIsCreateOpen(false);
@@ -87,7 +84,7 @@ export default function Policies() {
     });
   };
 
-  const toggleRole = (role: string) => {
+  const toggleRole = (role: CredentialPolicyRole) => {
     setFormData(prev => ({
       ...prev,
       roles: prev.roles.includes(role) 
@@ -168,7 +165,15 @@ export default function Policies() {
             <div className="space-y-6 py-4">
               <div className="space-y-2">
                 <Label>{t('policies.type')}</Label>
-                <Select value={formData.credentialType} onValueChange={(v) => setFormData({ ...formData, credentialType: v })}>
+                <Select
+                  value={formData.credentialType}
+                  onValueChange={(value) =>
+                    setFormData({
+                      ...formData,
+                      credentialType: value as CredentialPolicyType,
+                    })
+                  }
+                >
                   <SelectTrigger>
                     <SelectValue placeholder={t('policies.select_type')} />
                   </SelectTrigger>

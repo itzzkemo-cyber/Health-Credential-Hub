@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   ShieldAlert,
   ExternalLink,
+  RefreshCw,
 } from "lucide-react";
 import {
   isPdfUrl,
@@ -39,7 +40,7 @@ export default function CredentialDetail() {
   const queryClient = useQueryClient();
   const id = Number(params?.id);
 
-  const { data: cred, isLoading, isError } = useGetCredential(id);
+  const { data: cred, isLoading, isError, refetch } = useGetCredential(id);
 
   const deleteCred = useDeleteCredential();
 
@@ -54,8 +55,24 @@ export default function CredentialDetail() {
 
   if (isError || !cred) {
     return (
-      <div className="p-8 text-center text-destructive">
-        {t("credential.load_error")}
+      <div
+        className="mx-auto flex max-w-lg flex-col items-center gap-4 rounded-xl border border-destructive/30 bg-card p-8 text-center"
+        role="alert"
+        aria-live="assertive"
+      >
+        <ShieldAlert className="h-10 w-10 text-destructive" aria-hidden="true" />
+        <p className="font-medium text-destructive">
+          {t("credential.load_error")}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void refetch()}
+          className="min-h-11 gap-2"
+        >
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          {t("common.retry")}
+        </Button>
       </div>
     );
   }
@@ -164,7 +181,7 @@ export default function CredentialDetail() {
             variant="destructive"
             size="sm"
             onClick={handleDelete}
-            className="min-h-10 gap-2"
+            className="min-h-11 gap-2"
             disabled={deleteCred.isPending}
             aria-label={t("common.delete")}
           >
@@ -255,7 +272,7 @@ export default function CredentialDetail() {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="gap-2"
+                  className="min-h-11 gap-2"
                   onClick={() => openFileInNewTab(cred.fileUrl!)}
                 >
                   <ExternalLink className="h-4 w-4" />{" "}
@@ -279,7 +296,7 @@ export default function CredentialDetail() {
                       <FileText className="h-16 w-16 opacity-50" />
                       <p className="text-sm">{t("credential.pdf_open_hint")}</p>
                       <Button
-                        className="gap-2"
+                        className="min-h-11 gap-2"
                         onClick={() => openFileInNewTab(cred.fileUrl!)}
                       >
                         <ExternalLink className="h-4 w-4" />{" "}

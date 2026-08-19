@@ -19,6 +19,7 @@ import {
 } from "../lib/auth";
 import {
   getScopedUsers,
+  getCredentialScopedUsers,
   getCredentialsFor,
   getPolicies,
   computeEmployeeStats,
@@ -28,6 +29,7 @@ import {
   getDepartments,
   logAudit,
 } from "../lib/helpers";
+import { canAssignRole, canManageTarget } from "../lib/roleHierarchy";
 
 const router: IRouter = Router();
 
@@ -84,27 +86,6 @@ router.get("/employees", async (req, res) => {
   result.sort((a, b) => a.complianceRate - b.complianceRate);
   res.json(result);
 });
-
-const ROLE_RANK: Record<User["role"], number> = {
-  employee: 0,
-  supervisor: 1,
-  department_manager: 2,
-  hospital_admin: 3,
-  system_admin: 4,
-};
-
-/** May `actor` assign `newRole` to someone? Admins only; privileged roles need system_admin. */
-function canAssignRole(actor: User, newRole: User["role"]): boolean {
-  if (actor.role === "system_admin") return true;
-  if (!ADMIN_ROLES.includes(actor.role)) return false;
-  return ROLE_RANK[newRole] < ROLE_RANK[actor.role];
-}
-
-/** May `actor` manage (edit/deactivate/delete) `target`? Only strictly lower-ranked users, except system_admin. */
-function canManageTarget(actor: User, target: User): boolean {
-  if (actor.role === "system_admin") return true;
-  return ROLE_RANK[target.role] < ROLE_RANK[actor.role];
-}
 
 router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
   const user = getUser(req);
@@ -226,6 +207,7 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
     created.nameAr,
     undefined,
     req.ip,
+    created.facilityId,
   );
   res.status(201).json(serializeUser(created));
 });
@@ -233,7 +215,7 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
 router.get("/employees/:id", async (req, res) => {
   const user = getUser(req);
   const id = Number(req.params.id);
-  const scoped = await getScopedUsers(user);
+  const scoped = await getCredentialScopedUsers(user);
   const target = scoped.find((u) => u.id === id);
   if (!target) {
     res.status(404).json({ message: "Employee not found" });
@@ -393,7 +375,16 @@ router.patch("/employees/:id", requireRole(...MANAGER_ROLES), async (req, res) =
     res.status(500).json({ message: "Update failed" });
     return;
   }
-  await logAudit(user, "Updated employee", "تحديث موظف", result.name, result.nameAr, undefined, req.ip);
+  await logAudit(
+    user,
+    "Updated employee",
+    "تحديث موظف",
+    result.name,
+    result.nameAr,
+    undefined,
+    req.ip,
+    result.facilityId,
+  );
   res.json(serializeUser(result));
 });
 
@@ -426,7 +417,16 @@ router.delete("/employees/:id", requireRole(...ADMIN_ROLES), async (req, res) =>
       sessionVersion: sql`${usersTable.sessionVersion} + 1`,
     })
     .where(eq(usersTable.id, id));
-  await logAudit(user, "Deactivated employee", "إيقاف موظف", target.name, target.nameAr, undefined, req.ip);
+  await logAudit(
+    user,
+    "Deactivated employee",
+    "إيقاف موظف",
+    target.name,
+    target.nameAr,
+    undefined,
+    req.ip,
+    target.facilityId,
+  );
   res.status(204).end();
 });
 
@@ -474,6 +474,7 @@ async function setActive(
     result.nameAr,
     undefined,
     req.ip,
+    result.facilityId,
   );
   res.json(serializeUser(result));
 }

@@ -307,6 +307,7 @@ async function main() {
     details?: string,
   ) => ({
     userId: u.id,
+    facilityId: u.facilityId,
     userName: u.name,
     userNameAr: u.nameAr,
     action,

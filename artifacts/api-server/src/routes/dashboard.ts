@@ -1,9 +1,10 @@
 import { Router, type IRouter } from "express";
 import { db, auditLogsTable } from "@workspace/db";
-import { desc, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { requireAuth, getUser } from "../lib/auth";
 import {
   getScopedUsers,
+  getCredentialScopedUsers,
   getCredentialsFor,
   getPolicies,
   getDepartments,
@@ -17,12 +18,21 @@ const router: IRouter = Router();
 
 router.use("/dashboard", requireAuth);
 
-async function recentActivityFor(userIds: number[], limit: number) {
+async function recentActivityFor(
+  userIds: number[],
+  limit: number,
+  facilityId: number | null,
+) {
   if (userIds.length === 0) return [];
+  const scope = inArray(auditLogsTable.userId, userIds);
   const rows = await db
     .select()
     .from(auditLogsTable)
-    .where(inArray(auditLogsTable.userId, userIds))
+    .where(
+      facilityId == null
+        ? scope
+        : and(scope, eq(auditLogsTable.facilityId, facilityId)),
+    )
     .orderBy(desc(auditLogsTable.createdAt))
     .limit(limit);
   return rows.map((r) => ({
@@ -39,7 +49,7 @@ async function recentActivityFor(userIds: number[], limit: number) {
 
 router.get("/dashboard/stats", async (req, res) => {
   const user = getUser(req);
-  const scoped = (await getScopedUsers(user)).filter((u) => u.isActive);
+  const scoped = (await getCredentialScopedUsers(user)).filter((u) => u.isActive);
   const byId = new Map(scoped.map((u) => [u.id, u]));
   const creds = await getCredentialsFor(scoped.map((u) => u.id));
   const policies = await getPolicies(user.role === "system_admin" ? null : user.facilityId);
@@ -84,13 +94,14 @@ router.get("/dashboard/stats", async (req, res) => {
     recentActivity: await recentActivityFor(
       scoped.map((u) => u.id),
       10,
+      user.role === "system_admin" ? null : user.facilityId,
     ),
   });
 });
 
 router.get("/dashboard/compliance", async (req, res) => {
   const user = getUser(req);
-  const scoped = (await getScopedUsers(user)).filter((u) => u.isActive);
+  const scoped = (await getCredentialScopedUsers(user)).filter((u) => u.isActive);
   const creds = await getCredentialsFor(scoped.map((u) => u.id));
   const policies = await getPolicies(user.role === "system_admin" ? null : user.facilityId);
   const departments = await getDepartments(user.role === "system_admin" ? null : user.facilityId);
@@ -132,6 +143,7 @@ router.get("/dashboard/activity", async (req, res) => {
     await recentActivityFor(
       scoped.map((u) => u.id),
       20,
+      user.role === "system_admin" ? null : user.facilityId,
     ),
   );
 });

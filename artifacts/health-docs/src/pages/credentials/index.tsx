@@ -155,13 +155,13 @@ export default function CredentialsList() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-4 sm:flex sm:justify-end">
-                  <Button asChild variant="outline" size="sm" className="min-h-10 gap-2">
+                  <Button asChild variant="outline" size="sm" className="min-h-11 gap-2">
                     <Link href={`/verify/${credential.qrToken}`}>
                       <QrCode className="h-4 w-4" aria-hidden="true" />
                       {t("employee_portal.verify")}
                     </Link>
                   </Button>
-                  <Button asChild size="sm" className="min-h-10">
+                  <Button asChild size="sm" className="min-h-11">
                     <Link href={`/credentials/${credential.id}`}>{t("common.view")}</Link>
                   </Button>
                 </div>

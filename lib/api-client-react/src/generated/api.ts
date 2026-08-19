@@ -1508,7 +1508,7 @@ export const getTotpAdminDisableUrl = () => {
 }
 
 /**
- * @summary Admin recovery — disable 2FA for a locked-out employee (hospital/system admins)
+ * @summary Admin recovery — disable 2FA for a lower-ranked account in scope
  */
 export const totpAdminDisable = async (totpAdminDisableInput: TotpAdminDisableInput, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
 
@@ -1557,7 +1557,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type TotpAdminDisableMutationError = ErrorType<void>
 
     /**
- * @summary Admin recovery — disable 2FA for a locked-out employee (hospital/system admins)
+ * @summary Admin recovery — disable 2FA for a lower-ranked account in scope
  */
 export const useTotpAdminDisable = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof totpAdminDisable>>, TError,{data: BodyType<TotpAdminDisableInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -1817,7 +1817,7 @@ export const getListCredentialsUrl = (params?: ListCredentialsParams,) => {
 }
 
 /**
- * @summary List credentials
+ * @summary List self-owned or strictly lower-ranked in-scope credentials
  */
 export const listCredentials = async (params?: ListCredentialsParams, options?: Parameters<typeof customFetch>[1]): Promise<CredentialListResponse> => {
 
@@ -1864,7 +1864,7 @@ export type ListCredentialsQueryError = ErrorType<unknown>
 
 
 /**
- * @summary List credentials
+ * @summary List self-owned or strictly lower-ranked in-scope credentials
  */
 
 export function useListCredentials<TData = Awaited<ReturnType<typeof listCredentials>>, TError = ErrorType<unknown>>(
@@ -1894,7 +1894,7 @@ export const getCreateCredentialUrl = () => {
 }
 
 /**
- * @summary Create credential
+ * @summary Create a self-owned or strictly lower-ranked in-scope credential
  */
 export const createCredential = async (credentialInput: CredentialInput, options?: Parameters<typeof customFetch>[1]): Promise<Credential> => {
 
@@ -1943,7 +1943,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateCredentialMutationError = ErrorType<unknown>
 
     /**
- * @summary Create credential
+ * @summary Create a self-owned or strictly lower-ranked in-scope credential
  */
 export const useCreateCredential = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCredential>>, TError,{data: BodyType<CredentialInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -2204,7 +2204,7 @@ export const getGetCredentialUrl = (id: number,) => {
 }
 
 /**
- * @summary Get credential by ID
+ * @summary Get a self-owned or strictly lower-ranked in-scope credential by ID
  */
 export const getCredential = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<Credential> => {
 
@@ -2251,7 +2251,7 @@ export type GetCredentialQueryError = ErrorType<void>
 
 
 /**
- * @summary Get credential by ID
+ * @summary Get a self-owned or strictly lower-ranked in-scope credential by ID
  */
 
 export function useGetCredential<TData = Awaited<ReturnType<typeof getCredential>>, TError = ErrorType<void>>(
@@ -2281,7 +2281,7 @@ export const getUpdateCredentialUrl = (id: number,) => {
 }
 
 /**
- * @summary Update credential
+ * @summary Update a self-owned or strictly lower-ranked in-scope credential
  */
 export const updateCredential = async (id: number,
     credentialUpdate: CredentialUpdate, options?: Parameters<typeof customFetch>[1]): Promise<Credential> => {
@@ -2331,7 +2331,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateCredentialMutationError = ErrorType<ErrorEnvelope>
 
     /**
- * @summary Update credential
+ * @summary Update a self-owned or strictly lower-ranked in-scope credential
  */
 export const useUpdateCredential = <TError = ErrorType<ErrorEnvelope>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCredential>>, TError,{id: number;data: BodyType<CredentialUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -2353,7 +2353,7 @@ export const getDeleteCredentialUrl = (id: number,) => {
 }
 
 /**
- * @summary Delete credential
+ * @summary Delete a self-owned or strictly lower-ranked in-scope credential
  */
 export const deleteCredential = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
 
@@ -2402,7 +2402,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteCredentialMutationError = ErrorType<unknown>
 
     /**
- * @summary Delete credential
+ * @summary Delete a self-owned or strictly lower-ranked in-scope credential
  */
 export const useDeleteCredential = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteCredential>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}

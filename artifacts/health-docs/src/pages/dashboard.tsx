@@ -40,7 +40,7 @@ export default function Dashboard() {
         <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
           <ShieldAlert className="h-10 w-10 text-destructive" aria-hidden="true" />
           <p className="font-medium">{t("employee_portal.dashboard_error")}</p>
-          <Button variant="outline" onClick={() => void refetch()} className="gap-2">
+          <Button variant="outline" onClick={() => void refetch()} className="min-h-11 gap-2">
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
             {t("employee_portal.retry")}
           </Button>
@@ -149,7 +149,7 @@ export default function Dashboard() {
                         {new Date(credential.expiryDate).toLocaleDateString(isRTL ? "ar-SA" : "en-US")}
                       </p>
                     </div>
-                    <Button asChild variant="outline" size="sm" className="shrink-0">
+                    <Button asChild variant="outline" size="sm" className="min-h-11 shrink-0">
                       <Link href={`/credentials/${credential.id}`}>{t("common.view")}</Link>
                     </Button>
                   </div>
@@ -200,7 +200,7 @@ export default function Dashboard() {
                 : t("employee_portal.facility_compliance_hint")}
             </p>
             {isEmployee && (
-              <Button asChild variant="outline" className="w-full">
+              <Button asChild variant="outline" className="min-h-11 w-full">
                 <Link href="/credentials">{t("employee_portal.review_documents")}</Link>
               </Button>
             )}

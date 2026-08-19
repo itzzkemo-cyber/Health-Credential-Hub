@@ -9,7 +9,7 @@ import { db, credentialsTable, uploadGrantsTable } from "@workspace/db";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { requireAuth, getUser, MANAGER_ROLES } from "../lib/auth";
-import { getScopedUsers, logAudit } from "../lib/helpers";
+import { getCredentialScopedUsers, logAudit } from "../lib/helpers";
 import { rateLimit } from "../lib/rateLimit";
 import { ObjectPermission } from "../lib/objectAcl";
 import {
@@ -155,9 +155,9 @@ router.get(
  * GET /storage/objects/*
  *
  * Serve credential document files from PRIVATE_OBJECT_DIR.
- * Requires a logged-in session. Manager roles (supervisor and above) may view
- * any document; other users only documents they own (ACL owner = the
- * credential's employee id, set when the credential is saved).
+ * Requires a logged-in session. Manager roles may view documents only inside
+ * their server-side facility/team scope; other users only documents they own
+ * (ACL owner = the credential's employee id, set when the credential is saved).
  */
 router.get(
   "/storage/objects/*path",
@@ -194,11 +194,14 @@ router.get(
         (linked.some((entry) => entry.employeeId === user.id) ||
           pendingGrant != null);
       let canManage = false;
+      let auditFacilityId = user.facilityId;
       if (!isOwner && MANAGER_ROLES.includes(user.role)) {
-        const scopedIds = new Set(
-          (await getScopedUsers(user)).map((employee) => employee.id),
+        const linkedIds = new Set(linked.map((entry) => entry.employeeId));
+        const linkedOwner = (await getCredentialScopedUsers(user)).find((employee) =>
+          linkedIds.has(employee.id),
         );
-        canManage = linked.some((entry) => scopedIds.has(entry.employeeId));
+        canManage = linkedOwner != null;
+        if (linkedOwner) auditFacilityId = linkedOwner.facilityId;
       }
       if (!isOwner && !canManage) {
         // Retained objects with no active credential link must not be
@@ -220,6 +223,7 @@ router.get(
         "ملف وثيقة خاص",
         undefined,
         req.ip,
+        auditFacilityId,
       );
 
       res.status(response.status);
