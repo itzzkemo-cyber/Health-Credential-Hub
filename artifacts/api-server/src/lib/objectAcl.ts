@@ -1,6 +1,7 @@
-import { File } from '@google-cloud/storage';
+import type { StoredObjectFile } from "./objectStorage";
 
-const ACL_POLICY_METADATA_KEY = 'custom:aclPolicy';
+const ACL_POLICY_METADATA_KEY = "acl-policy";
+const LEGACY_ACL_POLICY_METADATA_KEY = "custom:aclPolicy";
 
 // Can be flexibly defined according to the use case.
 //
@@ -20,8 +21,8 @@ export interface ObjectAccessGroup {
 }
 
 export enum ObjectPermission {
-  READ = 'read',
-  WRITE = 'write',
+  READ = "read",
+  WRITE = "write",
 }
 
 export interface ObjectAclRule {
@@ -29,10 +30,10 @@ export interface ObjectAclRule {
   permission: ObjectPermission;
 }
 
-// Stored as object custom metadata under "custom:aclPolicy" (JSON string).
+// Stored as provider-neutral object custom metadata (JSON string).
 export interface ObjectAclPolicy {
   owner: string;
-  visibility: 'public' | 'private';
+  visibility: "public" | "private";
   aclRules?: Array<ObjectAclRule>;
 }
 
@@ -68,7 +69,7 @@ function createObjectAccessGroup(
 }
 
 export async function setObjectAclPolicy(
-  objectFile: File,
+  objectFile: StoredObjectFile,
   aclPolicy: ObjectAclPolicy,
 ): Promise<void> {
   const [exists] = await objectFile.exists();
@@ -84,10 +85,12 @@ export async function setObjectAclPolicy(
 }
 
 export async function getObjectAclPolicy(
-  objectFile: File,
+  objectFile: StoredObjectFile,
 ): Promise<ObjectAclPolicy | null> {
   const [metadata] = await objectFile.getMetadata();
-  const aclPolicy = metadata?.metadata?.[ACL_POLICY_METADATA_KEY];
+  const aclPolicy =
+    metadata?.metadata?.[ACL_POLICY_METADATA_KEY] ??
+    metadata?.metadata?.[LEGACY_ACL_POLICY_METADATA_KEY];
   if (!aclPolicy) {
     return null;
   }
@@ -100,7 +103,7 @@ export async function canAccessObject({
   requestedPermission,
 }: {
   userId?: string;
-  objectFile: File;
+  objectFile: StoredObjectFile;
   requestedPermission: ObjectPermission;
 }): Promise<boolean> {
   const aclPolicy = await getObjectAclPolicy(objectFile);
@@ -109,7 +112,7 @@ export async function canAccessObject({
   }
 
   if (
-    aclPolicy.visibility === 'public' &&
+    aclPolicy.visibility === "public" &&
     requestedPermission === ObjectPermission.READ
   ) {
     return true;

@@ -21,7 +21,8 @@
 - Node.js 24
 - pnpm 11.19.0 (Corepack is fine)
 - PostgreSQL for API runtime
-- A private Google Cloud Storage bucket for document uploads
+- A private object-storage bucket for document uploads (Google Cloud Storage
+  or Oracle Object Storage in Riyadh)
 
 ## Local setup
 
@@ -100,12 +101,13 @@ pnpm --filter @workspace/api-spec run codegen
 
 ## Production checklist
 
-The supported hosting path is Google Cloud in Dammam: Cloud Run + Cloud SQL
-PostgreSQL + a private Cloud Storage bucket. See
-[docs/GOOGLE_CLOUD_DEPLOYMENT.md](docs/GOOGLE_CLOUD_DEPLOYMENT.md). A reviewed
-Cloud Shell bootstrap is included at `infra/gcp/bootstrap.sh`. Data flows,
+The repository supports Google Cloud in Dammam and an OCI Riyadh alternative.
+See [docs/GOOGLE_CLOUD_DEPLOYMENT.md](docs/GOOGLE_CLOUD_DEPLOYMENT.md) or
+[infra/oci/README.md](infra/oci/README.md). The Google path includes a reviewed
+Cloud Shell bootstrap; the OCI path remains gated on a verified tenancy and
+explicit charge approval. Data flows,
 provider setup, retention assumptions, and remaining approval decisions for
-GCS, Gemini, Resend, and Google OAuth are documented in
+GCS/Oracle Object Storage, Gemini, Resend, and Google OAuth are documented in
 [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
 
 إنشاء أول حساب إدارة في قاعدة جديدة مسار مستقل ومحمي بلا كلمة مرور افتراضية؛
@@ -124,7 +126,7 @@ SaudiNIC وSAIP موثقة في
 - Use a secret manager and a random `SESSION_SECRET` of at least 32 characters.
 - Apply reviewed Drizzle migrations; do not use `push-force` in production.
 - Provision private object storage and verify retention, malware scanning, file-size quotas, and orphan cleanup.
-- Attach a least-privilege Cloud Run service account; the storage client uses Google Application Default Credentials and never needs a committed JSON key.
+- Attach a least-privilege runtime identity. GCS uses Google Application Default Credentials; OCI customer secret keys must come from OCI Vault and never from a committed file.
 - Configure Gemini only after approving the privacy/data-processing terms for uploaded workforce documents.
 - Configure Google OAuth redirect domains and an email provider if those features are enabled.
 - Add a distributed rate limiter and production observability before exposing authentication or OCR publicly at scale.

@@ -9,7 +9,7 @@ import * as zod from 'zod';
 
 
 /**
- * Returns a presigned GCS URL for direct upload. The client sends JSON
+ * Returns a presigned private-object-storage URL for direct upload. The client sends JSON
  * metadata here, then uploads the file directly to the returned URL with
  * every returned required header. The overwrite precondition makes each
  * URL create one new object generation only.
@@ -32,7 +32,7 @@ export const RequestUploadUrlBody = zod.object({
 
 
 export const RequestUploadUrlResponse = zod.object({
-  "uploadURL": zod.string().describe('Presigned GCS URL for PUT upload.'),
+  "uploadURL": zod.string().describe('Presigned private-object-storage URL for PUT upload.'),
   "objectPath": zod.string().describe('Normalized object path (e.g. `\/objects\/uploads\/uuid`). Store this in your database.'),
   "requiredHeaders": zod.record(zod.string(), zod.string()).describe('Headers that must be included verbatim in the signed PUT request.'),
   "metadata": zod.object({

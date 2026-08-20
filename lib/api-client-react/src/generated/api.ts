@@ -115,7 +115,7 @@ export const getRequestUploadUrlUrl = () => {
 }
 
 /**
- * Returns a presigned GCS URL for direct upload. The client sends JSON
+ * Returns a presigned private-object-storage URL for direct upload. The client sends JSON
  * metadata here, then uploads the file directly to the returned URL with
  * every returned required header. The overwrite precondition makes each
  * URL create one new object generation only.

@@ -8,15 +8,16 @@ health data.
 
 The browser-only Showcase is a separate mode: it uses synthetic data, keeps a
 selected file in the browser tab's memory, simulates OCR locally, and does not
-call Cloud Storage, Gemini, Resend, or Google OAuth. See
+call external object storage, Gemini, Resend, or Google OAuth. See
 [`SHOWCASE.md`](./SHOWCASE.md). The sections below apply to the API-backed
 application.
 
 ## Status at a glance
 
-| Integration                        | Implemented in the repository                                                                                                          | Provisioned by the supplied Google Cloud bootstrap                                                                                                                                                                      | Production status                                                                                                                                                                                                                                                                                                     |
+| Integration                        | Implemented in the repository                                                                                                          | Provisioned by supplied infrastructure                                                                                                                                                                                  | Production status                                                                                                                                                                                                                                                                                                     |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                   | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | Supported deployment path, but document lifecycle deletion, orphan cleanup, malware scanning, and restore drills remain operator work.                                                                                                                                                                                |
+| Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.         | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | Supported application driver. Keep disabled until the OCI tenancy is verified, bucket is private, CORS/IAM/lifecycle are reviewed, and a synthetic end-to-end upload/restore drill passes.                                                                                                                            |
 | Gemini OCR                         | Authenticated users can send an authorized stored file to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields. | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                        |
 | Resend email                       | Password resets, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API.                                 | No. The bootstrap explicitly deploys with email disabled and does not create the Resend secret.                                                                                                                         | Optional and fail-closed until an operator enables it. Subprocessor approval, data-region/retention confirmation, bounce handling, and delivery reconciliation remain required.                                                                                                                                       |
 | Google OAuth                       | Authorization-code login for an already linked Google subject, local session issuance, and local 2FA continuation are implemented.     | No. The bootstrap does not create an OAuth client or bind its secret.                                                                                                                                                   | Optional when client credentials and the canonical public URL are configured. Email-only account linking and production auto-provisioning are disabled in code. Bounded timeouts are implemented; account-link/unlink procedures remain required.                                                                     |
@@ -26,7 +27,7 @@ application.
 environment. No FHIR, HL7, SMART on FHIR, regulator API, or other health-data
 standard integration is implemented or claimed here.
 
-## 1. Private Google Cloud Storage
+## 1. Private object storage (GCS or OCI Riyadh)
 
 ### Current data flow
 
@@ -38,10 +39,10 @@ standard integration is implemented or claimed here.
    and records a 15-minute upload grant in PostgreSQL. The grant binds the
    opaque object path, original filename, declared size/type, and requesting
    user.
-3. The browser PUTs the prepared file bytes directly to GCS with the signed
-   content type and `x-goog-if-generation-match: 0`. The generation precondition
-   makes the write create-only rather than overwrite-capable.
-4. Before a credential links the object, the API reads GCS metadata and checks
+3. The browser PUTs the prepared file bytes directly to the selected provider
+   with the signed content type and a create-only precondition: GCS uses
+   `x-goog-if-generation-match: 0`; OCI uses `If-None-Match: *`.
+4. Before a credential links the object, the API reads provider metadata and checks
    the actual size/type against the grant. It consumes the grant once and sets
    private application ACL metadata whose owner is the credential employee.
 5. Private reads always pass through the API. Owners are checked against the
@@ -51,10 +52,14 @@ standard integration is implemented or claimed here.
 6. OCR is a separate authorized read: the API downloads the object into server
    memory and then sends it to Gemini as described in the next section.
 
-GCS receives the file bytes, content type, generated object name, request
-metadata inherent to HTTPS/GCS access, and custom ACL JSON containing the
+The selected storage provider receives the file bytes, content type, generated
+object name, request metadata inherent to HTTPS access, and custom ACL JSON containing the
 numeric local owner ID. The original filename remains in the PostgreSQL upload
-grant rather than being used as the GCS object name.
+grant rather than being used as the object name.
+
+Set `OBJECT_STORAGE_PROVIDER=gcs` for Google Cloud or
+`OBJECT_STORAGE_PROVIDER=oci` for Oracle Object Storage. The default remains
+`gcs` so existing deployments do not change behavior implicitly.
 
 ### Destination, region, credentials, and retention
 
@@ -141,15 +146,37 @@ no-store, max-age=0`; only explicitly public objects may use cacheable
    duplicate active `credentials.file_url` values before applying the partial
    unique-index migration.
 
+### OCI Riyadh operator setup
+
+1. Create or verify an OCI tenancy whose home/active target region is Saudi
+   Arabia Central (Riyadh), identifier `me-riyadh-1`.
+2. Create a private bucket with public access disabled, versioning/recovery and
+   an approved lifecycle policy. Configure the S3 Compatibility API designated
+   compartment and a least-privilege application identity/customer secret key.
+3. Set `OBJECT_STORAGE_PROVIDER=oci`, `PRIVATE_OBJECT_DIR=/BUCKET/private`,
+   `OCI_OBJECT_STORAGE_REGION=me-riyadh-1`, and the exact namespace endpoint
+   `https://NAMESPACE.compat.objectstorage.me-riyadh-1.oraclecloud.com`. Inject
+   both customer-secret-key values from OCI Vault; never commit them.
+4. Restrict bucket CORS to the exact `https://app.wathaiqihealth.com` origin,
+   `PUT`, `Content-Type`, and `If-None-Match`. The API rejects non-Riyadh,
+   credential-bearing, path-bearing, or lookalike storage endpoints.
+5. OCI's compatibility list does not include CopyObject. Updating application
+   ACL metadata therefore reads and replaces the same object server-side; the
+   8 MiB cap bounds memory. Keep bucket versioning enabled and verify this path
+   using synthetic files before real data.
+6. Apply the same malware quarantine, byte-cap ingress, orphan cleanup,
+   retention, restoration, budget alert, and cross-tenant tests required for
+   GCS. Provider selection alone is not production acceptance.
+
 ## 2. Gemini OCR
 
 ### Current data flow
 
 1. An authenticated user submits only an internal `/objects/...` path to
    `POST /api/credentials/ocr`.
-2. The API resolves the private object, requires either the caller's active
+2. The API resolves the private object from the configured provider, requires either the caller's active
    upload grant or an existing owner/scoped-manager ACL decision, validates its
-   actual MIME type and maximum 8 MiB size, and downloads the bytes from GCS.
+   actual MIME type and maximum 8 MiB size, and downloads the bytes privately.
 3. The API Base64-encodes the entire document and sends it inline with an
    extraction prompt to the configured Gemini-compatible base URL, using model
    `gemini-2.5-flash`. The prompt requests document type, holder names, issuer

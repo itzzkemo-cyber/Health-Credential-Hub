@@ -1,4 +1,4 @@
-import type { File } from "@google-cloud/storage";
+import type { StoredObjectFile } from "./objectStorage";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { db, uploadGrantsTable, type UploadGrant } from "@workspace/db";
 
@@ -31,7 +31,7 @@ export async function findActiveUploadGrant(
  * used for the file that was approved, not a substituted larger payload.
  */
 export async function validateUploadedObject(
-  objectFile: File,
+  objectFile: StoredObjectFile,
   grant?: UploadGrant | null,
 ): Promise<{ contentType: string; size: number }> {
   const [metadata] = await objectFile.getMetadata();

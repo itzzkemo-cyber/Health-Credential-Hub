@@ -29,7 +29,7 @@ export interface UploadUrlRequest {
 export type UploadUrlResponseRequiredHeaders = {[key: string]: string};
 
 export interface UploadUrlResponse {
-  /** Presigned GCS URL for PUT upload. */
+  /** Presigned private-object-storage URL for PUT upload. */
   uploadURL: string;
   /** Normalized object path (e.g. `/objects/uploads/uuid`). Store this in your database. */
   objectPath: string;

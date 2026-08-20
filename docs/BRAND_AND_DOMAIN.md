@@ -50,5 +50,5 @@ until the SAIP search and legal review are complete.
    domains, email sender identity, support addresses, and legal notices
    together in one reviewed release.
 5. Keep `demo.wathaiqihealth.com` visibly identified as a synthetic demo until
-   the Google Cloud production deployment on `app.wathaiqihealth.com` passes
-   the release checklist.
+   the selected Saudi-hosted production deployment on `app.wathaiqihealth.com`
+   passes the release checklist.

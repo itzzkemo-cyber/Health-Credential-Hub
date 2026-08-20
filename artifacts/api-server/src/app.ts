@@ -1,4 +1,3 @@
-
 import express, {
   type Express,
   type Request,
@@ -15,38 +14,19 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { allowedOrigins, csrfOriginGuard } from "./lib/csrf";
 import { validateTotpEncryptionConfig } from "./lib/totpSecret";
-import { validateStoragePathIsolation } from "./lib/objectStorage";
+import {
+  getStorageConnectSources,
+  validateObjectStorageConfiguration,
+  validateStoragePathIsolation,
+} from "./lib/objectStorage";
 
 const app: Express = express();
 const isProduction = process.env.NODE_ENV === "production";
 
-function getStorageConnectSources(): string[] {
-  const sources = new Set(["https://storage.googleapis.com"]);
-  const configuredEndpoint = process.env.STORAGE_API_ENDPOINT?.trim();
-  if (!configuredEndpoint) return [...sources];
-
-  let endpoint: URL;
-  try {
-    endpoint = new URL(configuredEndpoint);
-  } catch {
-    throw new Error("STORAGE_API_ENDPOINT must be a valid URL");
-  }
-  const isApprovedGoogleStorageHost =
-    endpoint.protocol === "https:" &&
-    (endpoint.hostname === "storage.googleapis.com" ||
-      /^storage\.[a-z0-9-]+\.rep\.googleapis\.com$/.test(endpoint.hostname));
-  if (isProduction && !isApprovedGoogleStorageHost) {
-    throw new Error(
-      "Production STORAGE_API_ENDPOINT must use an approved HTTPS Google Storage host",
-    );
-  }
-  if (endpoint.protocol === "https:") sources.add(endpoint.origin);
-  return [...sources];
-}
-
 const storageConnectSources = getStorageConnectSources();
 
 validateTotpEncryptionConfig();
+validateObjectStorageConfiguration();
 validateStoragePathIsolation();
 app.disable("x-powered-by");
 
@@ -69,7 +49,11 @@ app.use(
             imgSrc: ["'self'", "data:", "blob:", "https:"],
             objectSrc: ["'self'", "blob:"],
             scriptSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            styleSrc: [
+              "'self'",
+              "'unsafe-inline'",
+              "https://fonts.googleapis.com",
+            ],
             upgradeInsecureRequests: [],
           },
         }
@@ -107,7 +91,10 @@ app.use(
   cors({
     origin(origin, callback) {
       // `origin` is undefined for same-origin and non-browser requests.
-      callback(null, origin != null && allowedOrigins.has(origin) ? origin : false);
+      callback(
+        null,
+        origin != null && allowedOrigins.has(origin) ? origin : false,
+      );
     },
     credentials: true,
   }),
@@ -140,7 +127,9 @@ if (isProduction || process.env.SERVE_WEB === "true") {
     fs.existsSync(path.join(candidate, "index.html")),
   );
   if (!webDist) {
-    throw new Error(`Built web application not found (checked: ${candidates.join(", ")})`);
+    throw new Error(
+      `Built web application not found (checked: ${candidates.join(", ")})`,
+    );
   }
   app.use(
     express.static(webDist, {
@@ -184,7 +173,11 @@ app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
   }
   req.log.error({ err }, "Unhandled error");
   res
-    .status(typeof status === "number" && status >= 400 && status < 600 ? status : 500)
+    .status(
+      typeof status === "number" && status >= 400 && status < 600
+        ? status
+        : 500,
+    )
     .json({ message: "Internal server error" });
 });
 
