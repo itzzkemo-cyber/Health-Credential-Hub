@@ -43,6 +43,13 @@
       "when": 1787143795017,
       "tag": "0005_automation_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787784557439,
+      "tag": "0006_sharp_shadow_king",
+      "breakpoints": true
     }
   ]
 }

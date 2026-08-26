@@ -1,6 +1,6 @@
 ---
 name: health-credential-integrations
-description: Design or review Health Credential Hub integrations with Gemini OCR, private object storage, email, Google OAuth, and future FHIR, HL7, SMART, or regulator APIs. Use when data crosses a service boundary.
+description: Design or review Health Credential Hub integrations with Gemini OCR, private object storage, email, workflow automation, and future FHIR, HL7, SMART, or regulator APIs. Use when data crosses a service boundary.
 ---
 
 # Health Credential Integrations

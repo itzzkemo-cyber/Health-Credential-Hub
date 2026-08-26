@@ -7,7 +7,6 @@ import {
   Bell,
   ShieldCheck,
   FileBarChart,
-  Boxes,
   Settings,
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
@@ -39,6 +38,18 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
       icon: FileText,
       label: t("common.credentials"),
       path: "/credentials",
+      roles: [
+        "employee",
+        "supervisor",
+        "department_manager",
+        "hospital_admin",
+        "system_admin",
+      ],
+    },
+    {
+      icon: Bell,
+      label: t("common.notifications"),
+      path: "/notifications",
       roles: [
         "employee",
         "supervisor",
@@ -88,12 +99,6 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
       roles: ["hospital_admin", "system_admin"],
     },
     {
-      icon: Boxes,
-      label: t("common.integrations"),
-      path: "/integrations",
-      roles: ["system_admin"],
-    },
-    {
       icon: Settings,
       label: t("common.settings"),
       path: "/settings",
@@ -129,13 +134,13 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
                 href={item.path}
                 onClick={onNavigate}
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+                  "flex min-h-11 items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2",
                   isActive
                     ? "bg-sidebar-accent text-sidebar-accent-foreground"
                     : "text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground",
                 )}
               >
-                <item.icon className="h-5 w-5" />
+                <item.icon className="h-5 w-5" aria-hidden="true" />
                 {item.label}
               </Link>
             );

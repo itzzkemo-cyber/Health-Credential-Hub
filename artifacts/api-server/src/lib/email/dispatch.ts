@@ -8,6 +8,7 @@ import {
 } from "@workspace/db";
 import { and, desc, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
 import { logger } from "../logger";
+import { safeErrorLogFields } from "../safeError";
 import {
   computeEmployeeStats,
   getCredentialsFor,
@@ -250,7 +251,7 @@ async function attemptSend(input: {
       .update(emailLogTable)
       .set({
         status: "skipped",
-        error: "Demo fixture address — real delivery suppressed",
+        error: "Test-only recipient address — real delivery suppressed",
       })
       .where(eq(emailLogTable.id, claim.id));
     logger.info(
@@ -286,14 +287,17 @@ async function attemptSend(input: {
       );
       return;
     }
-    const message = err instanceof Error ? err.message : String(err);
+    const safeFailure = safeErrorLogFields(err);
+    const failureClassification = safeFailure.errorCode
+      ? `${safeFailure.errorName}:${safeFailure.errorCode}`
+      : safeFailure.errorName;
     await db
       .update(emailLogTable)
-      .set({ status: "failed", error: message.slice(0, 500) })
+      .set({ status: "failed", error: failureClassification })
       .where(eq(emailLogTable.id, claim.id));
     logger.error(
       {
-        errorName: err instanceof Error ? err.name : "UnknownError",
+        ...safeFailure,
         kind: input.kind,
       },
       "Email send failed",

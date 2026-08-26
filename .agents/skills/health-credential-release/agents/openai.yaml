@@ -1,4 +1,4 @@
 interface:
   display_name: "Health Credential Release"
-  short_description: "Prepare a safe, testable web Demo for handoff"
-  default_prompt: "Use $health-credential-release to prepare this site for a verified Demo handoff."
+  short_description: "Prepare the production web release for handoff"
+  default_prompt: "Use $health-credential-release to prepare this site for a verified production release handoff."

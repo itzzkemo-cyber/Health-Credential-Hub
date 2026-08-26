@@ -30,16 +30,13 @@ export class EmailNotConfiguredError extends Error {
  * Sender identity must use a domain verified in the user's Resend account.
  */
 /**
- * Domains used by seeded demo accounts and e2e test users. They must never
- * receive real mail: the addresses are fabricated, would bounce (or land in
- * a stranger's inbox — both domains are plausible real .sa domains), and
- * bounces damage the sender reputation of the shared Resend identity.
+ * RFC-reserved `.invalid` addresses used by automated tests must never reach
+ * the provider. Real domains are never suppressed merely because their name
+ * resembles old fixture data.
  */
-const FIXTURE_EMAIL_DOMAINS = ["healthdocs.sa", "hospital.sa"];
-
 export function isFixtureRecipient(email: string): boolean {
   const domain = email.toLowerCase().split("@").pop() ?? "";
-  return FIXTURE_EMAIL_DOMAINS.includes(domain);
+  return domain === "invalid" || domain.endsWith(".invalid");
 }
 
 export function isEmailConfigured(): boolean {

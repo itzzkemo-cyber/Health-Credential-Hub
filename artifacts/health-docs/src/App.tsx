@@ -1,6 +1,6 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiError } from '@workspace/api-client-react';
-import { clearAuthSession, getAuthUser, isAuthenticated } from '@/lib/auth';
+import { clearAuthSession, getAuthUser, isAuthenticated, setAuthSession } from '@/lib/auth';
 import { lazy, Suspense, type ReactNode } from 'react';
 import { Toaster } from 'sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -13,10 +13,10 @@ import { useLanguage } from '@/lib/language-context';
 import { AppShell } from '@/components/layout/Shell';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { withPasswordChangeState } from '@/lib/password-change-state';
 
 // Split route bundles so mobile employees do not download management screens up front.
 const Login = lazy(() => import('@/pages/login'));
-const Register = lazy(() => import('@/pages/register'));
 const ForgotPassword = lazy(() => import('@/pages/forgot-password'));
 const ResetPassword = lazy(() => import('@/pages/reset-password'));
 const TwoFactorChallenge = lazy(() => import('@/pages/two-factor-challenge'));
@@ -31,7 +31,6 @@ const NotificationsList = lazy(() => import('@/pages/notifications'));
 const AuditLogList = lazy(() => import('@/pages/audit-log'));
 const ReportsView = lazy(() => import('@/pages/reports'));
 const PoliciesList = lazy(() => import('@/pages/policies'));
-const IntegrationsView = lazy(() => import('@/pages/integrations'));
 const VerifyQR = lazy(() => import('@/pages/verify'));
 const Settings = lazy(() => import('@/pages/settings'));
 const NotFound = lazy(() => import('@/pages/not-found'));
@@ -50,7 +49,6 @@ const MANAGEMENT_ROLES: readonly AppRole[] = [
   'system_admin',
 ];
 const ADMIN_ROLES: readonly AppRole[] = ['hospital_admin', 'system_admin'];
-const SYSTEM_ADMIN_ROLES: readonly AppRole[] = ['system_admin'];
 
 // This is a navigation/UX boundary only. Every management request is still
 // authorized and scoped by the API, which remains the source of truth.
@@ -109,16 +107,26 @@ function RouteFallback() {
 // The session lives in an httpOnly cookie, so the client can't inspect it.
 // When it expires or is revoked the API answers 401 — drop the cached profile
 // and return to the login page.
-function handleUnauthorized(error: unknown) {
-  if (error instanceof ApiError && error.status === 401 && isAuthenticated()) {
+function handleAuthError(error: unknown) {
+  if (!(error instanceof ApiError)) return;
+
+  if (error.status === 401 && isAuthenticated()) {
     clearAuthSession();
     window.location.assign(`${import.meta.env.BASE_URL}login`);
+    return;
+  }
+
+  const code = (error.data as { code?: string } | null)?.code;
+  if (error.status === 403 && code === 'PASSWORD_CHANGE_REQUIRED') {
+    const user = getAuthUser() as Record<string, unknown> | null;
+    if (user) setAuthSession(withPasswordChangeState(user, true));
+    window.location.assign(`${import.meta.env.BASE_URL}settings`);
   }
 }
 
 const queryClient = new QueryClient({
-  queryCache: new QueryCache({ onError: handleUnauthorized }),
-  mutationCache: new MutationCache({ onError: handleUnauthorized }),
+  queryCache: new QueryCache({ onError: handleAuthError }),
+  mutationCache: new MutationCache({ onError: handleAuthError }),
   defaultOptions: {
     queries: {
       retry: false,
@@ -131,7 +139,6 @@ function Router() {
   return (
     <Switch>
       <Route path="/login" component={Login} />
-      <Route path="/register" component={Register} />
       <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/2fa-challenge" component={TwoFactorChallenge} />
@@ -173,11 +180,6 @@ function Router() {
             <Route path="/policies">
               <AllowedRoles roles={ADMIN_ROLES}>
                 <PoliciesList />
-              </AllowedRoles>
-            </Route>
-            <Route path="/integrations">
-              <AllowedRoles roles={SYSTEM_ADMIN_ROLES}>
-                <IntegrationsView />
               </AllowedRoles>
             </Route>
             <Route path="/settings" component={Settings} />

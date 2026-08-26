@@ -7,5 +7,5 @@
  */
 
 export interface ChangePasswordResult {
-  token: string;
+  success: boolean;
 }

@@ -6,6 +6,7 @@ import {
 } from "@workspace/api-client-react";
 import { useLanguage } from "@/lib/language-context";
 import { setAuthSession } from "@/lib/auth";
+import { authenticatedLandingPath } from "@/lib/password-change-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -27,7 +28,7 @@ export default function TwoFactorChallenge() {
   const { t } = useLanguage();
   const [, setLocation] = useLocation();
   const [challengeToken] = useState(() => {
-    // Google OAuth hands the challenge token over in the URL fragment
+    // An external authentication flow may hand the challenge token over in the URL fragment
     // (#ct=…): fragments never reach servers, logs or Referer headers. Move
     // it into sessionStorage and scrub the address bar immediately.
     const fromHash = new URLSearchParams(window.location.hash.slice(1)).get("ct");
@@ -67,7 +68,7 @@ export default function TwoFactorChallenge() {
           sessionStorage.removeItem(TWOFA_CHALLENGE_KEY);
           setAuthSession(res.user);
           toast.success(t("auth.welcome_back"));
-          setLocation("/");
+          setLocation(authenticatedLandingPath(res.user));
         },
         onError: (err) => {
           const code =

@@ -25,7 +25,6 @@ vi.mock("@workspace/db", () => {
   };
   return {
     usersTable,
-    facilitiesTable: {},
     passwordResetTokensTable: {},
     db: {
       select: vi.fn(() => ({
@@ -108,6 +107,27 @@ describe("administrative TOTP recovery hierarchy", () => {
   });
 
   async function disable(userId: number): Promise<globalThis.Response> {
+    return post("/auth/totp/admin-disable", { userId });
+  }
+
+  async function post(
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<globalThis.Response> {
+    return request(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "HealthCredentialHub",
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  async function request(
+    path: string,
+    init?: RequestInit,
+  ): Promise<globalThis.Response> {
     const app = express();
     app.use(express.json());
     app.use("/api", router);
@@ -117,15 +137,36 @@ describe("administrative TOTP recovery hierarchy", () => {
     if (!address || typeof address === "string") {
       throw new Error("Expected a disposable TCP listener");
     }
-    return fetch(
-      `http://127.0.0.1:${address.port}/api/auth/totp/admin-disable`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
-      },
-    );
+    return fetch(`http://127.0.0.1:${address.port}/api${path}`, init);
   }
+
+  it.each([
+    ["demo login", "/auth/demo-login", { role: "employee" }],
+    [
+      "self-registration",
+      "/auth/register",
+      {
+        name: "Worker",
+        nameAr: "موظف",
+        email: "worker@example.sa",
+        password: "safe-password",
+        facilityId: 10,
+      },
+    ],
+  ])("does not expose the removed %s endpoint", async (_label, path, body) => {
+    const response = await post(path, body);
+
+    expect(response.status).toBe(404);
+  });
+
+  it.each(["/auth/google", "/auth/google/callback?code=test&state=test"])(
+    "does not expose the removed Google OAuth endpoint %s",
+    async (path) => {
+      const response = await request(path);
+
+      expect(response.status).toBe(404);
+    },
+  );
 
   it.each([
     ["peer", account(2, "hospital_admin", 10)],

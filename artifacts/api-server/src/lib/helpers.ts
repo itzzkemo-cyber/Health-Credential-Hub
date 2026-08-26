@@ -65,6 +65,7 @@ export function serializeUser(u: User) {
     phone: u.phone,
     avatarUrl: u.avatarUrl,
     isActive: u.isActive,
+    mustChangePassword: u.mustChangePassword,
     totpEnabled: u.totpEnabled,
     createdAt: u.createdAt.toISOString(),
   };

@@ -10,6 +10,7 @@ export interface EmployeeInput {
   name: string;
   nameAr: string;
   email: string;
+  /** @minLength 12 */
   password: string;
   role: string;
   /** @nullable */

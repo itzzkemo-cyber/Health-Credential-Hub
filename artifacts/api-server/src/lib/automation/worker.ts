@@ -20,6 +20,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { logger } from "../logger";
+import { safeErrorLogFields } from "../safeError";
 import { daysUntil } from "../helpers";
 import type { AutomationConfig } from "./config";
 import {
@@ -429,7 +430,7 @@ export async function runAutomationWorkerContinuously(
       await runAutomationWorkerCycle(config);
     } catch (error) {
       logger.error(
-        { errorName: error instanceof Error ? error.name : "UnknownError" },
+        safeErrorLogFields(error),
         "Automation worker cycle failed",
       );
     }

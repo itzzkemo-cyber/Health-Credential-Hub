@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EmailNotConfiguredError,
   isEmailConfigured,
+  isFixtureRecipient,
   sendEmail,
 } from "./sender";
 
@@ -20,6 +21,13 @@ afterEach(() => {
 });
 
 describe("email delivery configuration", () => {
+  it("suppresses only reserved .invalid fixture recipients", () => {
+    expect(isFixtureRecipient("employee@healthdocs.invalid")).toBe(true);
+    expect(isFixtureRecipient("employee@qa.hospital.invalid")).toBe(true);
+    expect(isFixtureRecipient("employee@hospital.sa")).toBe(false);
+    expect(isFixtureRecipient("employee@healthdocs.sa")).toBe(false);
+  });
+
   it("stays disabled unless alerts are explicitly enabled with both provider values", () => {
     process.env.RESEND_API_KEY = "test-key";
     process.env.EMAIL_FROM = "HealthDocs <no-reply@example.sa>";

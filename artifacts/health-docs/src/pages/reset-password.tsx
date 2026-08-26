@@ -55,7 +55,7 @@ export default function ResetPassword() {
               : undefined;
           if (code === "weak_password") {
             // Token is still fine — only the password was rejected.
-            toast.error(t("register.password_hint"));
+            toast.error(t("reset_password.password_hint"));
           } else if (err instanceof ApiError && err.status === 400) {
             setLinkInvalid(true);
           } else {
@@ -103,7 +103,7 @@ export default function ResetPassword() {
                 id="password"
                 type="password"
                 required
-                minLength={8}
+                minLength={12}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 dir="ltr"
@@ -111,7 +111,7 @@ export default function ResetPassword() {
                 autoComplete="new-password"
               />
               <p className="text-xs text-muted-foreground">
-                {t("register.password_hint")}
+                {t("reset_password.password_hint")}
               </p>
             </div>
             <div className="space-y-2">
@@ -120,7 +120,7 @@ export default function ResetPassword() {
                 id="confirm"
                 type="password"
                 required
-                minLength={8}
+                minLength={12}
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 dir="ltr"

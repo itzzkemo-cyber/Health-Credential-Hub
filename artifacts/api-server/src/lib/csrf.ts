@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { SESSION_COOKIE } from "./auth";
 
 // First-party browser origins: the workspace/production web domains plus the
-// Expo dev origin. Used both by CORS (read permission) and by the CSRF guards
+// trusted web origin. Used both by CORS (read permission) and by the CSRF guards
 // below (write permission). Requests without an Origin header (curl, native
 // mobile apps) are not browser CSRF vectors and are never blocked here.
 function normalizeOrigin(value: string): string | null {
@@ -111,8 +111,8 @@ export function csrfOriginGuard(
   next();
 }
 
-// Login-CSRF defense for endpoints that ISSUE a session cookie (login,
-// demo-login): those carry no cookie yet, so csrfOriginGuard cannot see them.
+// Login-CSRF defense for endpoints that issue a session cookie. These requests
+// carry no cookie yet, so csrfOriginGuard cannot see them.
 // Attached directly to the routes — not matched by path string — so
 // trailing-slash or case variants of the URL can never bypass it.
 export function sessionIssuanceCsrfGuard(

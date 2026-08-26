@@ -26,6 +26,7 @@ export interface User {
   /** @nullable */
   avatarUrl?: string | null;
   isActive: boolean;
+  mustChangePassword: boolean;
   totpEnabled: boolean;
   createdAt: string;
 }

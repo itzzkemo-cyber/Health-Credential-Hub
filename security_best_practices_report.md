@@ -1,6 +1,6 @@
 # Health Credential Hub security review
 
-Date: 2026-08-19
+Date: 2026-08-27
 
 ## Release position
 
@@ -18,8 +18,8 @@ until the operator completes the organizational and privacy controls below.
   request marker, in addition to CORS.
 - Helmet sets CSP, HSTS, nosniff, referrer, framing and related browser
   protections; Express technology disclosure is disabled.
-- Demo login, self-registration, destructive Demo seed and Google
-  auto-provisioning fail closed in production.
+- Public registration, test-only login, destructive seed, and Google sign-in
+  routes are absent from the release.
 - TOTP shared secrets are encrypted with AES-256-GCM using a Secret
   Manager-provided key; no long-lived cloud service-account key is required.
 - TOTP-enabled accounts fail closed if their encrypted secret is missing, and
@@ -43,7 +43,7 @@ until the operator completes the organizational and privacy controls below.
    purpose, minimization, retention/deletion, data-subject handling, incident
    response and processor agreements for OCR/email.
 2. Run tenant-isolation integration tests against a disposable PostgreSQL and
-   real private bucket. Current automated tests are unit/client Demo tests and
+   real private bucket. Current automated tests are unit and route tests and
    do not prove every cross-tenant query against live infrastructure.
 3. Enforce the upload byte limit at storage ingress before accepting files from
    untrusted users; post-upload metadata validation does not prevent oversized

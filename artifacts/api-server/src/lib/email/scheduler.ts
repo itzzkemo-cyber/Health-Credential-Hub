@@ -1,6 +1,7 @@
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../logger";
+import { safeErrorLogFields } from "../safeError";
 import { syncExpiryNotifications } from "../helpers";
 import { dispatchPendingExpiryEmails, sendWeeklyDigests } from "./dispatch";
 import { isEmailConfigured } from "./sender";
@@ -40,7 +41,7 @@ async function tick(): Promise<void> {
       await sendWeeklyDigests();
     }
   } catch (err) {
-    logger.error({ err }, "Email scheduler tick failed");
+    logger.error(safeErrorLogFields(err), "Email scheduler tick failed");
   } finally {
     running = false;
   }
@@ -55,7 +56,10 @@ async function syncAllUsersNotifications(): Promise<void> {
     try {
       await syncExpiryNotifications(user);
     } catch (err) {
-      logger.error({ err, userId: user.id }, "Notification sync failed");
+      logger.error(
+        { ...safeErrorLogFields(err), userId: user.id },
+        "Notification sync failed",
+      );
     }
   }
 }

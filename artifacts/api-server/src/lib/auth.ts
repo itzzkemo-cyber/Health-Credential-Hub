@@ -44,7 +44,7 @@ export function signToken(userId: number, sessionVersion: number): string {
 // setup). They carry a `purpose` claim, and requireAuth refuses any token
 // that has one — possessing a challenge token must never grant API access.
 
-export type TokenPurpose = "2fa_challenge" | "totp_setup" | "oauth_state";
+export type TokenPurpose = "2fa_challenge" | "totp_setup";
 
 export function signPurposeToken(
   purpose: TokenPurpose,
@@ -107,13 +107,11 @@ export function getUser(req: Request): User {
 }
 
 // --- Session cookie ---------------------------------------------------------
-// The web app authenticates with an httpOnly cookie so the token is never
-// readable from JavaScript (XSS cannot exfiltrate it). Native/mobile clients
-// may instead send the token from the login response as an
-// `Authorization: Bearer` header.
+// The web app authenticates with an httpOnly cookie. Session JWTs are never
+// returned in response bodies, so browser JavaScript cannot read them.
 //
 // SameSite defaults to Lax in production because the web app and API share an
-// origin. Local cross-origin Expo development can opt into None explicitly.
+// origin. An explicitly trusted cross-origin web deployment can opt into None.
 // CSRF is instead enforced by csrfOriginGuard (first-party Origin required on
 // cookie-authenticated mutations) plus the CORS allowlist. SameSite=None
 // always requires the Secure attribute.
@@ -162,6 +160,20 @@ function extractToken(req: Request): string | null {
   return typeof cookieToken === "string" && cookieToken ? cookieToken : null;
 }
 
+const PASSWORD_CHANGE_ALLOWED_PATHS = new Set([
+  "/api/auth/me",
+  "/api/auth/change-password",
+  "/api/auth/logout",
+]);
+
+function canAccessWhilePasswordChangeRequired(req: Request): boolean {
+  // originalUrl retains the app-level /api mount point. Remove only the query
+  // string and require an exact path match so suffixes/trailing slashes cannot
+  // expand this narrow recovery allowlist.
+  const requestPath = req.originalUrl.split("?", 1)[0];
+  return PASSWORD_CHANGE_ALLOWED_PATHS.has(requestPath);
+}
+
 export async function requireAuth(
   req: Request,
   res: Response,
@@ -206,6 +218,17 @@ export async function requireAuth(
       return;
     }
     (req as AuthedRequest).user = user;
+    if (
+      user.mustChangePassword &&
+      !canAccessWhilePasswordChangeRequired(req)
+    ) {
+      res.status(403).json({
+        code: "PASSWORD_CHANGE_REQUIRED",
+        message: "You must change your temporary password before continuing",
+        messageAr: "يجب تغيير كلمة المرور المؤقتة قبل المتابعة",
+      });
+      return;
+    }
     next();
   } catch {
     res.status(401).json({ message: "Unauthorized" });

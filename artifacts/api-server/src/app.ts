@@ -12,12 +12,13 @@ import helmet from "helmet";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { safeErrorLogFields } from "./lib/safeError";
+import { safeRequestPath } from "./lib/safeRequestPath";
 import { allowedOrigins, csrfOriginGuard } from "./lib/csrf";
 import { validateTotpEncryptionConfig } from "./lib/totpSecret";
 import {
   getStorageConnectSources,
   validateObjectStorageConfiguration,
-  validateStoragePathIsolation,
 } from "./lib/objectStorage";
 
 const app: Express = express();
@@ -27,7 +28,6 @@ const storageConnectSources = getStorageConnectSources();
 
 validateTotpEncryptionConfig();
 validateObjectStorageConfiguration();
-validateStoragePathIsolation();
 app.disable("x-powered-by");
 
 // Behind Cloud Run's managed proxy: trust the first hop so req.ip (audit logs)
@@ -70,7 +70,7 @@ app.use(
         return {
           id: req.id,
           method: req.method,
-          url: req.url?.split("?")[0],
+          url: safeRequestPath(req.url),
         };
       },
       res(res) {
@@ -155,7 +155,7 @@ if (isProduction || process.env.SERVE_WEB === "true") {
 }
 
 // JSON error responses instead of Express's default HTML error page, so the
-// web/mobile clients can show a localized message. Body-parser rejects
+// web clients can show a localized message. Body-parser rejects
 // oversized payloads before any route runs (413); anything else is an
 // unexpected server error.
 app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
@@ -171,7 +171,7 @@ app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
     });
     return;
   }
-  req.log.error({ err }, "Unhandled error");
+  req.log.error(safeErrorLogFields(err), "Unhandled error");
   res
     .status(
       typeof status === "number" && status >= 400 && status < 600

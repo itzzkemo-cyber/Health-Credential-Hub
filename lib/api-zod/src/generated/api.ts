@@ -44,18 +44,6 @@ export const RequestUploadUrlResponse = zod.object({
 
 
 /**
- * Unconditionally public — no authentication or ACL checks.
- * Searches PUBLIC_OBJECT_SEARCH_PATHS for the given file path.
- * @summary Serve a public asset from PUBLIC_OBJECT_SEARCH_PATHS
- */
-export const GetPublicObjectParams = zod.object({
-  "filePath": zod.coerce.string().describe('Relative file path within the public search paths.')
-})
-
-export const GetPublicObjectResponse = zod.unknown()
-
-
-/**
  * Serves credential document files. Requires authentication; access is
  * limited to the file owner and manager roles.
  * @summary Serve an object entity from PRIVATE_OBJECT_DIR
@@ -94,7 +82,6 @@ export const LoginBody = zod.object({
 })
 
 export const LoginResponse = zod.object({
-  "token": zod.string(),
   "user": zod.object({
   "id": zod.number(),
   "email": zod.string(),
@@ -110,6 +97,7 @@ export const LoginResponse = zod.object({
   "phone": zod.string().nullish(),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
+  "mustChangePassword": zod.boolean(),
   "totpEnabled": zod.boolean(),
   "createdAt": zod.string()
 })
@@ -117,72 +105,8 @@ export const LoginResponse = zod.object({
 
 
 /**
- * @summary Sign in to a showcase demo account (credentials never leave the server)
- */
-export const DemoLoginBody = zod.object({
-  "role": zod.enum(['system_admin', 'hospital_admin', 'department_manager', 'supervisor', 'employee'])
-})
-
-export const DemoLoginResponse = zod.object({
-  "token": zod.string(),
-  "user": zod.object({
-  "id": zod.number(),
-  "email": zod.string(),
-  "name": zod.string(),
-  "nameAr": zod.string(),
-  "role": zod.enum(['employee', 'supervisor', 'department_manager', 'hospital_admin', 'system_admin']),
-  "departmentId": zod.number().nullish(),
-  "supervisorId": zod.number().nullish(),
-  "facilityId": zod.number(),
-  "jobTitle": zod.string().optional(),
-  "jobTitleAr": zod.string().optional(),
-  "employeeNumber": zod.string().optional(),
-  "phone": zod.string().nullish(),
-  "avatarUrl": zod.string().nullish(),
-  "isActive": zod.boolean(),
-  "totpEnabled": zod.boolean(),
-  "createdAt": zod.string()
-})
-})
-
-
-/**
- * @summary Self-registration — create an employee account and sign in
- */
-export const RegisterBody = zod.object({
-  "name": zod.string().describe('Full name in English'),
-  "nameAr": zod.string().describe('Full name in Arabic'),
-  "email": zod.string(),
-  "password": zod.string().describe('Minimum 8 characters'),
-  "phone": zod.string().nullish(),
-  "facilityId": zod.number().describe('Facility id — must be a positive integer sent as a JSON number (kept as `number` in the schema for codegen compatibility; the server rejects non-integer values).')
-})
-
-export const RegisterResponse = zod.object({
-  "token": zod.string(),
-  "user": zod.object({
-  "id": zod.number(),
-  "email": zod.string(),
-  "name": zod.string(),
-  "nameAr": zod.string(),
-  "role": zod.enum(['employee', 'supervisor', 'department_manager', 'hospital_admin', 'system_admin']),
-  "departmentId": zod.number().nullish(),
-  "supervisorId": zod.number().nullish(),
-  "facilityId": zod.number(),
-  "jobTitle": zod.string().optional(),
-  "jobTitleAr": zod.string().optional(),
-  "employeeNumber": zod.string().optional(),
-  "phone": zod.string().nullish(),
-  "avatarUrl": zod.string().nullish(),
-  "isActive": zod.boolean(),
-  "totpEnabled": zod.boolean(),
-  "createdAt": zod.string()
-})
-})
-
-
-/**
- * @summary List facilities (public — powers the registration facility dropdown)
+ * System administrators receive the global directory; every other role receives only its own facility.
+ * @summary List facilities visible to the authenticated account
  */
 export const GetFacilitiesResponseItem = zod.object({
   "id": zod.number(),
@@ -216,6 +140,7 @@ export const GetMeResponse = zod.object({
   "phone": zod.string().nullish(),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
+  "mustChangePassword": zod.boolean(),
   "totpEnabled": zod.boolean(),
   "createdAt": zod.string()
 })
@@ -224,13 +149,17 @@ export const GetMeResponse = zod.object({
 /**
  * @summary Change password
  */
+export const changePasswordBodyNewPasswordMin = 12;
+
+
+
 export const ChangePasswordBody = zod.object({
   "currentPassword": zod.string(),
-  "newPassword": zod.string()
+  "newPassword": zod.string().min(changePasswordBodyNewPasswordMin)
 })
 
 export const ChangePasswordResponse = zod.object({
-  "token": zod.string()
+  "success": zod.boolean()
 })
 
 
@@ -247,7 +176,7 @@ export const ForgotPasswordResponse = zod.unknown()
 /**
  * @summary Set a new password using an emailed reset token
  */
-export const resetPasswordBodyNewPasswordMin = 8;
+export const resetPasswordBodyNewPasswordMin = 12;
 
 
 
@@ -257,7 +186,6 @@ export const ResetPasswordBody = zod.object({
 })
 
 export const ResetPasswordResponse = zod.object({
-  "token": zod.string(),
   "user": zod.object({
   "id": zod.number(),
   "email": zod.string(),
@@ -273,6 +201,7 @@ export const ResetPasswordResponse = zod.object({
   "phone": zod.string().nullish(),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
+  "mustChangePassword": zod.boolean(),
   "totpEnabled": zod.boolean(),
   "createdAt": zod.string()
 })
@@ -312,7 +241,6 @@ export const TotpChallengeBody = zod.object({
 })
 
 export const TotpChallengeResponse = zod.object({
-  "token": zod.string(),
   "user": zod.object({
   "id": zod.number(),
   "email": zod.string(),
@@ -328,6 +256,7 @@ export const TotpChallengeResponse = zod.object({
   "phone": zod.string().nullish(),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
+  "mustChangePassword": zod.boolean(),
   "totpEnabled": zod.boolean(),
   "createdAt": zod.string()
 })
@@ -930,11 +859,15 @@ export const ListEmployeesResponse = zod.array(ListEmployeesResponseItem)
 /**
  * @summary Create employee
  */
+export const createEmployeeBodyPasswordMin = 12;
+
+
+
 export const CreateEmployeeBody = zod.object({
   "name": zod.string(),
   "nameAr": zod.string(),
   "email": zod.string(),
-  "password": zod.string(),
+  "password": zod.string().min(createEmployeeBodyPasswordMin),
   "role": zod.string(),
   "departmentId": zod.number().nullish(),
   "supervisorId": zod.number().nullish(),

@@ -1,4 +1,4 @@
-import { useRoute, useLocation } from "wouter";
+import { Link, useRoute, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetEmployee,
@@ -111,9 +111,9 @@ export default function EmployeeDetail() {
               </div>
 
               <div className="py-6 border-b border-border space-y-4">
-                <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <Mail className="h-4 w-4" />
-                  <span>{emp.email}</span>
+                <div className="flex min-w-0 items-center gap-3 text-sm text-muted-foreground">
+                  <Mail className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 break-all" dir="ltr">{emp.email}</span>
                 </div>
                 {emp.phone && (
                   <div className="flex items-center gap-3 text-sm text-muted-foreground">
@@ -218,24 +218,24 @@ export default function EmployeeDetail() {
 
               <div className="space-y-3">
                 {emp.credentials?.length ? emp.credentials.map((cred) => (
-                  <div key={cred.id} className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/30 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-primary/10 p-2 rounded-md">
+                  <div key={cred.id} className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/30 sm:flex-nowrap">
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <div className="shrink-0 rounded-md bg-primary/10 p-2">
                         <FileText className="h-5 w-5 text-primary" />
                       </div>
-                      <div>
-                        <div 
-                          className="font-medium hover:text-primary cursor-pointer transition-colors"
-                          onClick={() => setLocation(`/credentials/${cred.id}`)}
+                      <div className="min-w-0">
+                        <Link
+                          href={`/credentials/${cred.id}`}
+                          className="inline-flex min-h-11 max-w-full items-center rounded-sm font-medium transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         >
-                          {isRTL ? (cred.customTypeNameAr || cred.type) : (cred.customTypeName || cred.type)}
-                        </div>
+                          <span className="truncate">{isRTL ? (cred.customTypeNameAr || cred.type) : (cred.customTypeName || cred.type)}</span>
+                        </Link>
                         <div className="text-xs text-muted-foreground">
                           {t('employees_page.expires')}: {new Date(cred.expiryDate).toLocaleDateString(isRTL ? 'ar-SA' : 'en-US')}
                         </div>
                       </div>
                     </div>
-                    <Badge className={getStatusColor(cred.status)} variant="outline">
+                    <Badge className={`${getStatusColor(cred.status)} shrink-0`} variant="outline">
                       {t(`common.${cred.status}`)}
                     </Badge>
                   </div>

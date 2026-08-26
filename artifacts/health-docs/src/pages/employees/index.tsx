@@ -1,141 +1,774 @@
-import { useState } from "react";
-import { useLanguage } from "@/lib/language-context";
-import { useListEmployees } from "@workspace/api-client-react";
-import { Link, useLocation } from "wouter";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Search, Filter, AlertCircle, HeartPulse } from "lucide-react";
+import { useDeferredValue, useState } from "react";
+import {
+  ApiError,
+  type EmployeeWithStats,
+  getListDepartmentsQueryKey,
+  getListEmployeesQueryKey,
+  useCreateEmployee,
+  useListDepartments,
+  useListEmployees,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "wouter";
+import {
+  AlertCircle,
+  Copy,
+  Eye,
+  EyeOff,
+  HeartPulse,
+  KeyRound,
+  Loader2,
+  Plus,
+  Search,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getAuthUser } from "@/lib/auth";
+import { useLanguage } from "@/lib/language-context";
+import { cn } from "@/lib/utils";
+import {
+  buildEmployeeInput,
+  generateTemporaryPassword,
+  type EmployeeAccountForm,
+  getComplianceRate,
+  getEmployeeDisplayName,
+  getEmployeeInitial,
+  isPasswordDeliveryReady,
+} from "./employee-list-state";
 
 export default function EmployeesList() {
   const { t, isRTL } = useLanguage();
-  const [, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const user = getAuthUser() as { role?: string } | null;
+  const canCreateEmployee =
+    user?.role === "hospital_admin" || user?.role === "system_admin";
   const [search, setSearch] = useState("");
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
+  const [passwordDeliveryAcknowledged, setPasswordDeliveryAcknowledged] =
+    useState(false);
+  const [employeeForm, setEmployeeForm] = useState(createEmptyEmployeeForm);
+  const deferredSearch = useDeferredValue(search.trim());
 
-  const { data: employees, isLoading } = useListEmployees({
-    search: search || undefined,
+  const employeesQuery = useListEmployees({
+    search: deferredSearch || undefined,
   });
+  const departmentsQuery = useListDepartments({
+    query: {
+      queryKey: getListDepartmentsQueryKey(),
+      enabled: canCreateEmployee,
+    },
+  });
+  const createEmployee = useCreateEmployee();
+  const employees = employeesQuery.data ?? [];
+  const assignableRoles =
+    user?.role === "system_admin"
+      ? ["hospital_admin", "department_manager", "supervisor", "employee"]
+      : ["department_manager", "supervisor", "employee"];
 
-  const getComplianceColor = (rate: number) => {
-    if (rate >= 90) return 'bg-emerald-500';
-    if (rate >= 70) return 'bg-amber-500';
-    return 'bg-destructive';
+  const openCreateEmployee = () => {
+    createEmployee.reset();
+    setEmployeeForm(createEmptyEmployeeForm());
+    setShowTemporaryPassword(false);
+    setPasswordDeliveryAcknowledged(false);
+    setIsCreateOpen(true);
   };
 
+  const generatePassword = () => {
+    setEmployeeForm((previous) => ({
+      ...previous,
+      password: generateTemporaryPassword(),
+    }));
+    setShowTemporaryPassword(true);
+    setPasswordDeliveryAcknowledged(false);
+  };
+
+  const copyTemporaryPassword = async () => {
+    if (!employeeForm.password) return;
+    try {
+      await navigator.clipboard.writeText(employeeForm.password);
+      toast.success(t("employees_page.password_copied"));
+    } catch {
+      toast.error(t("employees_page.password_copy_failed"));
+    }
+  };
+
+  const handleCreateEmployee = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (
+      !isPasswordDeliveryReady(
+        employeeForm.password,
+        passwordDeliveryAcknowledged,
+      )
+    ) {
+      return;
+    }
+
+    createEmployee.mutate(
+      {
+        data: buildEmployeeInput(employeeForm),
+      },
+      {
+        onSuccess: () => {
+          toast.success(t("employees_page.create_success"));
+          setIsCreateOpen(false);
+          setEmployeeForm(createEmptyEmployeeForm());
+          setShowTemporaryPassword(false);
+          setPasswordDeliveryAcknowledged(false);
+          void queryClient.invalidateQueries({
+            queryKey: getListEmployeesQueryKey(),
+          });
+        },
+      },
+    );
+  };
+
+  const createErrorKey =
+    createEmployee.error instanceof ApiError && createEmployee.error.status === 409
+      ? "employees_page.email_exists"
+      : "employees_page.create_failed";
+
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="space-y-5 animate-in fade-in duration-500 sm:space-y-6">
+      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{t('common.employees')}</h1>
-          <p className="text-muted-foreground mt-1">{t('employees_page.subtitle')}</p>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            {t("common.employees")}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground sm:text-base">
+            {t("employees_page.subtitle")}
+          </p>
         </div>
-        <Button className="gap-2">
-          <Plus className="h-4 w-4" />
-          {t('employees_page.add_employee')}
-        </Button>
+        {canCreateEmployee && (
+          <Button
+            type="button"
+            onClick={openCreateEmployee}
+            className="min-h-11 w-full gap-2 sm:w-auto"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            {t("employees_page.add_employee")}
+          </Button>
+        )}
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-4 items-center bg-card p-4 rounded-xl border border-border shadow-sm">
-        <div className="relative flex-1 w-full">
-          <Search className={cn("absolute top-3 h-4 w-4 text-muted-foreground", isRTL ? "right-3" : "left-3")} />
+      <div className="rounded-xl border border-border bg-card p-3 shadow-sm sm:p-4">
+        <div className="relative w-full">
+          <Search
+            className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
           <Input
-            placeholder={t('common.search')}
+            type="search"
+            aria-label={t("employees_page.search_label")}
+            placeholder={t("employees_page.search_placeholder")}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className={cn("bg-background", isRTL ? "pr-9" : "pl-9")}
+            onChange={(event) => setSearch(event.target.value)}
+            className="min-h-11 bg-background ps-9"
           />
         </div>
-        <Button variant="outline" className="w-full sm:w-auto gap-2">
-          <Filter className="h-4 w-4" />
-          {t('employees_page.filter')}
-        </Button>
       </div>
 
-      <div className="grid gap-4">
-        {isLoading ? (
-          Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-20 w-full rounded-xl" />
-          ))
-        ) : !employees || employees.length === 0 ? (
-          <div className="text-center py-12 bg-card rounded-xl border border-dashed">
-            <HeartPulse className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-20" />
-            <h3 className="text-lg font-medium">{t('employees_page.empty')}</h3>
+      <section aria-busy={employeesQuery.isFetching} aria-live="polite">
+        {employeesQuery.isLoading ? (
+          <EmployeeListSkeleton loadingLabel={t("common.loading")} />
+        ) : employeesQuery.isError ? (
+          <QueryErrorState
+            error={employeesQuery.error}
+            onRetry={() => void employeesQuery.refetch()}
+          />
+        ) : employees.length === 0 ? (
+          <div className="rounded-xl border border-dashed bg-card px-4 py-12 text-center">
+            <HeartPulse
+              className="mx-auto mb-4 h-12 w-12 text-muted-foreground opacity-20"
+              aria-hidden="true"
+            />
+            <h2 className="text-lg font-medium">
+              {deferredSearch
+                ? t("employees_page.no_search_results")
+                : t("employees_page.empty")}
+            </h2>
           </div>
         ) : (
-          <div className="rounded-xl border border-border overflow-hidden bg-card shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left rtl:text-right">
-                <thead className="bg-muted/50 text-muted-foreground border-b border-border font-medium">
+          <>
+            <div className="grid gap-3 md:hidden">
+              {employees.map((employee) => (
+                <EmployeeMobileCard
+                  key={employee.id}
+                  employee={employee}
+                  isRTL={isRTL}
+                  t={t}
+                />
+              ))}
+            </div>
+
+            <div className="hidden overflow-hidden rounded-xl border border-border bg-card shadow-sm md:block">
+              <table className="w-full text-start text-sm">
+                <thead className="border-b border-border bg-muted/50 font-medium text-muted-foreground">
                   <tr>
-                    <th className="px-6 py-4">{t('employees_page.employee')}</th>
-                    <th className="px-6 py-4">{t('employees_page.role')}</th>
-                    <th className="px-6 py-4 hidden md:table-cell">{t('employees_page.status')}</th>
-                    <th className="px-6 py-4">{t('employees_page.compliance')}</th>
-                    <th className="px-6 py-4 text-right rtl:text-left">{t('common.actions')}</th>
+                    <th scope="col" className="px-5 py-4 text-start">
+                      {t("employees_page.employee")}
+                    </th>
+                    <th scope="col" className="px-5 py-4 text-start">
+                      {t("employees_page.role")}
+                    </th>
+                    <th scope="col" className="px-5 py-4 text-start">
+                      {t("employees_page.status")}
+                    </th>
+                    <th scope="col" className="px-5 py-4 text-start">
+                      {t("employees_page.compliance")}
+                    </th>
+                    <th scope="col" className="px-5 py-4 text-end">
+                      {t("common.actions")}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {employees.map((emp: any) => (
-                    <tr key={emp.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold">
-                            {isRTL ? emp.nameAr[0] : emp.name[0]}
-                          </div>
-                          <div>
-                            <div className="font-semibold text-foreground">
-                              <Link href={`/employees/${emp.id}`} className="hover:text-primary hover:underline">
-                                {isRTL ? emp.nameAr : emp.name}
-                              </Link>
-                            </div>
-                            <div className="text-xs text-muted-foreground">{emp.employeeNumber || emp.email}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-muted-foreground">
-                        {t(`roles.${emp.role}`)}
-                      </td>
-                      <td className="px-6 py-4 hidden md:table-cell">
-                        {emp.isAtRisk ? (
-                          <Badge variant="outline" className="bg-destructive/10 text-destructive border-0 gap-1">
-                            <AlertCircle className="h-3 w-3" /> {t('employees_page.at_risk')}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 border-0">
-                            {t('employees_page.compliant')}
-                          </Badge>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 min-w-[150px]">
-                        <div className="flex items-center gap-3">
-                          <Progress 
-                            value={emp.complianceRate || 0} 
-                            className="h-2 flex-1" 
-                            indicatorClassName={getComplianceColor(emp.complianceRate || 0)}
-                          />
-                          <span className="text-xs font-medium w-9">{emp.complianceRate || 0}%</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right rtl:text-left">
-                        <Button variant="ghost" size="sm" onClick={() => setLocation(`/employees/${emp.id}`)}>
-                          {t('common.view')}
-                        </Button>
-                      </td>
-                    </tr>
+                  {employees.map((employee) => (
+                    <EmployeeTableRow
+                      key={employee.id}
+                      employee={employee}
+                      isRTL={isRTL}
+                      t={t}
+                    />
                   ))}
                 </tbody>
               </table>
             </div>
-          </div>
+          </>
         )}
-      </div>
+      </section>
+
+      <Dialog
+        open={isCreateOpen}
+        onOpenChange={(open) => {
+          setIsCreateOpen(open);
+          if (!open) {
+            createEmployee.reset();
+            setEmployeeForm(createEmptyEmployeeForm());
+            setShowTemporaryPassword(false);
+            setPasswordDeliveryAcknowledged(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{t("employees_page.add_employee")}</DialogTitle>
+            <DialogDescription>
+              {t("employees_page.add_employee_description")}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateEmployee} className="space-y-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <EmployeeFormField
+                id="employee-name-en"
+                label={t("employees_page.name_english")}
+                value={employeeForm.name}
+                onChange={(name) =>
+                  setEmployeeForm((previous) => ({ ...previous, name }))
+                }
+                dir="ltr"
+              />
+              <EmployeeFormField
+                id="employee-name-ar"
+                label={t("employees_page.name_arabic")}
+                value={employeeForm.nameAr}
+                onChange={(nameAr) =>
+                  setEmployeeForm((previous) => ({ ...previous, nameAr }))
+                }
+                dir="rtl"
+              />
+              <EmployeeFormField
+                id="employee-email"
+                label={t("employees_page.email")}
+                value={employeeForm.email}
+                onChange={(email) =>
+                  setEmployeeForm((previous) => ({ ...previous, email }))
+                }
+                type="email"
+                dir="ltr"
+              />
+              <EmployeeFormField
+                id="employee-number"
+                label={t("employees_page.employee_number")}
+                value={employeeForm.employeeNumber}
+                onChange={(employeeNumber) =>
+                  setEmployeeForm((previous) => ({
+                    ...previous,
+                    employeeNumber,
+                  }))
+                }
+                dir="ltr"
+              />
+              <EmployeeFormField
+                id="employee-job-title-en"
+                label={t("employees_page.job_title_english")}
+                value={employeeForm.jobTitle}
+                onChange={(jobTitle) =>
+                  setEmployeeForm((previous) => ({ ...previous, jobTitle }))
+                }
+                dir="ltr"
+              />
+              <EmployeeFormField
+                id="employee-job-title-ar"
+                label={t("employees_page.job_title_arabic")}
+                value={employeeForm.jobTitleAr}
+                onChange={(jobTitleAr) =>
+                  setEmployeeForm((previous) => ({ ...previous, jobTitleAr }))
+                }
+                dir="rtl"
+              />
+
+              <div className="space-y-2">
+                <Label htmlFor="employee-role">
+                  {t("employees_page.role")}
+                </Label>
+                <Select
+                  value={employeeForm.role}
+                  onValueChange={(role) =>
+                    setEmployeeForm((previous) => ({ ...previous, role }))
+                  }
+                >
+                  <SelectTrigger id="employee-role" className="min-h-11">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assignableRoles.map((role) => (
+                      <SelectItem key={role} value={role}>
+                        {t(`roles.${role}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="employee-department">
+                  {t("employees_page.department")}
+                </Label>
+                <Select
+                  value={employeeForm.departmentId || "none"}
+                  onValueChange={(departmentId) =>
+                    setEmployeeForm((previous) => ({
+                      ...previous,
+                      departmentId:
+                        departmentId === "none" ? "" : departmentId,
+                    }))
+                  }
+                >
+                  <SelectTrigger
+                    id="employee-department"
+                    className="min-h-11"
+                    disabled={departmentsQuery.isLoading}
+                  >
+                    <SelectValue
+                      placeholder={t("employees_page.no_department")}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      {t("employees_page.no_department")}
+                    </SelectItem>
+                    {(departmentsQuery.data ?? []).map((department) => (
+                      <SelectItem
+                        key={department.id}
+                        value={String(department.id)}
+                      >
+                        {isRTL ? department.nameAr : department.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label htmlFor="employee-temporary-password">
+                    {t("employees_page.temporary_password")}
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={generatePassword}
+                    disabled={createEmployee.isPending}
+                    className="min-h-11 gap-2"
+                  >
+                    <KeyRound className="h-4 w-4" aria-hidden="true" />
+                    {t("employees_page.generate_password")}
+                  </Button>
+                </div>
+                <div className="relative">
+                  <Input
+                    id="employee-temporary-password"
+                    type={showTemporaryPassword ? "text" : "password"}
+                    minLength={12}
+                    required
+                    autoComplete="new-password"
+                    value={employeeForm.password}
+                    onChange={(event) => {
+                      setEmployeeForm((previous) => ({
+                        ...previous,
+                        password: event.target.value,
+                      }));
+                      setPasswordDeliveryAcknowledged(false);
+                    }}
+                    dir="ltr"
+                    className="min-h-11 pe-12"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute end-0 top-0 h-11 w-11"
+                    onClick={() =>
+                      setShowTemporaryPassword((previous) => !previous)
+                    }
+                    aria-label={t(
+                      showTemporaryPassword
+                        ? "employees_page.hide_password"
+                        : "employees_page.show_password",
+                    )}
+                  >
+                    {showTemporaryPassword ? (
+                      <EyeOff className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <Eye className="h-4 w-4" aria-hidden="true" />
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs leading-5 text-muted-foreground">
+                  {t("employees_page.temporary_password_hint")}
+                </p>
+                <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void copyTemporaryPassword()}
+                    disabled={!employeeForm.password || createEmployee.isPending}
+                    className="min-h-11 gap-2"
+                  >
+                    <Copy className="h-4 w-4" aria-hidden="true" />
+                    {t("employees_page.copy_temporary_password")}
+                  </Button>
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      id="employee-password-delivery-ack"
+                      checked={passwordDeliveryAcknowledged}
+                      onCheckedChange={(checked) =>
+                        setPasswordDeliveryAcknowledged(checked === true)
+                      }
+                      disabled={!employeeForm.password || createEmployee.isPending}
+                      className="mt-1"
+                    />
+                    <Label
+                      htmlFor="employee-password-delivery-ack"
+                      className="cursor-pointer text-xs leading-5 text-muted-foreground"
+                    >
+                      {t("employees_page.password_delivery_ack")}
+                    </Label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {createEmployee.isError && (
+              <p
+                className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+                role="alert"
+              >
+                {t(createErrorKey)}
+              </p>
+            )}
+
+            <DialogFooter className="gap-2 sm:space-x-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsCreateOpen(false)}
+                className="min-h-11 w-full sm:w-auto"
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  createEmployee.isPending ||
+                  !isPasswordDeliveryReady(
+                    employeeForm.password,
+                    passwordDeliveryAcknowledged,
+                  )
+                }
+                className="min-h-11 w-full gap-2 sm:w-auto"
+              >
+                {createEmployee.isPending && (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                )}
+                {t("employees_page.create_employee")}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function cn(...classes: (string | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
+function EmployeeMobileCard({
+  employee,
+  isRTL,
+  t,
+}: EmployeeItemProps) {
+  const name = getEmployeeDisplayName(employee, isRTL);
+  const complianceRate = getComplianceRate(employee.complianceRate);
+
+  return (
+    <Card className="min-w-0 overflow-hidden">
+      <CardContent className="space-y-4 p-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <EmployeeAvatar name={name} />
+          <div className="min-w-0 flex-1">
+            <Link
+              href={`/employees/${employee.id}`}
+              className="inline-flex min-h-11 max-w-full items-center rounded-md font-semibold text-foreground underline-offset-4 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <span className="truncate">{name}</span>
+            </Link>
+            <p className="truncate text-xs text-muted-foreground" dir="auto">
+              {employee.employeeNumber || employee.email}
+            </p>
+          </div>
+          <ComplianceBadge employee={employee} t={t} />
+        </div>
+
+        <dl className="grid grid-cols-2 gap-3 rounded-lg bg-muted/40 p-3 text-sm">
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">
+              {t("employees_page.role")}
+            </dt>
+            <dd className="mt-1 truncate font-medium">
+              {t(`roles.${employee.role}`)}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">
+              {t("employees_page.compliance")}
+            </dt>
+            <dd className="mt-1 font-semibold tabular-nums">
+              {complianceRate}%
+            </dd>
+          </div>
+        </dl>
+
+        <ProgressBar
+          name={name}
+          rate={complianceRate}
+          label={t("employees_page.compliance")}
+        />
+
+        <Button asChild variant="outline" className="min-h-11 w-full">
+          <Link href={`/employees/${employee.id}`}>
+            {t("employees_page.view_profile")}
+          </Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
 }
+
+function EmployeeTableRow({ employee, isRTL, t }: EmployeeItemProps) {
+  const name = getEmployeeDisplayName(employee, isRTL);
+  const complianceRate = getComplianceRate(employee.complianceRate);
+
+  return (
+    <tr className="transition-colors hover:bg-muted/30">
+      <td className="px-5 py-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <EmployeeAvatar name={name} />
+          <div className="min-w-0">
+            <Link
+              href={`/employees/${employee.id}`}
+              className="rounded-sm font-semibold text-foreground underline-offset-4 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              {name}
+            </Link>
+            <div className="max-w-56 truncate text-xs text-muted-foreground" dir="auto">
+              {employee.employeeNumber || employee.email}
+            </div>
+          </div>
+        </div>
+      </td>
+      <td className="px-5 py-4 text-muted-foreground">
+        {t(`roles.${employee.role}`)}
+      </td>
+      <td className="px-5 py-4">
+        <ComplianceBadge employee={employee} t={t} />
+      </td>
+      <td className="w-52 px-5 py-4">
+        <div className="flex items-center gap-3">
+          <ProgressBar
+            name={name}
+            rate={complianceRate}
+            label={t("employees_page.compliance")}
+          />
+          <span className="w-10 text-end text-xs font-medium tabular-nums">
+            {complianceRate}%
+          </span>
+        </div>
+      </td>
+      <td className="px-5 py-4 text-end">
+        <Button asChild variant="ghost" className="min-h-11">
+          <Link href={`/employees/${employee.id}`}>{t("common.view")}</Link>
+        </Button>
+      </td>
+    </tr>
+  );
+}
+
+function EmployeeAvatar({ name }: { name: string }) {
+  return (
+    <span
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 font-bold text-primary"
+      aria-hidden="true"
+    >
+      {getEmployeeInitial(name)}
+    </span>
+  );
+}
+
+function ComplianceBadge({
+  employee,
+  t,
+}: {
+  employee: EmployeeWithStats;
+  t: Translator;
+}) {
+  return employee.isAtRisk ? (
+    <Badge
+      variant="outline"
+      className="shrink-0 gap-1 border-0 bg-destructive/10 text-destructive"
+    >
+      <AlertCircle className="h-3 w-3" aria-hidden="true" />
+      {t("employees_page.at_risk")}
+    </Badge>
+  ) : (
+    <Badge
+      variant="outline"
+      className="shrink-0 border-0 bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400"
+    >
+      {t("employees_page.compliant")}
+    </Badge>
+  );
+}
+
+function ProgressBar({
+  name,
+  rate,
+  label,
+}: {
+  name: string;
+  rate: number;
+  label: string;
+}) {
+  return (
+    <Progress
+      value={rate}
+      aria-label={`${label}: ${name}`}
+      className="h-2 min-w-0 flex-1"
+      indicatorClassName={cn(
+        rate >= 90
+          ? "bg-emerald-500"
+          : rate >= 70
+            ? "bg-amber-500"
+            : "bg-destructive",
+      )}
+    />
+  );
+}
+
+function EmployeeListSkeleton({ loadingLabel }: { loadingLabel: string }) {
+  return (
+    <div className="grid gap-3" role="status">
+      <span className="sr-only">{loadingLabel}</span>
+      {Array.from({ length: 5 }).map((_, index) => (
+        <Skeleton key={index} className="h-44 w-full rounded-xl md:h-20" />
+      ))}
+    </div>
+  );
+}
+
+function EmployeeFormField({
+  id,
+  label,
+  value,
+  onChange,
+  type = "text",
+  dir,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: "text" | "email";
+  dir: "rtl" | "ltr";
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type={type}
+        required
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        dir={dir}
+        className="min-h-11"
+      />
+    </div>
+  );
+}
+
+function createEmptyEmployeeForm(): EmployeeAccountForm {
+  return {
+    name: "",
+    nameAr: "",
+    email: "",
+    password: "",
+    role: "employee",
+    departmentId: "",
+    jobTitle: "",
+    jobTitleAr: "",
+    employeeNumber: "",
+  };
+}
+
+type Translator = (key: string) => string;
+
+type EmployeeItemProps = {
+  employee: EmployeeWithStats;
+  isRTL: boolean;
+  t: Translator;
+};

@@ -51,6 +51,7 @@ import {
   validateUploadedObject,
 } from "../lib/uploadSecurity";
 import { getAi } from "@workspace/integrations-gemini-ai";
+import { safeErrorLogFields } from "../lib/safeError";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -293,7 +294,7 @@ router.post("/credentials/ocr", async (req, res) => {
       return;
     }
     req.log.error(
-      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      safeErrorLogFields(error),
       "OCR: failed to load stored document",
     );
     res.status(500).json({ message: "Failed to load stored document" });
@@ -381,7 +382,7 @@ router.post("/credentials/ocr", async (req, res) => {
     // SDK errors are deliberately not serialized: provider request objects can
     // contain the inline Base64 document or authorization metadata.
     req.log.error(
-      { errorName: error instanceof Error ? error.name : "UnknownError" },
+      safeErrorLogFields(error),
       "OCR: AI extraction failed",
     );
     res.status(502).json({ message: "AI document reading failed" });

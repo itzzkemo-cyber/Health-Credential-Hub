@@ -5,13 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --config vite.config.ts --host 0.0.0.0",
-    "dev:showcase": "vite --config vite.config.ts --mode showcase --base / --host 0.0.0.0 --port 4173",
     "build": "vite build --config vite.config.ts",
     "build:production": "vite build --config vite.config.ts --base /",
-    "build:pages": "vite build --config vite.config.ts --mode showcase --base /",
-    "build:showcase": "vite build --config vite.config.ts --mode showcase --base /",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
-    "serve:showcase": "pnpm run build:showcase && vite preview --config vite.config.ts --host 0.0.0.0 --port 4173",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -57,21 +57,6 @@ export interface LoginInput {
   password: string;
 }
 
-export type DemoLoginInputRole = typeof DemoLoginInputRole[keyof typeof DemoLoginInputRole];
-
-
-export const DemoLoginInputRole = {
-  system_admin: 'system_admin',
-  hospital_admin: 'hospital_admin',
-  department_manager: 'department_manager',
-  supervisor: 'supervisor',
-  employee: 'employee',
-} as const;
-
-export interface DemoLoginInput {
-  role: DemoLoginInputRole;
-}
-
 export type UserRole = typeof UserRole[keyof typeof UserRole];
 
 
@@ -102,12 +87,12 @@ export interface User {
   /** @nullable */
   avatarUrl?: string | null;
   isActive: boolean;
+  mustChangePassword: boolean;
   totpEnabled: boolean;
   createdAt: string;
 }
 
 export interface AuthResponse {
-  token: string;
   user: User;
 }
 
@@ -148,6 +133,7 @@ export interface TotpAdminDisableInput {
 
 export interface ChangePasswordInput {
   currentPassword: string;
+  /** @minLength 12 */
   newPassword: string;
 }
 
@@ -156,27 +142,13 @@ export interface ForgotPasswordInput {
 }
 
 export interface ChangePasswordResult {
-  token: string;
+  success: boolean;
 }
 
 export interface ResetPasswordInput {
   token: string;
-  /** @minLength 8 */
+  /** @minLength 12 */
   newPassword: string;
-}
-
-export interface RegisterInput {
-  /** Full name in English */
-  name: string;
-  /** Full name in Arabic */
-  nameAr: string;
-  email: string;
-  /** Minimum 8 characters */
-  password: string;
-  /** @nullable */
-  phone?: string | null;
-  /** Facility id — must be a positive integer sent as a JSON number (kept as `number` in the schema for codegen compatibility; the server rejects non-integer values). */
-  facilityId: number;
 }
 
 export interface FacilityOption {
@@ -480,6 +452,7 @@ export interface EmployeeInput {
   name: string;
   nameAr: string;
   email: string;
+  /** @minLength 12 */
   password: string;
   role: string;
   /** @nullable */
@@ -745,6 +718,19 @@ export interface ComplianceReport {
   overallComplianceRate: number;
   departments: DepartmentComplianceDetail[];
 }
+
+export type ChangePassword400Code = typeof ChangePassword400Code[keyof typeof ChangePassword400Code];
+
+
+export const ChangePassword400Code = {
+  PASSWORD_REUSE_NOT_ALLOWED: 'PASSWORD_REUSE_NOT_ALLOWED',
+} as const;
+
+export type ChangePassword400 = {
+  code?: ChangePassword400Code;
+  message: string;
+  messageAr?: string;
+};
 
 export type ListCredentialsParams = {
 status?: ListCredentialsStatus;

@@ -1,12 +1,11 @@
 import { useLanguage } from "@/lib/language-context";
 import { useTheme } from "@/components/theme-provider";
-import { Bell, Search, Moon, Sun, Globe, Menu } from "lucide-react";
+import { Bell, Moon, Sun, Globe, Menu } from "lucide-react";
 import { useState } from "react";
 import { AppSidebar } from "./Sidebar";
 import { clearAuthSession, getAuthUser } from "@/lib/auth";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -74,21 +73,6 @@ export function AppHeader() {
       <span className="text-base font-bold text-primary sm:hidden">
         {t("auth.brand_name")}
       </span>
-      <div className="hidden flex-1 items-center gap-4 sm:flex">
-        <div className="relative w-full max-w-md">
-          <Search
-            className={cn(
-              "absolute top-2.5 h-4 w-4 text-muted-foreground",
-              isRTL ? "right-3" : "left-3",
-            )}
-          />
-          <Input
-            placeholder={t("common.search")}
-            className={cn("bg-muted/50 h-9", isRTL ? "pr-9" : "pl-9")}
-          />
-        </div>
-      </div>
-
       <div className="ms-auto flex items-center gap-0.5 sm:gap-2">
         <Button
           variant="ghost"
@@ -158,8 +142,4 @@ export function AppHeader() {
       </div>
     </header>
   );
-}
-
-function cn(...classes: (string | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
 }

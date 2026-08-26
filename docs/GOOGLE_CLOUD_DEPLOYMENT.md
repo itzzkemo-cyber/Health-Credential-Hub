@@ -40,7 +40,7 @@ Build source archives use a private regional bucket with seven-day automatic
 deletion; build logs go to Cloud Logging. The script also creates an Artifact
 Registry repository, a migration job, and a one-instance Cloud Run service. It
 finishes by calling `/api/readyz` and prints the generated HTTPS URL. It does
-not seed Demo accounts.
+  not create application accounts automatically.
 
 The authenticated `gcloud` principal must be allowed to enable services,
 manage the listed IAM bindings, create the resources, submit Cloud Builds, and
@@ -101,13 +101,15 @@ facility is absent. It has no reset/update mode. Subsequent administrator
 creation and account recovery must use the authenticated application workflow
 and approved audit process.
 
-There is currently no database-enforced `mustChangePassword` or
-`mustEnrollMfa` flag. Consequently, production launch must remain blocked from
-loading real workforce data until two operators verify that the first
-administrator has signed in, changed the one-time bootstrap password, enrolled
-TOTP, stored recovery codes in the approved password manager, and that the
-temporary password secret and Job were removed. This is an explicit operator
-gate, not a control the application can presently prove automatically.
+The bootstrap administrator and every account provisioned by an administrator
+are created with `mustChangePassword=true`. The API then permits only current
+profile, password-change, and logout requests until the temporary password has
+been replaced; the responsive web application sends the user directly to that
+required step. A successful change or password reset clears the flag and
+revokes older sessions. TOTP enrollment for administrators remains a separate
+operator gate: before loading real workforce data, verify that the first
+administrator enrolled TOTP, stored recovery codes in the approved password
+manager, and that the temporary password secret and bootstrap Job were removed.
 
 ## Migration database identity
 
@@ -166,6 +168,11 @@ send external traffic. Both event production and the separate webhook worker
 remain disabled until their explicit environment switches are enabled; see
 [`INTEGRATIONS.md`](./INTEGRATIONS.md).
 
+Migration `0006_sharp_shadow_king.sql` adds the fail-closed temporary-password
+gate. Existing accounts retain `false`; newly provisioned and bootstrap
+accounts are marked `true` by the application. Apply the migration before
+deploying the corresponding API build.
+
 ## Custom domain
 
 For production, put a global external HTTPS Application Load Balancer with a
@@ -176,8 +183,6 @@ that IP. Update these values after the certificate is active:
 - Cloud Run: `PUBLIC_APP_URL=https://your-domain` and
   `APP_ORIGINS=https://your-domain`.
 - Cloud Storage bucket CORS: allow `PUT` from exactly that HTTPS origin.
-- Google OAuth, if enabled: add
-  `https://your-domain/api/auth/google/callback` as an authorized redirect URI.
 - Resend, if enabled: verify the sending domain, store `RESEND_API_KEY` in
   Secret Manager, set `EMAIL_FROM`, then change `EMAIL_ALERTS_DISABLED=0`.
 

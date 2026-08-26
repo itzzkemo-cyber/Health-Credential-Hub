@@ -8,5 +8,6 @@
 
 export interface ChangePasswordInput {
   currentPassword: string;
+  /** @minLength 12 */
   newPassword: string;
 }

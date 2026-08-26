@@ -8,11 +8,6 @@ export type BodyType<T> = T;
 
 export type AuthTokenGetter = () => Promise<string | null> | string | null;
 
-export type RequestHandler = (
-  input: RequestInfo | URL,
-  init: RequestInit,
-) => Response | undefined | Promise<Response | undefined>;
-
 const NO_BODY_STATUS = new Set([204, 205, 304]);
 const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
@@ -22,13 +17,12 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
-let _requestHandler: RequestHandler | null = null;
 
 /**
  * Set a base URL that is prepended to every relative request URL
  * (i.e. paths that start with `/`).
  *
- * Useful for Expo bundles that need to call a remote API server.
+ * Useful for trusted API clients that need to call a remote API server.
  * Pass `null` to clear the base URL.
  */
 export function setBaseUrl(url: string | null): void {
@@ -40,7 +34,7 @@ export function setBaseUrl(url: string | null): void {
  * the getter is invoked; when it returns a non-null string, an
  * `Authorization: Bearer <token>` header is attached to the request.
  *
- * Useful for Expo bundles making token-gated API calls.
+ * Useful for trusted clients making token-gated API calls.
  * Pass `null` to clear the getter.
  *
  * NOTE: This function should never be used in web applications where session
@@ -48,15 +42,6 @@ export function setBaseUrl(url: string | null): void {
  */
 export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
-}
-
-/**
- * Register an optional request handler used by controlled runtimes such as
- * the browser-only showcase. Returning undefined falls through to fetch.
- * Production applications should leave this unset.
- */
-export function setRequestHandler(handler: RequestHandler | null): void {
-  _requestHandler = handler;
 }
 
 function isRequest(input: RequestInfo | URL): input is Request {
@@ -404,10 +389,7 @@ export async function customFetch<T = unknown>(
     method,
     headers,
   };
-  const handledResponse = _requestHandler
-    ? await _requestHandler(input, requestInit)
-    : undefined;
-  const response = handledResponse ?? (await fetch(input, requestInit));
+  const response = await fetch(input, requestInit);
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);

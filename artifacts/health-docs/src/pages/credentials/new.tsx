@@ -4,18 +4,14 @@ import {
   ArrowRight,
   Check,
   FileCheck2,
-  FileText,
-  Info,
   Loader2,
   ShieldCheck,
-  Sparkles,
   UploadCloud,
 } from "lucide-react";
 import {
   CredentialInputType,
   getGetEmployeeQueryKey,
   useCreateCredential,
-  useExtractCredentialOcr,
   useGetEmployee,
   useRequestUploadUrl,
 } from "@workspace/api-client-react";
@@ -24,7 +20,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -34,13 +30,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { getAuthUser } from "@/lib/auth";
 import { useLanguage } from "@/lib/language-context";
 import { prepareUploadFile, UploadTooLargeError } from "@/lib/upload";
-import { isShowcaseMode, retainShowcaseFile } from "@/demo/showcase";
 import { cn } from "@/lib/utils";
+import { getCredentialOwnerState } from "./credential-owner-state";
 
 const FILE_ACCEPT =
   "image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif,application/pdf";
@@ -59,22 +54,29 @@ export default function CredentialNew() {
     requestedEmployeeId > 0
       ? requestedEmployeeId
       : user?.id;
-  const { data: targetEmployee } = useGetEmployee(employeeId ?? 0, {
+  const isUploadingForAnotherEmployee = Boolean(
+    employeeId && employeeId !== user?.id,
+  );
+  const targetEmployeeQuery = useGetEmployee(employeeId ?? 0, {
     query: {
       queryKey: getGetEmployeeQueryKey(employeeId ?? 0),
-      enabled: Boolean(employeeId && employeeId !== user?.id),
+      enabled: isUploadingForAnotherEmployee,
     },
   });
+  const targetEmployee = targetEmployeeQuery.data;
+  const ownerState = getCredentialOwnerState({
+    employeeId,
+    currentUserId: user?.id,
+    isLoading: targetEmployeeQuery.isLoading,
+    isError: targetEmployeeQuery.isError,
+    hasTargetEmployee: Boolean(targetEmployee),
+  });
 
-  const [activeTab, setActiveTab] = useState("smart");
   const [fileUrl, setFileUrl] = useState("");
   const [fileKind, setFileKind] = useState<"pdf" | "image" | "">("");
   const [fileName, setFileName] = useState("");
   const [isUploading, setIsUploading] = useState(false);
-  const [ocrConsent, setOcrConsent] = useState(false);
-  const manualTabRef = useRef<HTMLButtonElement>(null);
 
-  const extractOcr = useExtractCredentialOcr();
   const createCredential = useCreateCredential();
   const requestUploadUrl = useRequestUploadUrl();
 
@@ -90,11 +92,6 @@ export default function CredentialNew() {
     notes: "",
   });
 
-  const openManualEntry = () => {
-    setActiveTab("manual");
-    requestAnimationFrame(() => manualTabRef.current?.focus());
-  };
-
   useEffect(() => {
     if (!targetEmployee) return;
     setFormData((previous) => ({
@@ -104,53 +101,8 @@ export default function CredentialNew() {
     }));
   }, [targetEmployee]);
 
-  const runSmartScan = (objectPath: string, name: string) => {
-    extractOcr.mutate(
-      { data: { fileUrl: objectPath, fileName: name } },
-      {
-        onSuccess: (result) => {
-          toast.success(t("credential.scan_success"));
-          setFormData((previous) => ({
-            ...previous,
-            type: (result.detectedType as CredentialInputType) || "BLS",
-            holderName: result.holderName || previous.holderName,
-            holderNameAr: result.holderNameAr || previous.holderNameAr,
-            issuerName: result.issuerName || "",
-            issuerNameAr: result.issuerNameAr || "",
-            certificateNumber: result.certificateNumber || "",
-            issueDate: result.issueDate ? result.issueDate.split("T")[0] : "",
-            expiryDate: result.expiryDate
-              ? result.expiryDate.split("T")[0]
-              : "",
-          }));
-          openManualEntry();
-        },
-        onError: () => {
-          toast.error(t("credential.scan_failed"));
-          openManualEntry();
-        },
-      },
-    );
-  };
-
-  const handleShowcaseSample = () => {
-    const sample = new Blob(
-      [
-        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><rect width="100%" height="100%" fill="white"/><rect x="40" y="40" width="1120" height="720" rx="24" fill="none" stroke="#0f766e" stroke-width="8"/><text x="600" y="280" text-anchor="middle" font-family="sans-serif" font-size="72" fill="#0f172a">BLS Certificate</text><text x="600" y="390" text-anchor="middle" font-family="sans-serif" font-size="44" fill="#334155">Noura Alqahtani</text><text x="600" y="500" text-anchor="middle" font-family="sans-serif" font-size="34" fill="#475569">Synthetic showcase document</text></svg>',
-      ],
-      { type: "image/svg+xml" },
-    );
-    const objectPath = retainShowcaseFile(sample);
-    const name = "sample-bls-certificate.svg";
-    setFileUrl(objectPath);
-    setFileKind("image");
-    setFileName(name);
-    runSmartScan(objectPath, name);
-  };
-
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>,
-    useSmartScan: boolean,
   ) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -159,46 +111,29 @@ export default function CredentialNew() {
     setIsUploading(true);
     try {
       const prepared = await prepareUploadFile(file);
-      let objectPath: string;
-      if (isShowcaseMode) {
-        objectPath = retainShowcaseFile(prepared.blob);
-      } else {
-        const granted = await requestUploadUrl.mutateAsync({
-          data: {
-            name: file.name,
-            size: prepared.blob.size,
-            contentType: prepared.contentType,
-          },
-        });
-        const upload = await fetch(granted.uploadURL, {
-          method: "PUT",
-          body: prepared.blob,
-          headers: {
-            ...granted.requiredHeaders,
-            "Content-Type": prepared.contentType,
-          },
-        });
-        if (!upload.ok)
-          throw new Error(`Storage upload failed (${upload.status})`);
-        objectPath = granted.objectPath;
-      }
+      const granted = await requestUploadUrl.mutateAsync({
+        data: {
+          name: file.name,
+          size: prepared.blob.size,
+          contentType: prepared.contentType,
+        },
+      });
+      const upload = await fetch(granted.uploadURL, {
+        method: "PUT",
+        body: prepared.blob,
+        headers: {
+          ...granted.requiredHeaders,
+          "Content-Type": prepared.contentType,
+        },
+      });
+      if (!upload.ok)
+        throw new Error(`Storage upload failed (${upload.status})`);
+      const objectPath = granted.objectPath;
 
       setFileUrl(objectPath);
       setFileKind(prepared.kind);
       setFileName(file.name);
-
-      if (!useSmartScan) {
-        toast.success(
-          t(
-            isShowcaseMode
-              ? "credential.showcase_file_selected"
-              : "credential.upload_success",
-          ),
-        );
-        return;
-      }
-
-      runSmartScan(objectPath, file.name);
+      toast.success(t("credential.upload_success"));
     } catch (error) {
       toast.error(
         t(
@@ -214,7 +149,7 @@ export default function CredentialNew() {
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (!employeeId) {
+    if (ownerState !== "ready") {
       toast.error(t("credential.employee_required"));
       return;
     }
@@ -242,7 +177,6 @@ export default function CredentialNew() {
     );
   };
 
-  const isFileBusy = isUploading || extractOcr.isPending;
   const types = Object.keys(CredentialInputType);
 
   return (
@@ -274,102 +208,45 @@ export default function CredentialNew() {
         </div>
       </div>
 
-      {targetEmployee && (
+      {ownerState === "loading" && (
+        <Card>
+          <CardContent
+            className="flex min-h-28 items-center justify-center gap-3 p-6 text-sm text-muted-foreground"
+            role="status"
+            aria-live="polite"
+          >
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+            {t("credential.owner_loading")}
+          </CardContent>
+        </Card>
+      )}
+
+      {ownerState === "error" && (
+        <QueryErrorState
+          error={targetEmployeeQuery.error}
+          onRetry={() => void targetEmployeeQuery.refetch()}
+        />
+      )}
+
+      {ownerState === "ready" && targetEmployee && (
         <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm">
           {t("credential.uploading_for")}:{" "}
           <strong>{isRTL ? targetEmployee.nameAr : targetEmployee.name}</strong>
         </div>
       )}
 
-      <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-        <ShieldCheck
-          className="mt-0.5 h-5 w-5 shrink-0 text-primary"
-          aria-hidden="true"
-        />
-        <p className="leading-6">
-          {t(
-            isShowcaseMode
-              ? "credential.showcase_upload_notice"
-              : "credential.private_upload_notice",
-          )}
-        </p>
-      </div>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="mb-5 grid h-auto w-full grid-cols-2 p-1 sm:mb-8">
-          <TabsTrigger value="smart" className="min-h-11 gap-2 px-2">
-            <UploadCloud className="h-4 w-4" aria-hidden="true" />
-            <span className="truncate">{t("credential.smart_scan")}</span>
-          </TabsTrigger>
-          <TabsTrigger
-            ref={manualTabRef}
-            value="manual"
-            className="min-h-11 gap-2 px-2"
-          >
-            <FileText className="h-4 w-4" aria-hidden="true" />
-            <span className="truncate">{t("credential.manual")}</span>
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="smart" className="space-y-4">
-          <div
-            className="flex items-start gap-3 rounded-xl border border-amber-300/60 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200"
-            id="ocr-processing-disclosure"
-          >
-            <Info className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
-            {isShowcaseMode ? (
-              <p className="leading-6">
-                {t("credential.showcase_ocr_review_notice")}
-              </p>
-            ) : (
-              <div className="space-y-2 leading-6">
-                <p className="font-medium">
-                  {t("credential.ocr_external_notice")}
-                </p>
-                <p>{t("credential.ocr_review_notice")}</p>
-              </div>
-            )}
+      {ownerState === "ready" && (
+        <>
+          <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+            <ShieldCheck
+              className="mt-0.5 h-5 w-5 shrink-0 text-primary"
+              aria-hidden="true"
+            />
+            <p className="leading-6">
+              {t("credential.private_upload_notice")}
+            </p>
           </div>
-          {!isShowcaseMode && (
-            <Label
-              htmlFor="ocr-processing-consent"
-              className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-border bg-card p-4 text-sm"
-            >
-              <Checkbox
-                id="ocr-processing-consent"
-                checked={ocrConsent}
-                onCheckedChange={(checked) => setOcrConsent(checked === true)}
-                aria-describedby="ocr-processing-disclosure"
-                className="mt-0.5 shrink-0"
-              />
-              <span className="min-w-0 flex-1 leading-6">
-                {t("credential.ocr_consent")}
-              </span>
-            </Label>
-          )}
-          <DocumentPicker
-            id="smart-document-upload"
-            busy={isFileBusy}
-            disabled={!isShowcaseMode && !ocrConsent}
-            fileName={fileName}
-            onChange={(event) => void handleFileUpload(event, true)}
-            t={t}
-          />
-          {isShowcaseMode && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleShowcaseSample}
-              disabled={isFileBusy}
-              className="min-h-12 w-full gap-2 border-primary/30 bg-card"
-            >
-              <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
-              {t("showcase.use_sample_document")}
-            </Button>
-          )}
-        </TabsContent>
 
-        <TabsContent value="manual">
           <Card>
             <CardContent className="p-4 sm:p-6">
               <form onSubmit={handleSubmit} className="space-y-6">
@@ -390,7 +267,7 @@ export default function CredentialNew() {
                     busy={isUploading}
                     fileName={fileName}
                     compact
-                    onChange={(event) => void handleFileUpload(event, false)}
+                    onChange={(event) => void handleFileUpload(event)}
                     t={t}
                   />
                 </section>
@@ -525,7 +402,7 @@ export default function CredentialNew() {
                     disabled={
                       createCredential.isPending ||
                       isUploading ||
-                      extractOcr.isPending
+                      ownerState !== "ready"
                     }
                     className="min-h-12 w-full gap-2 sm:w-auto"
                   >
@@ -543,8 +420,8 @@ export default function CredentialNew() {
               </form>
             </CardContent>
           </Card>
-        </TabsContent>
-      </Tabs>
+        </>
+      )}
     </div>
   );
 }
@@ -620,19 +497,15 @@ function DocumentPicker({
             aria-live="polite"
           >
             {busy
-              ? t("credential.scanning_title")
-              : fileName || t("credential.upload_zone_title")}
+              ? t("credential.uploading_title")
+              : fileName || t("credential.choose_file")}
           </p>
           <p className="mt-1 text-sm leading-5 text-muted-foreground">
             {busy
-              ? t("credential.scanning_hint")
+              ? t("credential.uploading_hint")
               : fileName
                 ? t("credential.file_ready")
-                : t(
-                    compact
-                      ? "credential.manual_upload_hint"
-                      : "credential.upload_zone_hint",
-                  )}
+                : t("credential.manual_upload_hint")}
           </p>
         </div>
         <Button

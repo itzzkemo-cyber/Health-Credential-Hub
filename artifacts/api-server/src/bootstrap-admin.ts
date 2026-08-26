@@ -88,6 +88,7 @@ async function bootstrap(): Promise<number> {
           jobTitle: "Credential administrator",
           jobTitleAr: "مسؤول الاعتمادات",
           isActive: true,
+          mustChangePassword: true,
         })
         .returning()
     )[0];

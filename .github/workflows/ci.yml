@@ -50,23 +50,5 @@ jobs:
       - name: Build API
         run: pnpm --filter @workspace/api-server run build
 
-      - name: Build web application
-        run: pnpm --filter @workspace/health-docs run build
-        env:
-          BASE_PATH: /health-docs/
-          PORT: 4173
-
-      - name: Build browser-only showcase
-        run: pnpm --filter @workspace/health-docs run build:showcase
-
-      - name: Build mockup application
-        run: pnpm --filter @workspace/mockup-sandbox run build
-        env:
-          BASE_PATH: /
-          PORT: 4174
-
-      - name: Build Expo bundles
-        run: pnpm --filter @workspace/mobile run build
-        env:
-          BASE_PATH: /
-          EXPO_PUBLIC_DOMAIN: ci.invalid
+      - name: Build production web application
+        run: pnpm --filter @workspace/health-docs run build:production

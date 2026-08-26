@@ -22,7 +22,6 @@ Domains. Google Workspace DNS and mail records must remain intact.
 Suggested hostnames after purchase:
 
 - `app.wathaiqihealth.com` — production application;
-- `demo.wathaiqihealth.com` — synthetic stakeholder demo hosted on GitHub Pages;
 - `status.wathaiqihealth.com` — later, for service status only.
 
 The shorter `wathaiqi.com` was already registered when checked. The following
@@ -46,9 +45,9 @@ until the SAIP search and legal review are complete.
 3. Run [SAIP trademark searches](https://www.saip.gov.sa/en/services/trademarks/trademark1)
    for **Watha'iqi Health**, **Wathaiqi Health**, and **وثائقي الصحية**, then
    obtain legal approval for the word mark and future logo.
-4. Configure DNS, TLS, the application base URL, OAuth consent and callback
-   domains, email sender identity, support addresses, and legal notices
+4. Configure DNS, TLS, the application base URL, email sender identity,
+   support addresses, and legal notices
    together in one reviewed release.
-5. Keep `demo.wathaiqihealth.com` visibly identified as a synthetic demo until
-   the selected Saudi-hosted production deployment on `app.wathaiqihealth.com`
-   passes the release checklist.
+5. Keep `app.wathaiqihealth.com` without public DNS until the selected
+   Saudi-hosted production deployment passes the release checklist; do not
+   point the retired demo hostname at the production service.

@@ -4,7 +4,6 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   db,
   usersTable,
-  facilitiesTable,
   passwordResetTokensTable,
   type User,
 } from "@workspace/db";
@@ -37,6 +36,7 @@ import { canManageTarget } from "../lib/roleHierarchy";
 import { sessionIssuanceCsrfGuard } from "../lib/csrf";
 import { decryptTotpSecret, encryptTotpSecret } from "../lib/totpSecret";
 import { logger } from "../lib/logger";
+import { safeErrorLogFields } from "../lib/safeError";
 import { rateLimit } from "../lib/rateLimit";
 import {
   EmailNotConfiguredError,
@@ -51,7 +51,6 @@ import {
 
 const router: IRouter = Router();
 const loginRateLimit = rateLimit({ name: "login", max: 10, windowMs: 10 * 60_000 });
-const registrationRateLimit = rateLimit({ name: "register", max: 5, windowMs: 60 * 60_000 });
 const recoveryRateLimit = rateLimit({ name: "recovery", max: 5, windowMs: 60 * 60_000 });
 const changePasswordRateLimit = rateLimit({
   name: "change-password",
@@ -66,10 +65,10 @@ const totpSensitiveRateLimit = rateLimit({
 
 /**
  * Complete a successful authentication: sync notifications, audit, then issue
- * the session. The token is set as an httpOnly cookie (unreadable by web
- * JavaScript) and also returned in the body for native clients that
- * authenticate with an Authorization: Bearer header. Every route that calls
- * this MUST be registered with `sessionIssuanceCsrfGuard` (login CSRF).
+ * the session. The token is set only as an httpOnly cookie so web JavaScript
+ * can never read or exfiltrate the reusable session credential. Every route
+ * that calls this MUST be registered with `sessionIssuanceCsrfGuard` (login
+ * CSRF).
  */
 async function issueSession(
   user: User,
@@ -82,7 +81,7 @@ async function issueSession(
   await logAudit(user, actionEn, actionAr, "Session", "الجلسة", undefined, req.ip);
   const token = signToken(user.id, user.sessionVersion);
   setSessionCookie(res, token);
-  res.json({ token, user: serializeUser(user) });
+  res.json({ user: serializeUser(user) });
 }
 
 router.post("/auth/login", loginRateLimit, sessionIssuanceCsrfGuard, async (req, res) => {
@@ -92,13 +91,6 @@ router.post("/auth/login", loginRateLimit, sessionIssuanceCsrfGuard, async (req,
     return;
   }
   const normalizedEmail = email.toLowerCase().trim();
-  if (
-    isDemoAccount(normalizedEmail) &&
-    !enabledOutsideProduction("DEMO_LOGIN_ENABLED")
-  ) {
-    res.status(401).json({ message: "Invalid credentials" });
-    return;
-  }
   const rows = await db
     .select()
     .from(usersTable)
@@ -140,156 +132,6 @@ function respondWithTwoFactorChallenge(user: User, res: Response): void {
   });
 }
 
-// Server-side allowlist of showcase accounts. Only the role names are known
-// to the client; passwords never appear in the frontend bundle.
-const DEMO_ACCOUNT_EMAILS: Record<string, string> = {
-  system_admin: "admin@healthdocs.sa",
-  hospital_admin: "hospital@healthdocs.sa",
-  department_manager: "dept@healthdocs.sa",
-  supervisor: "supervisor@healthdocs.sa",
-  employee: "employee@healthdocs.sa",
-};
-
-function enabledOutsideProduction(name: string): boolean {
-  if (process.env.NODE_ENV === "production") return false;
-  const value = process.env[name];
-  if (value === "true") return true;
-  if (value === "false") return false;
-  return true;
-}
-
-function isDemoAccount(email: string): boolean {
-  return Object.values(DEMO_ACCOUNT_EMAILS).includes(email.toLowerCase());
-}
-
-router.post("/auth/demo-login", loginRateLimit, sessionIssuanceCsrfGuard, async (req, res) => {
-  if (!enabledOutsideProduction("DEMO_LOGIN_ENABLED")) {
-    res.status(403).json({ message: "Demo login is disabled" });
-    return;
-  }
-  const { role } = req.body as { role?: string };
-  const email = role ? DEMO_ACCOUNT_EMAILS[role] : undefined;
-  if (!email) {
-    res.status(400).json({ message: "Unknown demo role" });
-    return;
-  }
-  const rows = await db.select().from(usersTable).where(eq(usersTable.email, email));
-  const user = rows[0];
-  if (!user || !user.isActive) {
-    res.status(403).json({ message: "Demo account unavailable" });
-    return;
-  }
-  await issueSession(user, req, res, "Signed in (demo)", "تسجيل دخول (تجريبي)");
-});
-
-// Self-registration: anyone can create an *employee* account. The role is
-// hardcoded server-side — privileged roles are only ever granted by an admin.
-router.post("/auth/register", registrationRateLimit, sessionIssuanceCsrfGuard, async (req, res) => {
-  if (!enabledOutsideProduction("SELF_REGISTRATION_ENABLED")) {
-    res.status(403).json({
-      message: "Self-registration is disabled",
-      messageAr: "التسجيل الذاتي غير متاح",
-    });
-    return;
-  }
-  const body = req.body as {
-    name?: unknown;
-    nameAr?: unknown;
-    email?: unknown;
-    password?: unknown;
-    phone?: unknown;
-    facilityId?: unknown;
-  };
-  const name = typeof body.name === "string" ? body.name.trim() : "";
-  const nameAr = typeof body.nameAr === "string" ? body.nameAr.trim() : "";
-  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  const password = typeof body.password === "string" ? body.password : "";
-  const phone =
-    typeof body.phone === "string" && body.phone.trim() ? body.phone.trim() : null;
-  // Strict: only a positive integer sent as an actual JSON number is accepted
-  // (a bare Number() coercion would turn true into 1 and null into 0).
-  const facilityId =
-    typeof body.facilityId === "number" &&
-    Number.isInteger(body.facilityId) &&
-    body.facilityId > 0
-      ? body.facilityId
-      : NaN;
-
-  if (!name || !nameAr || !email || !password || !Number.isFinite(facilityId)) {
-    res.status(400).json({
-      message: "Name (Arabic and English), email, password and facility are required",
-      messageAr: "الاسم بالعربية والإنجليزية والبريد وكلمة المرور والمنشأة حقول مطلوبة",
-    });
-    return;
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    res.status(400).json({
-      message: "Invalid email address",
-      messageAr: "البريد الإلكتروني غير صالح",
-    });
-    return;
-  }
-  if (password.length < 8) {
-    res.status(400).json({
-      message: "Password must be at least 8 characters",
-      messageAr: "كلمة المرور يجب ألا تقل عن 8 أحرف",
-    });
-    return;
-  }
-  const facility = (
-    await db.select().from(facilitiesTable).where(eq(facilitiesTable.id, facilityId))
-  )[0];
-  if (!facility) {
-    res.status(400).json({
-      message: "Unknown facility",
-      messageAr: "المنشأة المختارة غير معروفة",
-    });
-    return;
-  }
-  const existing = await db
-    .select()
-    .from(usersTable)
-    .where(eq(usersTable.email, email));
-  if (existing.length > 0) {
-    res.status(409).json({
-      message: "Email already in use",
-      messageAr: "هذا البريد الإلكتروني مستخدم مسبقاً",
-    });
-    return;
-  }
-
-  let user: User;
-  try {
-    const inserted = await db
-      .insert(usersTable)
-      .values({
-        email,
-        passwordHash: await hashPassword(password),
-        name,
-        nameAr,
-        role: "employee",
-        facilityId: facility.id,
-        phone,
-        isActive: true,
-      })
-      .returning();
-    user = inserted[0]!;
-  } catch (err) {
-    // Unique-constraint race: two simultaneous registrations with the same
-    // email — the check above passed for both, the second insert loses.
-    if ((err as { code?: string } | null)?.code === "23505") {
-      res.status(409).json({
-        message: "Email already in use",
-        messageAr: "هذا البريد الإلكتروني مستخدم مسبقاً",
-      });
-      return;
-    }
-    throw err;
-  }
-
-  await issueSession(user, req, res, "Created account", "إنشاء حساب");
-});
-
 router.post("/auth/logout", requireAuth, async (req, res) => {
   const user = getUser(req);
   const updated = (
@@ -324,8 +166,8 @@ router.post("/auth/change-password", requireAuth, changePasswordRateLimit, async
     currentPassword?: string;
     newPassword?: string;
   };
-  if (!currentPassword || !newPassword || newPassword.length < 8) {
-    res.status(400).json({ message: "Password must be at least 8 characters" });
+  if (!currentPassword || !newPassword || newPassword.length < 12) {
+    res.status(400).json({ message: "Password must be at least 12 characters" });
     return;
   }
   const ok = await comparePassword(currentPassword, user.passwordHash);
@@ -333,11 +175,20 @@ router.post("/auth/change-password", requireAuth, changePasswordRateLimit, async
     res.status(400).json({ message: "Current password is incorrect" });
     return;
   }
+  if (await comparePassword(newPassword, user.passwordHash)) {
+    res.status(400).json({
+      code: "PASSWORD_REUSE_NOT_ALLOWED",
+      message: "The new password must be different from the current password",
+      messageAr: "يجب أن تكون كلمة المرور الجديدة مختلفة عن كلمة المرور الحالية",
+    });
+    return;
+  }
   const updated = (
     await db
       .update(usersTable)
       .set({
         passwordHash: await hashPassword(newPassword),
+        mustChangePassword: false,
         // "Log out everywhere": revoke all sessions issued before this change…
         sessionVersion: sql`${usersTable.sessionVersion} + 1`,
       })
@@ -345,10 +196,11 @@ router.post("/auth/change-password", requireAuth, changePasswordRateLimit, async
       .returning()
   )[0]!;
   await logAudit(updated, "Changed password", "تغيير كلمة المرور", "Account", "الحساب");
-  // …but keep THIS one alive by re-issuing at the new session version.
+  // …but keep THIS browser alive with a new httpOnly cookie at the new
+  // session version. The reusable JWT is deliberately absent from the body.
   const freshToken = signToken(updated.id, updated.sessionVersion);
   setSessionCookie(res, freshToken);
-  res.json({ token: freshToken });
+  res.json({ success: true });
 });
 
 // --- Two-factor authentication (TOTP) ---------------------------------------
@@ -817,7 +669,7 @@ router.post("/auth/forgot-password", recoveryRateLimit, async (req, res) => {
       return;
     }
     // Response already sent; log for operators, never leak to the caller.
-    logger.error({ err }, "Password reset processing failed");
+    logger.error(safeErrorLogFields(err), "Password reset processing failed");
   }
 });
 
@@ -825,11 +677,11 @@ router.post("/auth/reset-password", recoveryRateLimit, sessionIssuanceCsrfGuard,
   const body = req.body as { token?: unknown; newPassword?: unknown };
   const token = typeof body.token === "string" ? body.token.trim() : "";
   const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
-  if (!token || !newPassword || newPassword.length < 8) {
+  if (!token || !newPassword || newPassword.length < 12) {
     res.status(400).json({
       code: "weak_password",
-      message: "A reset token and a password of at least 8 characters are required",
-      messageAr: "رمز إعادة التعيين وكلمة مرور لا تقل عن 8 أحرف مطلوبان",
+      message: "A reset token and a password of at least 12 characters are required",
+      messageAr: "رمز إعادة التعيين وكلمة مرور لا تقل عن 12 حرفًا مطلوبان",
     });
     return;
   }
@@ -871,6 +723,7 @@ router.post("/auth/reset-password", recoveryRateLimit, sessionIssuanceCsrfGuard,
       .update(usersTable)
       .set({
         passwordHash: await hashPassword(newPassword),
+        mustChangePassword: false,
         // Revoke every existing session — a stolen cookie/token must not
         // survive an account-recovery reset.
         sessionVersion: sql`${usersTable.sessionVersion} + 1`,

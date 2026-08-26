@@ -5,6 +5,7 @@ import { requireAuth, getUser } from "../lib/auth";
 import { syncExpiryNotifications } from "../lib/helpers";
 import { dispatchPendingExpiryEmails } from "../lib/email/dispatch";
 import { logger } from "../lib/logger";
+import { safeErrorLogFields } from "../lib/safeError";
 
 const router: IRouter = Router();
 
@@ -16,7 +17,10 @@ function dispatchThrottled(): void {
   if (Date.now() - lastDispatchAt < 5 * 60_000) return;
   lastDispatchAt = Date.now();
   void dispatchPendingExpiryEmails().catch((err) =>
-    logger.error({ err }, "On-activity email dispatch failed"),
+    logger.error(
+      safeErrorLogFields(err),
+      "On-activity email dispatch failed",
+    ),
   );
 }
 

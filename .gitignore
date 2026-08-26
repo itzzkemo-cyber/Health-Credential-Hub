@@ -16,9 +16,6 @@ coverage/
 .local/
 .turbo/
 .vite/
-.metro-cache/
-.expo/
-.expo-shared/
 
 # Local environment and secrets
 .env
@@ -30,7 +27,6 @@ coverage/
 *.pfx
 *.jks
 *.keystore
-*.mobileprovision
 
 # Logs
 *.log

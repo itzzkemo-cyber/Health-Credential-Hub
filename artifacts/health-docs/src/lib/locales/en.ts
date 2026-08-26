@@ -7,7 +7,6 @@ export const en = {
     policies: "Policies",
     reports: "Reports",
     audit_log: "Audit Log",
-    integrations: "Integrations",
     settings: "Settings",
     notifications: "Notifications",
     menu: "Menu",
@@ -27,8 +26,6 @@ export const en = {
     back: "Back",
     confirm: "Confirm",
     actions: "Actions",
-    coming_soon: "Coming Soon",
-    not_connected: "Not Connected",
     all: "All",
     loading: "Loading…",
     retry: "Try again",
@@ -52,17 +49,6 @@ export const en = {
     change_theme: "Change theme",
     open_account_menu: "Open account menu",
   },
-  showcase: {
-    label: "Showcase mode",
-    notice:
-      "Synthetic showcase — selected files stay in this device's memory and reset when the page reloads.",
-    reset: "Reset demo",
-    employee_demo: "Start an employee or manager journey in one click",
-    external_disabled: "External integrations are disabled in the showcase",
-    use_sample_document: "Use a sample document and try smart capture",
-    security_settings_disabled:
-      "Two-factor authentication setup is disabled in the showcase because it requires a real account and server. It remains available in the full deployment.",
-  },
   settings_page: {
     subtitle:
       "Manage account security and how the site appears on your device.",
@@ -70,8 +56,6 @@ export const en = {
     language_region_desc: "Configure the interface language and date display.",
     interface_language: "Interface Language",
     interface_language_desc: "Changes all text and the page direction.",
-    calendar: "Hijri Calendar",
-    calendar_desc: "Use Hijri dates throughout the platform.",
     appearance: "Appearance",
     appearance_desc: "Choose the appearance that suits your device.",
     theme: "Theme",
@@ -79,33 +63,43 @@ export const en = {
     light: "Light Mode",
     dark: "Dark Mode",
     system: "System Default",
-    notifications: "Notification Preferences",
-    notifications_desc: "Control credential expiry alerts.",
-    expiry_warnings: "Expiry Warnings by Email",
-    expiry_warnings_desc: "Receive an email before documents expire.",
-    thresholds: "Alert Times Before Expiry",
-    days: "Days",
-    reset: "Reset Defaults",
-    saved: "Settings saved",
-    not_available: "This option is not available in this version.",
-    alerts_managed_by_admin:
-      "Email alert schedules are managed centrally by your facility administrator and cannot be changed here.",
     applies_immediately:
       "Language and appearance changes apply immediately on this device; there is no separate Save step.",
+    change_password: "Change password",
+    change_password_desc:
+      "Enter your current password and replace it with a new password for this account.",
+    current_password: "Current password",
+    new_password: "New password",
+    confirm_password: "Confirm new password",
+    password_minimum: "Use at least 12 characters.",
+    password_mismatch: "The new passwords do not match.",
+    current_password_incorrect: "The current password is incorrect.",
+    password_reuse_not_allowed:
+      "Choose a new password that is different from the temporary or current password.",
+    password_rate_limited:
+      "Too many password change attempts. Wait a few minutes and try again.",
+    password_change_failed:
+      "The password could not be changed. Check your connection and try again.",
+    password_changed: "Password changed successfully.",
+    password_required_title: "Replace your temporary password",
+    password_required_desc:
+      "For your security, choose a private password before you can use the rest of Watha'iqi Health.",
+    password_required_card_desc:
+      "Enter the temporary password you received, then create a new password known only to you.",
+    password_required_success: "Password replaced. Your account is ready.",
+    save_password: "Save new password",
+    show_password: "Show password",
+    hide_password: "Hide password",
   },
   auth: {
     brand_name: "Watha'iqi Health",
     login: "Login",
     email: "Email Address",
     password: "Password",
-    remember_me: "Remember Me",
     forgot_password: "Forgot Password?",
-    demo_accounts: "Demo Accounts — one-click sign in",
     feature_compliance: "Instant compliance",
     feature_compliance_desc:
       "Track credential and license validity in one place.",
-    feature_ocr: "Smart capture",
-    feature_ocr_desc: "Extract document data and review it before saving.",
     feature_qr: "QR verification",
     feature_qr_desc: "A clear verification link for every approved document.",
     feature_alerts: "Proactive alerts",
@@ -115,19 +109,6 @@ export const en = {
     login_button: "Sign In",
     welcome_back: "Welcome Back",
     login_subtitle: "Login to access your dashboard.",
-    no_account: "Don't have an account?",
-    create_account: "Create account",
-    google_or: "or",
-    google_button: "Continue with Google",
-    google_error_config:
-      "Google sign-in isn't configured yet — contact your system administrator",
-    google_error_failed:
-      "Google sign-in could not be completed — please try again",
-    google_error_denied: "Google sign-in was cancelled",
-    google_error_unverified:
-      "Your Google email address is unverified and can't be used",
-    google_error_inactive:
-      "This account is deactivated — contact your facility administrator",
   },
   twofa: {
     title: "Two-Factor Authentication (2FA)",
@@ -180,27 +161,12 @@ export const en = {
     admin_disabled_success:
       "Two-factor authentication disabled for this employee",
   },
-  register: {
-    title: "Create account",
-    subtitle: "Enter your details to join your healthcare facility",
-    name_ar: "Full name (Arabic)",
-    name_en: "Full name (English)",
-    phone: "Phone (optional)",
-    facility: "Facility",
-    facility_placeholder: "Choose a facility",
-    password_hint: "At least 8 characters",
-    submit: "Create account",
-    success: "Your account is ready — welcome!",
-    email_taken: "This email is already in use.",
-    failed: "Could not create the account — check your details and try again.",
-    have_account: "Already have an account?",
-    back_to_login: "Back to login",
-  },
   reset_password: {
     title: "Set a new password",
     subtitle: "Choose a new password for your account",
     new_password: "New password",
     confirm_password: "Confirm password",
+    password_hint: "At least 12 characters",
     mismatch: "The passwords do not match",
     submit: "Save password",
     success: "Password updated — you are now signed in.",
@@ -288,16 +254,46 @@ export const en = {
       "The document could not be verified. Refresh the queue and try again.",
   },
   employees_page: {
-    subtitle: "Manage staff and their compliance status.",
-    add_employee: "Add Employee",
-    filter: "Filter",
-    empty: "No employees found",
+    subtitle: "Manage employee records and document compliance within your authorized scope.",
+    add_employee: "Add employee",
+    add_employee_description:
+      "Create an organizational account for an employee in your authorized facility.",
+    search_label: "Search employees",
+    search_placeholder: "Search by name, employee number, or email…",
+    empty: "No employees are available in your authorized scope",
+    no_search_results: "No employees match your search",
     employee: "Employee",
     role: "Role",
     status: "Status",
     compliance: "Compliance",
     at_risk: "At Risk",
     compliant: "Compliant",
+    view_profile: "View profile",
+    name_english: "Full name in English",
+    name_arabic: "Full name in Arabic",
+    email: "Work email",
+    employee_number: "Employee number",
+    job_title_english: "Job title in English",
+    job_title_arabic: "Job title in Arabic",
+    department: "Department",
+    no_department: "No department",
+    temporary_password: "Temporary password",
+    generate_password: "Generate strong password",
+    show_password: "Show temporary password",
+    hide_password: "Hide temporary password",
+    temporary_password_hint:
+      "Use at least 12 characters. Share it only through an approved secure channel and require the employee to change it immediately after their first sign-in.",
+    copy_temporary_password: "Copy temporary password",
+    password_copied: "Temporary password copied.",
+    password_copy_failed:
+      "The password could not be copied. Select and store it manually before continuing.",
+    password_delivery_ack:
+      "I stored this temporary password and will share it through an approved secure channel. It cannot be recovered after the account is created.",
+    create_employee: "Create employee account",
+    create_success: "Employee account created successfully",
+    create_failed:
+      "The employee account could not be created. Check the fields and your permissions, then try again.",
+    email_exists: "This email address is already registered.",
     load_error: "Could not load the employee profile",
     profile: "Employee Profile",
     not_available: "Not available",
@@ -325,8 +321,6 @@ export const en = {
   },
   credential: {
     add_new: "Add Credential",
-    manual: "Manual Entry",
-    smart_scan: "Smart Scan (OCR)",
     type: "Credential Type",
     holder_name: "Holder Name",
     issuer: "Issuer",
@@ -335,9 +329,6 @@ export const en = {
     expiry_date: "Expiry Date",
     file: "Attached File",
     notes: "Notes",
-    upload_hint: "Choose an image or PDF from your device",
-    scan_success: "Document scanned — review the details, then save",
-    scan_failed: "Failed to extract data. Please enter manually",
     file_too_large:
       "File too large — the maximum is 8 MB. Try a smaller image or a compressed PDF",
     document_preview: "Document Preview",
@@ -345,22 +336,11 @@ export const en = {
     no_document: "No document attached",
     pdf_open_hint:
       'Inline PDF preview isn\'t supported in this browser — use "Open File" to view it',
-    ocr_review_notice:
-      "Smart scan is powered by AI: the system reads the document and fills the fields automatically — review and correct them before saving.",
-    ocr_external_notice:
-      "Smart scan sends the selected document to the configured Google Gemini service for OCR. It may contain sensitive workforce or health information, so continue only if you are authorized to use this processor.",
-    ocr_consent:
-      "I understand and agree to send this document to the external OCR processor for smart scanning.",
     upload_failed:
       "Could not upload the file — check your connection and try again",
     add_subtitle: "Upload a new professional certificate or license.",
-    scanning_title: "Processing document...",
-    scanning_hint: "The fields will be filled automatically for your review",
-    upload_zone_title: "Choose a document to scan",
-    upload_zone_hint:
-      "Upload your certificate (image or PDF, maximum 8 MB) and the fields will be filled for you to review before saving.",
-    duplicate_warning:
-      "A matching credential was already found. Do you want to proceed?",
+    uploading_title: "Uploading document…",
+    uploading_hint: "Keep this page open until the upload is complete",
     upload_success: "File uploaded successfully",
     employee_required: "The employee for this document could not be identified",
     date_order_error: "The expiry date must be after the issue date",
@@ -369,16 +349,11 @@ export const en = {
     create_failed:
       "Could not save the document — check the details and try again",
     uploading_for: "Uploading for employee",
+    owner_loading: "Loading the selected employee…",
     private_upload_notice:
       "The document is uploaded to private encrypted storage. Do not share upload links or document images outside the platform.",
-    showcase_upload_notice:
-      "In the showcase, the selected file stays only in this device's memory; it is not uploaded to a server or sent to any external service.",
-    showcase_ocr_review_notice:
-      "Smart scan is a local simulation using synthetic data here; the file is not sent to external AI or OCR. Review the fields before saving.",
-    showcase_file_selected:
-      "File selected and retained temporarily in this device's memory until the page reloads.",
     manual_upload_hint:
-      "Optional: attach an image or PDF (maximum 8 MB) without sending it to smart scan.",
+      "Optional: attach an image or PDF (maximum 8 MB).",
     select_type: "Select document type",
     english: "English",
     arabic: "Arabic",
@@ -469,12 +444,6 @@ export const en = {
     all_departments: "All departments",
     required_for: "Required for",
     optional_for: "Optional for",
-  },
-  integrations: {
-    title: "Integrations",
-    subtitle: "Manage system integrations with external platforms",
-    connected: "Connected",
-    configure: "Configure",
   },
   forgot_password: {
     title: "Reset Password",

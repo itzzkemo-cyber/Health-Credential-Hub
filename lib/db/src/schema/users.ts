@@ -41,8 +41,13 @@ export const usersTable = pgTable("users", {
   avatarUrl: text("avatar_url"),
   // Google account id (OAuth `sub` claim) — set once the user signs in with
   // Google; lets future Google logins skip the password entirely.
+  // Legacy nullable external identity retained for migration compatibility.
+  // No public OAuth route exists in the production web release.
   googleId: text("google_id").unique(),
   isActive: boolean("is_active").notNull().default(true),
+  // Administratively provisioned accounts must replace their temporary
+  // password before accessing workforce or credential data.
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   // Bumped on password reset/change to instantly revoke all issued sessions.
   sessionVersion: integer("session_version").notNull().default(0),
   // --- Two-factor authentication (TOTP) ---

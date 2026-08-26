@@ -9,11 +9,9 @@ import {
   type StoredObjectFile,
   UPLOAD_REQUIRED_HEADERS,
   validateObjectStorageConfiguration,
-  validateStoragePathIsolation,
 } from "./objectStorage";
 
 const originalPrivateDir = process.env.PRIVATE_OBJECT_DIR;
-const originalPublicPaths = process.env.PUBLIC_OBJECT_SEARCH_PATHS;
 const originalProvider = process.env.OBJECT_STORAGE_PROVIDER;
 const originalOciEndpoint = process.env.OCI_OBJECT_STORAGE_ENDPOINT;
 const originalOciRegion = process.env.OCI_OBJECT_STORAGE_REGION;
@@ -22,7 +20,6 @@ const originalOciSecret = process.env.OCI_OBJECT_STORAGE_SECRET_ACCESS_KEY;
 
 beforeEach(() => {
   process.env.PRIVATE_OBJECT_DIR = "/healthdocs-private/private";
-  delete process.env.PUBLIC_OBJECT_SEARCH_PATHS;
   delete process.env.OBJECT_STORAGE_PROVIDER;
   delete process.env.OCI_OBJECT_STORAGE_ENDPOINT;
   delete process.env.OCI_OBJECT_STORAGE_REGION;
@@ -33,9 +30,6 @@ beforeEach(() => {
 afterEach(() => {
   if (originalPrivateDir === undefined) delete process.env.PRIVATE_OBJECT_DIR;
   else process.env.PRIVATE_OBJECT_DIR = originalPrivateDir;
-  if (originalPublicPaths === undefined)
-    delete process.env.PUBLIC_OBJECT_SEARCH_PATHS;
-  else process.env.PUBLIC_OBJECT_SEARCH_PATHS = originalPublicPaths;
   if (originalProvider === undefined)
     delete process.env.OBJECT_STORAGE_PROVIDER;
   else process.env.OBJECT_STORAGE_PROVIDER = originalProvider;
@@ -111,15 +105,6 @@ describe("Google Cloud Storage object paths", () => {
     );
   });
 
-  it("accepts sibling public and private storage roots", () => {
-    process.env.PUBLIC_OBJECT_SEARCH_PATHS = "/healthdocs-private/public";
-    expect(() => validateStoragePathIsolation()).not.toThrow();
-  });
-
-  it("rejects a public root that contains the private document path", () => {
-    process.env.PUBLIC_OBJECT_SEARCH_PATHS = "/healthdocs-private";
-    expect(() => validateStoragePathIsolation()).toThrow(/must not overlap/);
-  });
 });
 
 describe("OCI Riyadh object storage configuration", () => {

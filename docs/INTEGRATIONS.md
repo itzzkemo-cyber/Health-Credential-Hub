@@ -6,11 +6,9 @@ employee identity data, OCR requests/results, email content, and authentication
 metadata are sensitive workforce information and may incidentally contain
 health data.
 
-The browser-only Showcase is a separate mode: it uses synthetic data, keeps a
-selected file in the browser tab's memory, simulates OCR locally, and does not
-call external object storage, Gemini, Resend, or Google OAuth. See
-[`SHOWCASE.md`](./SHOWCASE.md). The sections below apply to the API-backed
-application.
+The released web application is API-backed and does not include test-only login,
+synthetic runtime data, or local OCR simulation.
+Every enabled integration below must use the reviewed production controls.
 
 ## Status at a glance
 
@@ -20,7 +18,6 @@ application.
 | Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.         | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | Supported application driver. Keep disabled until the OCI tenancy is verified, bucket is private, CORS/IAM/lifecycle are reviewed, and a synthetic end-to-end upload/restore drill passes.                                                                                                                            |
 | Gemini OCR                         | Authenticated users can send an authorized stored file to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields. | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                        |
 | Resend email                       | Password resets, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API.                                 | No. The bootstrap explicitly deploys with email disabled and does not create the Resend secret.                                                                                                                         | Optional and fail-closed until an operator enables it. Subprocessor approval, data-region/retention confirmation, bounce handling, and delivery reconciliation remain required.                                                                                                                                       |
-| Google OAuth                       | Authorization-code login for an already linked Google subject, local session issuance, and local 2FA continuation are implemented.     | No. The bootstrap does not create an OAuth client or bind its secret.                                                                                                                                                   | Optional when client credentials and the canonical public URL are configured. Email-only account linking and production auto-provisioning are disabled in code. Bounded timeouts are implemented; account-link/unlink procedures remain required.                                                                     |
 | Signed automation webhook          | A PostgreSQL transactional outbox and optional HMAC-signed worker emit three minimized credential lifecycle events.                    | Partly. The bootstrap provisions or updates an inert one-shot Cloud Run Job, dedicated worker/scheduler identities, a regional HMAC secret, and a paused five-minute Scheduler job. It does not provision the receiver. | Disabled by default. Supports explicit facility routing, exact-host/public-IP enforcement, idempotency, bounded timeout, retry/backoff, stale-claim recovery, dead-letter retention, and no document/token fields. The recipient remains an operator-approved subprocessor and must verify signatures/replay windows. |
 
 "Implemented" does not mean that the provider has been enabled in a deployed
@@ -136,8 +133,7 @@ no-store, max-age=0`; only explicitly public objects may use cacheable
    bucket, uniform access, public-access prevention, versioning, regional
    endpoint, least-privilege service account, and secret-management controls.
 2. Set `GOOGLE_CLOUD_PROJECT`, `PRIVATE_OBJECT_DIR`, and
-   `STORAGE_API_ENDPOINT`; keep `PUBLIC_OBJECT_SEARCH_PATHS` separate from the
-   private root.
+   `STORAGE_API_ENDPOINT` for the private credential bucket.
 3. Restrict bucket CORS to exact production HTTPS origins and PUT plus required
    headers only.
 4. Verify owner and scoped-manager reads, cross-employee denial, bounded ingress
@@ -326,85 +322,7 @@ this ledger.
    duplicate scheduler execution, backlog catch-up, reset-token expiry and
    single use, bounce/complaint response, and log redaction.
 
-## 4. Google OAuth
-
-### Current data flow
-
-1. The API redirects the browser to Google's authorization endpoint requesting
-   `openid email profile`. A signed 10-minute `state` token and matching secure,
-   HTTP-only, SameSite=Lax nonce cookie bind the callback to the initiating
-   browser.
-2. Google redirects an authorization code to the canonical
-   `/api/auth/google/callback`. The API sends the code, client ID, client secret,
-   redirect URI, and authorization-code grant type to
-   `https://oauth2.googleapis.com/token`.
-3. The API sends the returned bearer access token to
-   `https://www.googleapis.com/oauth2/v3/userinfo` and receives `sub`, email,
-   email-verification status, display name, and picture URL.
-4. The API does not persist Google access/refresh tokens. It stores the Google
-   subject identifier and may store the picture URL; email and names already
-   form part of the local user record. It links an existing account only when
-   Google reports the email as verified and refuses a conflicting Google ID.
-5. Google login replaces only the password factor. An inactive account is
-   refused, and locally enabled TOTP is still required before a session is
-   issued.
-
-### Destination, region, credentials, and retention
-
-- Authorization, token, and userinfo go to Google's public global endpoints.
-  No regional endpoint or Saudi processing guarantee is configured. Google's
-  OAuth/user-profile retention and support access must be assessed under the
-  organization's Google terms/DPA.
-- `GOOGLE_CLIENT_SECRET` is server-only; `GOOGLE_CLIENT_ID` is public by design
-  but still managed configuration. Both are absent by default and the flow
-  returns a configuration error when either or the canonical public URL is
-  missing. The supplied bootstrap does not create an OAuth client or secret.
-- The local user record retains `googleId`, email/name, and optional avatar URL
-  for the account lifetime. There is no implemented Google unlink, profile
-  refresh, or provider-deprovisioning workflow; production must define account
-  unlink/deletion and stale-avatar handling.
-
-### Resilience, quotas, and failure behavior
-
-- Start and callback endpoints are limited to 20 requests per source IP per 10
-  minutes using the shared in-memory limiter. This is one-instance protection,
-  not a cluster-wide control.
-- Token and userinfo fetches each have a 15-second timeout and no automatic
-  retry. OAuth code exchange is not generally safe to retry blindly because
-  codes are short-lived and single-use; userinfo can use a bounded transient
-  retry while the access token remains valid.
-- Failures redirect to a small public error code and do not expose tokens or
-  provider bodies. The provider access token is held only in process memory.
-  Local sessions use an HTTP-only cookie and local TOTP remains enforced.
-- Production auto-provisioning is unconditionally disabled by the current code,
-  even if `GOOGLE_AUTO_PROVISION_ENABLED=true`; an unknown Google account is
-  refused. In non-production, auto-provisioning is possible unless the flag is
-  exactly `false`, so keep the safe `.env.example` value and never reuse such an
-  environment with real organizational data.
-- Production must document Google project quotas, consent-screen status,
-  authorized domains, client-secret rotation, timeout/error metrics, and an
-  incident/revocation procedure. Logs must continue to exclude codes, access
-  tokens, cookies, `state`, and profile payloads.
-
-### Operator setup
-
-1. Create a dedicated production OAuth client and consent configuration under
-   an organization-controlled Google Cloud project; request only
-   `openid email profile`.
-2. Register the exact canonical HTTPS callback
-   `${PUBLIC_APP_URL}/api/auth/google/callback`; configure
-   `PUBLIC_APP_URL`, `GOOGLE_CLIENT_ID`, and the Secret-Manager-backed
-   `GOOGLE_CLIENT_SECRET`.
-3. Keep `GOOGLE_AUTO_PROVISION_ENABLED=false`. Pre-create and scope employee
-   accounts through the approved administrator process; test verified-email
-   linking, conflicting IDs, inactive accounts, cancellation, stale/replayed
-   state, local 2FA, and secret revocation.
-4. Add provider health/error metrics, unlink and deprovisioning procedures,
-   and a documented emergency disable method before enabling the button for
-   production users. Validate the 15-second timeout behavior against the
-   approved network path.
-
-## 5. Durable workflow automation / n8n-compatible webhook
+## 4. Durable workflow automation / n8n-compatible webhook
 
 ### Scope and safe defaults
 
@@ -589,13 +507,13 @@ following have named owners and evidence:
   retention/deletion schedule, data-subject handling, incident response, and
   subprocessor/DPA review;
 - confirmed region and cross-border-transfer position for each provider (GCS
-  location must not be used as evidence for Gemini, Resend, or OAuth);
+  location must not be used as evidence for Gemini or Resend);
 - least-privilege runtime identity, secrets in Secret Manager, rotation and
   revocation runbooks, and no secrets in source, images, logs, or support data;
 - bounded timeouts, explicit retry/idempotency rules, quota/spend/backlog alerts,
   provider-outage behavior, and restore/reconciliation drills;
-- log redaction tests covering authorization, cookies, OAuth codes/tokens,
-  reset links, API keys, document bodies/Base64, signed URLs, OCR content, and
+- log redaction tests covering authorization, cookies, reset links, API keys,
+  document bodies/Base64, signed URLs, OCR content, and
   unnecessarily identifying recipient data;
 - an acceptance test using synthetic documents before any real credential is
   uploaded or transmitted.
@@ -616,8 +534,5 @@ The assessment above is based on these implementation sources:
   [`scheduler.ts`](../artifacts/api-server/src/lib/email/scheduler.ts),
   [`templates.ts`](../artifacts/api-server/src/lib/email/templates.ts), and
   [`email-log.ts`](../lib/db/src/schema/email-log.ts).
-- Google OAuth: [`oauth.ts`](../artifacts/api-server/src/routes/oauth.ts),
-  [`auth.ts`](../artifacts/api-server/src/lib/auth.ts), and
-  [`users.ts`](../lib/db/src/schema/users.ts).
 - Safe configuration defaults: [`.env.example`](../.env.example) and
   [`GOOGLE_CLOUD_DEPLOYMENT.md`](./GOOGLE_CLOUD_DEPLOYMENT.md).

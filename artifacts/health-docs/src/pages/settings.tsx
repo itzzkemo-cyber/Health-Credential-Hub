@@ -1,6 +1,18 @@
+import { useState } from "react";
+import { useLocation } from "wouter";
+import { ApiError, useChangePassword } from "@workspace/api-client-react";
+import { toast } from "sonner";
+
 import { useLanguage } from "@/lib/language-context";
+import { getAuthUser, setAuthSession } from "@/lib/auth";
+import {
+  mustReplaceTemporaryPassword,
+  withPasswordChangeState,
+  type PasswordChangeUser,
+} from "@/lib/password-change-state";
 import { useTheme } from "@/components/theme-provider";
 import TwoFactorCard from "@/components/settings/TwoFactorCard";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -9,6 +21,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -16,13 +29,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Globe, Moon, Bell, ShieldCheck } from "lucide-react";
-import { isShowcaseMode } from "@/demo/showcase";
+import { Eye, EyeOff, Globe, KeyRound, Loader2, Moon } from "lucide-react";
 
 export default function Settings() {
   const { t, language, setLanguage } = useLanguage();
   const { theme, setTheme } = useTheme();
+  const user = getAuthUser() as PasswordChangeUser | null;
+  const mustChangePassword = mustReplaceTemporaryPassword(user);
+
+  if (mustChangePassword) {
+    return (
+      <div className="space-y-6 animate-in fade-in duration-300">
+        <div className="space-y-2 text-center sm:text-start">
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            {t("settings_page.password_required_title")}
+          </h1>
+          <p className="text-sm leading-6 text-muted-foreground sm:text-base">
+            {t("settings_page.password_required_desc")}
+          </p>
+        </div>
+        <ChangePasswordCard forced />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500">
@@ -36,19 +65,9 @@ export default function Settings() {
       </div>
 
       <div className="grid gap-6">
-        {isShowcaseMode ? (
-          <Card className="border-amber-300/60 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20">
-            <CardContent className="flex items-start gap-3 p-5 text-sm leading-6 text-muted-foreground">
-              <ShieldCheck
-                className="mt-0.5 h-5 w-5 shrink-0 text-amber-700 dark:text-amber-300"
-                aria-hidden="true"
-              />
-              <p>{t("showcase.security_settings_disabled")}</p>
-            </CardContent>
-          </Card>
-        ) : (
-          <TwoFactorCard />
-        )}
+        <ChangePasswordCard />
+
+        <TwoFactorCard />
 
         <Card className="hover-elevate">
           <CardHeader>
@@ -87,27 +106,6 @@ export default function Settings() {
                   <SelectItem value="en">English</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-0.5">
-                <Label htmlFor="hijri-calendar">
-                  {t("settings_page.calendar")}
-                </Label>
-                <p
-                  id="hijri-calendar-description"
-                  className="text-sm text-muted-foreground"
-                >
-                  {t("settings_page.calendar_desc")}
-                  {" "}
-                  {t("settings_page.not_available")}
-                </p>
-              </div>
-              <Switch
-                id="hijri-calendar"
-                disabled
-                aria-describedby="hijri-calendar-description"
-              />
             </div>
           </CardContent>
         </Card>
@@ -155,47 +153,236 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        <Card className="hover-elevate">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Bell className="h-5 w-5 text-primary" />
-              <CardTitle>{t("settings_page.notifications")}</CardTitle>
-            </div>
-            <CardDescription>
-              {t("settings_page.notifications_desc")}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-0.5">
-                <Label htmlFor="expiry-email-warnings">
-                  {t("settings_page.expiry_warnings")}
-                </Label>
-                <p
-                  id="expiry-email-warnings-description"
-                  className="text-sm text-muted-foreground"
-                >
-                  {t("settings_page.expiry_warnings_desc")}
-                </p>
-              </div>
-              <Switch
-                id="expiry-email-warnings"
-                disabled
-                aria-describedby="expiry-email-warnings-description"
-              />
-            </div>
-
-            <div className="space-y-3 pt-4 border-t border-border">
-              <p className="text-sm leading-6 text-muted-foreground">
-                {t("settings_page.alerts_managed_by_admin")}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
         <p className="text-sm leading-6 text-muted-foreground">
           {t("settings_page.applies_immediately")}
         </p>
+      </div>
+    </div>
+  );
+}
+
+function ChangePasswordCard({ forced = false }: { forced?: boolean }) {
+  const { t } = useLanguage();
+  const [, setLocation] = useLocation();
+  const changePassword = useChangePassword();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [visiblePasswords, setVisiblePasswords] = useState({
+    current: false,
+    next: false,
+    confirm: false,
+  });
+
+  const clearError = () => {
+    setValidationError(null);
+    changePassword.reset();
+  };
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (newPassword.length < 12) {
+      setValidationError("settings_page.password_minimum");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setValidationError("settings_page.password_mismatch");
+      return;
+    }
+
+    setValidationError(null);
+    changePassword.mutate(
+      { data: { currentPassword, newPassword } },
+      {
+        onSuccess: () => {
+          setCurrentPassword("");
+          setNewPassword("");
+          setConfirmPassword("");
+          setVisiblePasswords({ current: false, next: false, confirm: false });
+          const user = getAuthUser() as Record<string, unknown> | null;
+          if (user) setAuthSession(withPasswordChangeState(user, false));
+          toast.success(
+            t(forced ? "settings_page.password_required_success" : "settings_page.password_changed"),
+          );
+          if (forced) setLocation("/");
+        },
+      },
+    );
+  };
+
+  const mutationCode =
+    changePassword.error instanceof ApiError
+      ? (changePassword.error.data as { code?: string } | null)?.code
+      : undefined;
+  const mutationError =
+    mutationCode === "PASSWORD_REUSE_NOT_ALLOWED"
+      ? "settings_page.password_reuse_not_allowed"
+      : changePassword.error instanceof ApiError && changePassword.error.status === 400
+        ? "settings_page.current_password_incorrect"
+      : changePassword.error instanceof ApiError &&
+          changePassword.error.status === 429
+        ? "settings_page.password_rate_limited"
+        : "settings_page.password_change_failed";
+  const errorKey = validationError ?? (changePassword.isError ? mutationError : null);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <KeyRound className="h-5 w-5 text-primary" aria-hidden="true" />
+          <CardTitle>{t("settings_page.change_password")}</CardTitle>
+        </div>
+        <CardDescription>
+          {t(
+            forced
+              ? "settings_page.password_required_card_desc"
+              : "settings_page.change_password_desc",
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <PasswordField
+            id="current-password"
+            label={t("settings_page.current_password")}
+            value={currentPassword}
+            onChange={(value) => {
+              clearError();
+              setCurrentPassword(value);
+            }}
+            visible={visiblePasswords.current}
+            onToggle={() =>
+              setVisiblePasswords((previous) => ({
+                ...previous,
+                current: !previous.current,
+              }))
+            }
+            showLabel={t("settings_page.show_password")}
+            hideLabel={t("settings_page.hide_password")}
+            autoComplete="current-password"
+          />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <PasswordField
+              id="new-password"
+              label={t("settings_page.new_password")}
+              value={newPassword}
+              onChange={(value) => {
+                clearError();
+                setNewPassword(value);
+              }}
+              visible={visiblePasswords.next}
+              onToggle={() =>
+                setVisiblePasswords((previous) => ({
+                  ...previous,
+                  next: !previous.next,
+                }))
+              }
+              showLabel={t("settings_page.show_password")}
+              hideLabel={t("settings_page.hide_password")}
+              autoComplete="new-password"
+              minLength={12}
+            />
+            <PasswordField
+              id="confirm-new-password"
+              label={t("settings_page.confirm_password")}
+              value={confirmPassword}
+              onChange={(value) => {
+                clearError();
+                setConfirmPassword(value);
+              }}
+              visible={visiblePasswords.confirm}
+              onToggle={() =>
+                setVisiblePasswords((previous) => ({
+                  ...previous,
+                  confirm: !previous.confirm,
+                }))
+              }
+              showLabel={t("settings_page.show_password")}
+              hideLabel={t("settings_page.hide_password")}
+              autoComplete="new-password"
+              minLength={12}
+            />
+          </div>
+          <p className="text-xs leading-5 text-muted-foreground">
+            {t("settings_page.password_minimum")}
+          </p>
+          {errorKey && (
+            <p
+              className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+              role="alert"
+            >
+              {t(errorKey)}
+            </p>
+          )}
+          <Button
+            type="submit"
+            disabled={changePassword.isPending}
+            className="min-h-11 w-full gap-2 sm:w-auto"
+          >
+            {changePassword.isPending && (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            )}
+            {t("settings_page.save_password")}
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PasswordField({
+  id,
+  label,
+  value,
+  onChange,
+  visible,
+  onToggle,
+  showLabel,
+  hideLabel,
+  autoComplete,
+  minLength,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  visible: boolean;
+  onToggle: () => void;
+  showLabel: string;
+  hideLabel: string;
+  autoComplete: "current-password" | "new-password";
+  minLength?: number;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="relative">
+        <Input
+          id={id}
+          type={visible ? "text" : "password"}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          required
+          minLength={minLength}
+          autoComplete={autoComplete}
+          dir="ltr"
+          className="min-h-11 pe-12"
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="absolute end-0 top-0 h-11 w-11"
+          onClick={onToggle}
+          aria-label={visible ? hideLabel : showLabel}
+        >
+          {visible ? (
+            <EyeOff className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <Eye className="h-4 w-4" aria-hidden="true" />
+          )}
+        </Button>
       </div>
     </div>
   );

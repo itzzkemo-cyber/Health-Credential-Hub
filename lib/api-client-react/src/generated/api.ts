@@ -23,6 +23,7 @@ import type {
   ActivityItem,
   AuditLogListResponse,
   AuthResponse,
+  ChangePassword400,
   ChangePasswordInput,
   ChangePasswordResult,
   ComplianceReport,
@@ -34,7 +35,6 @@ import type {
   CredentialUpdate,
   CredentialVerification,
   DashboardStats,
-  DemoLoginInput,
   Department,
   DepartmentCompliance,
   DepartmentInput,
@@ -64,7 +64,6 @@ import type {
   OcrInput,
   OcrResult,
   ReadinessStatus,
-  RegisterInput,
   ResetPasswordInput,
   TotpActivation,
   TotpAdminDisableInput,
@@ -180,85 +179,6 @@ export const useRequestUploadUrl = <TError = ErrorType<ErrorEnvelope>,
       > => {
       return useMutation(getRequestUploadUrlMutationOptions(options));
     }
-
-export const getGetPublicObjectUrl = (filePath: string,) => {
-
-
-
-
-  return `/api/storage/public-objects/${filePath}`
-}
-
-/**
- * Unconditionally public — no authentication or ACL checks.
- * Searches PUBLIC_OBJECT_SEARCH_PATHS for the given file path.
- * @summary Serve a public asset from PUBLIC_OBJECT_SEARCH_PATHS
- */
-export const getPublicObject = async (filePath: string, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
-
-  return customFetch<Blob>(getGetPublicObjectUrl(filePath),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getGetPublicObjectQueryKey = (filePath: string,) => {
-    return [
-    `/api/storage/public-objects/${filePath}`
-    ] as const;
-    }
-
-
-export const getGetPublicObjectQueryOptions = <TData = Awaited<ReturnType<typeof getPublicObject>>, TError = ErrorType<ErrorEnvelope>>(filePath: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPublicObject>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getGetPublicObjectQueryKey(filePath);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPublicObject>>> = ({ signal }) => getPublicObject(filePath, { signal, ...requestOptions });
-
-
-
-
-
-   return  { queryKey, queryFn, enabled: filePath !== null && filePath !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPublicObject>>, TError, TData> & { queryKey: QueryKey }
-}
-
-export type GetPublicObjectQueryResult = NonNullable<Awaited<ReturnType<typeof getPublicObject>>>
-export type GetPublicObjectQueryError = ErrorType<ErrorEnvelope>
-
-
-/**
- * @summary Serve a public asset from PUBLIC_OBJECT_SEARCH_PATHS
- */
-
-export function useGetPublicObject<TData = Awaited<ReturnType<typeof getPublicObject>>, TError = ErrorType<ErrorEnvelope>>(
- filePath: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPublicObject>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-
- ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-
-  const queryOptions = getGetPublicObjectQueryOptions(filePath,options)
-
-  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
 
 export const getGetStorageObjectUrl = (objectPath: string,) => {
 
@@ -564,148 +484,6 @@ export const useLogin = <TError = ErrorType<void>,
       return useMutation(getLoginMutationOptions(options));
     }
 
-export const getDemoLoginUrl = () => {
-
-
-
-
-  return `/api/auth/demo-login`
-}
-
-/**
- * @summary Sign in to a showcase demo account (credentials never leave the server)
- */
-export const demoLogin = async (demoLoginInput: DemoLoginInput, options?: Parameters<typeof customFetch>[1]): Promise<AuthResponse> => {
-
-  return customFetch<AuthResponse>(getDemoLoginUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(demoLoginInput)
-  }
-);}
-
-
-
-
-
-export const getDemoLoginMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof demoLogin>>, TError,{data: BodyType<DemoLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof demoLogin>>, TError,{data: BodyType<DemoLoginInput>}, TContext> => {
-
-const mutationKey = ['demoLogin'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof demoLogin>>, {data: BodyType<DemoLoginInput>}> = (props) => {
-          const {data} = props ?? {};
-
-          return  demoLogin(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type DemoLoginMutationResult = NonNullable<Awaited<ReturnType<typeof demoLogin>>>
-    export type DemoLoginMutationBody = BodyType<DemoLoginInput>
-    export type DemoLoginMutationError = ErrorType<void>
-
-    /**
- * @summary Sign in to a showcase demo account (credentials never leave the server)
- */
-export const useDemoLogin = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof demoLogin>>, TError,{data: BodyType<DemoLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof demoLogin>>,
-        TError,
-        {data: BodyType<DemoLoginInput>},
-        TContext
-      > => {
-      return useMutation(getDemoLoginMutationOptions(options));
-    }
-
-export const getRegisterUrl = () => {
-
-
-
-
-  return `/api/auth/register`
-}
-
-/**
- * @summary Self-registration — create an employee account and sign in
- */
-export const register = async (registerInput: RegisterInput, options?: Parameters<typeof customFetch>[1]): Promise<AuthResponse> => {
-
-  return customFetch<AuthResponse>(getRegisterUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(registerInput)
-  }
-);}
-
-
-
-
-
-export const getRegisterMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof register>>, TError,{data: BodyType<RegisterInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof register>>, TError,{data: BodyType<RegisterInput>}, TContext> => {
-
-const mutationKey = ['register'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof register>>, {data: BodyType<RegisterInput>}> = (props) => {
-          const {data} = props ?? {};
-
-          return  register(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type RegisterMutationResult = NonNullable<Awaited<ReturnType<typeof register>>>
-    export type RegisterMutationBody = BodyType<RegisterInput>
-    export type RegisterMutationError = ErrorType<void>
-
-    /**
- * @summary Self-registration — create an employee account and sign in
- */
-export const useRegister = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof register>>, TError,{data: BodyType<RegisterInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof register>>,
-        TError,
-        {data: BodyType<RegisterInput>},
-        TContext
-      > => {
-      return useMutation(getRegisterMutationOptions(options));
-    }
-
 export const getGetFacilitiesUrl = () => {
 
 
@@ -715,7 +493,8 @@ export const getGetFacilitiesUrl = () => {
 }
 
 /**
- * @summary List facilities (public — powers the registration facility dropdown)
+ * System administrators receive the global directory; every other role receives only its own facility.
+ * @summary List facilities visible to the authenticated account
  */
 export const getFacilities = async ( options?: Parameters<typeof customFetch>[1]): Promise<FacilityOption[]> => {
 
@@ -739,7 +518,7 @@ export const getGetFacilitiesQueryKey = () => {
     }
 
 
-export const getGetFacilitiesQueryOptions = <TData = Awaited<ReturnType<typeof getFacilities>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFacilities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetFacilitiesQueryOptions = <TData = Awaited<ReturnType<typeof getFacilities>>, TError = ErrorType<void>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFacilities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -758,14 +537,14 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetFacilitiesQueryResult = NonNullable<Awaited<ReturnType<typeof getFacilities>>>
-export type GetFacilitiesQueryError = ErrorType<unknown>
+export type GetFacilitiesQueryError = ErrorType<void>
 
 
 /**
- * @summary List facilities (public — powers the registration facility dropdown)
+ * @summary List facilities visible to the authenticated account
  */
 
-export function useGetFacilities<TData = Awaited<ReturnType<typeof getFacilities>>, TError = ErrorType<unknown>>(
+export function useGetFacilities<TData = Awaited<ReturnType<typeof getFacilities>>, TError = ErrorType<void>>(
   options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getFacilities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
@@ -957,7 +736,7 @@ export const changePassword = async (changePasswordInput: ChangePasswordInput, o
 
 
 
-export const getChangePasswordMutationOptions = <TError = ErrorType<unknown>,
+export const getChangePasswordMutationOptions = <TError = ErrorType<ChangePassword400>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changePassword>>, TError,{data: BodyType<ChangePasswordInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof changePassword>>, TError,{data: BodyType<ChangePasswordInput>}, TContext> => {
 
@@ -986,12 +765,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ChangePasswordMutationResult = NonNullable<Awaited<ReturnType<typeof changePassword>>>
     export type ChangePasswordMutationBody = BodyType<ChangePasswordInput>
-    export type ChangePasswordMutationError = ErrorType<unknown>
+    export type ChangePasswordMutationError = ErrorType<ChangePassword400>
 
     /**
  * @summary Change password
  */
-export const useChangePassword = <TError = ErrorType<unknown>,
+export const useChangePassword = <TError = ErrorType<ChangePassword400>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changePassword>>, TError,{data: BodyType<ChangePasswordInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof changePassword>>,

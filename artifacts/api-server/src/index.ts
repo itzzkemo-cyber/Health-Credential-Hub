@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { safeErrorLogFields } from "./lib/safeError";
 import { startEmailScheduler } from "./lib/email/scheduler";
 
 const rawPort = process.env["PORT"];
@@ -18,7 +19,7 @@ if (Number.isNaN(port) || port <= 0) {
 
 app.listen(port, (err) => {
   if (err) {
-    logger.error({ err }, "Error listening on port");
+    logger.error(safeErrorLogFields(err), "Error listening on port");
     process.exit(1);
   }
 

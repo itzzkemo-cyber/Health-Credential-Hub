@@ -64,10 +64,6 @@ const OCI_RIYADH_ENDPOINT =
 let ociClient: S3Client | undefined;
 let ociClientKey = "";
 
-function normalizeStorageRoot(path: string): string {
-  return `/${path.trim().replace(/^\/+|\/+$/g, "")}`;
-}
-
 function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} must be set`);
@@ -179,29 +175,6 @@ export function getUploadRequiredHeaders(): Record<string, string> {
       ? OCI_UPLOAD_REQUIRED_HEADERS
       : GCS_UPLOAD_REQUIRED_HEADERS),
   };
-}
-
-export function validateStoragePathIsolation(): void {
-  const privatePath = process.env.PRIVATE_OBJECT_DIR?.trim();
-  const publicPaths =
-    process.env.PUBLIC_OBJECT_SEARCH_PATHS?.split(",")
-      .map((path) => path.trim())
-      .filter(Boolean) ?? [];
-  if (!privatePath || publicPaths.length === 0) return;
-
-  const privateRoot = normalizeStorageRoot(privatePath);
-  for (const rawPublicPath of publicPaths) {
-    const publicRoot = normalizeStorageRoot(rawPublicPath);
-    if (
-      publicRoot === privateRoot ||
-      publicRoot.startsWith(`${privateRoot}/`) ||
-      privateRoot.startsWith(`${publicRoot}/`)
-    ) {
-      throw new Error(
-        "PUBLIC_OBJECT_SEARCH_PATHS must not overlap PRIVATE_OBJECT_DIR",
-      );
-    }
-  }
 }
 
 export class ObjectNotFoundError extends Error {
@@ -368,39 +341,12 @@ function getStoredObject(fullPath: string): StoredObjectFile {
 }
 
 export class ObjectStorageService {
-  getPublicObjectSearchPaths(): Array<string> {
-    const pathsStr = process.env.PUBLIC_OBJECT_SEARCH_PATHS || "";
-    const paths = Array.from(
-      new Set(
-        pathsStr
-          .split(",")
-          .map((path) => path.trim())
-          .filter((path) => path.length > 0),
-      ),
-    );
-    if (paths.length === 0) {
-      throw new Error(
-        "PUBLIC_OBJECT_SEARCH_PATHS must be set to comma-separated private-bucket paths",
-      );
-    }
-    return paths;
-  }
-
   getPrivateObjectDir(): string {
     const dir = process.env.PRIVATE_OBJECT_DIR || "";
     if (!dir) {
       throw new Error("PRIVATE_OBJECT_DIR must be set to /bucket-name/private");
     }
     return dir;
-  }
-
-  async searchPublicObject(filePath: string): Promise<StoredObjectFile | null> {
-    for (const searchPath of this.getPublicObjectSearchPaths()) {
-      const file = getStoredObject(`${searchPath}/${filePath}`);
-      const [exists] = await file.exists();
-      if (exists) return file;
-    }
-    return null;
   }
 
   async downloadObject(

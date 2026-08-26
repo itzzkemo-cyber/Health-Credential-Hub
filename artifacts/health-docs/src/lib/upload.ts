@@ -1,16 +1,16 @@
 // Prepares user-selected files for upload to object storage.
 //
 // Phone photos are routinely 5–20 MB; certificates stay perfectly readable
-// for OCR at 2000px, so images are downscaled/re-encoded in the browser
+// for document review at 2000px, so images are downscaled/re-encoded in the browser
 // before the direct-to-storage upload. PDFs (and images the browser cannot
 // decode, e.g. HEIC outside Safari) are uploaded as-is, subject to the size
 // cap below. The prepared bytes are PUT straight to the storage presigned
 // URL — they never pass through the API server as JSON.
 
-/** Max prepared file size uploaded to storage and accepted by OCR (8 MB). */
+/** Max prepared file size accepted by private document storage (8 MB). */
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
-/** Longest edge of re-encoded images, in pixels — plenty for OCR. */
+/** Longest edge of re-encoded document images, in pixels. */
 const MAX_IMAGE_EDGE = 2000;
 const JPEG_QUALITY = 0.82;
 

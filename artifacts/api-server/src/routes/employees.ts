@@ -5,6 +5,7 @@ import {
   credentialsTable,
   facilitiesTable,
   departmentsTable,
+  auditLogsTable,
   USER_ROLES,
   type User,
 } from "@workspace/db";
@@ -32,6 +33,17 @@ import {
 import { canAssignRole, canManageTarget } from "../lib/roleHierarchy";
 
 const router: IRouter = Router();
+
+function isPostgresUniqueViolation(error: unknown): boolean {
+  let current = error;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (typeof current !== "object" || current === null) return false;
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (candidate.code === "23505") return true;
+    current = candidate.cause;
+  }
+  return false;
+}
 
 router.use("/employees", requireAuth);
 
@@ -142,10 +154,10 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
     res.status(400).json({ message: "A valid email address is required" });
     return;
   }
-  if ((body.password as string).length < 8) {
+  if ((body.password as string).length < 12) {
     res
       .status(400)
-      .json({ message: "Password must contain at least 8 characters" });
+      .json({ message: "Password must contain at least 12 characters" });
     return;
   }
   const existing = await db
@@ -228,39 +240,53 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
       return;
     }
   }
-  const inserted = await db
-    .insert(usersTable)
-    .values({
-      email,
-      passwordHash: await hashPassword(body.password as string),
-      name: body.name as string,
-      nameAr: body.nameAr as string,
-      role: role as User["role"],
-      departmentId,
-      supervisorId,
-      facilityId,
-      jobTitle: body.jobTitle as string,
-      jobTitleAr: body.jobTitleAr as string,
-      employeeNumber: body.employeeNumber as string,
-      phone: (body.phone as string) ?? null,
-      isActive: true,
-    })
-    .returning();
-  const created = inserted[0];
-  if (!created) {
-    res.status(500).json({ message: "Insert failed" });
-    return;
+  const passwordHash = await hashPassword(body.password as string);
+  let created: User;
+  try {
+    created = await db.transaction(async (tx) => {
+      const inserted = await tx
+        .insert(usersTable)
+        .values({
+          email,
+          passwordHash,
+          name: body.name as string,
+          nameAr: body.nameAr as string,
+          role: role as User["role"],
+          departmentId,
+          supervisorId,
+          facilityId,
+          jobTitle: body.jobTitle as string,
+          jobTitleAr: body.jobTitleAr as string,
+          employeeNumber: body.employeeNumber as string,
+          phone: (body.phone as string) ?? null,
+          isActive: true,
+          mustChangePassword: true,
+        })
+        .returning();
+      const insertedUser = inserted[0];
+      if (!insertedUser) throw new Error("Employee insert returned no row");
+
+      await tx.insert(auditLogsTable).values({
+        userId: user.id,
+        facilityId: insertedUser.facilityId,
+        userName: user.name,
+        userNameAr: user.nameAr,
+        action: "Added employee",
+        actionAr: "إضافة موظف",
+        target: insertedUser.name,
+        targetAr: insertedUser.nameAr,
+        details: null,
+        ipAddress: req.ip ?? null,
+      });
+      return insertedUser;
+    });
+  } catch (error) {
+    if (isPostgresUniqueViolation(error)) {
+      res.status(409).json({ message: "Email already registered" });
+      return;
+    }
+    throw error;
   }
-  await logAudit(
-    user,
-    "Added employee",
-    "إضافة موظف",
-    created.name,
-    created.nameAr,
-    undefined,
-    req.ip,
-    created.facilityId,
-  );
   res.status(201).json(serializeUser(created));
 });
 

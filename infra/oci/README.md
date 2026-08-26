@@ -55,8 +55,8 @@ Official region and storage references:
    and an approved recovery/lifecycle policy, set the S3 Compatibility API
    designated compartment, and create a customer secret key for the application
    identity. Store both values in Vault.
-6. Deploy the application with values based on `app.env.example`. Keep Demo,
-   self-registration, seed, Google auto-provisioning, email, OCR, and automation
+6. Deploy the application with values based on `app.env.example`. The release
+   has no public account creation or seed path. Keep email, OCR, and automation
    fail-closed until each dependency is approved and tested.
 7. Restrict bucket CORS to `https://app.wathaiqihealth.com`, method `PUT`, and
    headers `Content-Type` and `If-None-Match`. Keep bucket/public-object access
@@ -93,7 +93,7 @@ serve every private file through authenticated server-side scope checks.
 - Malware scanning/quarantine and storage-ingress byte enforcement.
 - Auditable orphan cleanup, document deletion/retention, backup and restore
   drills, quotas, budgets, alerts, and incident response.
-- Subprocessor/DPA/region approval before Gemini, Resend, Google OAuth, or an
+- Subprocessor/DPA/region approval before Gemini, Resend, or an
   external n8n receiver is enabled.
-- A staging run with synthetic data. A local Demo or successful build is not
+- A staging run with non-sensitive test data. A successful build is not
   production acceptance.

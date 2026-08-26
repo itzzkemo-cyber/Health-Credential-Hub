@@ -12,7 +12,6 @@
 **/.cache
 **/.pnpm-store
 **/*.log
-artifacts/mobile/static-build
 attached_assets
 security_best_practices_report.md
 gha-creds-*.json
