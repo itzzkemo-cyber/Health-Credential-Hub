@@ -17,7 +17,10 @@ permissions:
 
 jobs:
   verify:
-    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'DEPLOY'
+    # Fail closed while direct cloud uploads lack bounded ingress and malware
+    # quarantine. Set this protected environment/repository variable only after
+    # those controls and the restore drill receive an explicit security review.
+    if: github.ref == 'refs/heads/main' && inputs.confirmation == 'DEPLOY' && vars.MANAGED_CLOUD_UPLOAD_SECURITY_APPROVED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

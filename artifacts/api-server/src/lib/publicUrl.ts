@@ -1,11 +1,11 @@
 /** Canonical browser URL, without a trailing slash. */
-export function getPublicAppUrl(): string | null {
-  const configured = process.env.PUBLIC_APP_URL?.trim();
+export function getPublicAppUrl(env: NodeJS.ProcessEnv = process.env): string | null {
+  const configured = env.PUBLIC_APP_URL?.trim();
   const value = configured ?? "";
   if (!value) return null;
   try {
     const url = new URL(value);
-    if (process.env.NODE_ENV === "production" && url.protocol !== "https:") {
+    if (env.NODE_ENV === "production" && url.protocol !== "https:") {
       throw new Error("PUBLIC_APP_URL must use HTTPS in production");
     }
     url.hash = "";

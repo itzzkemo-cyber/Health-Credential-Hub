@@ -67,6 +67,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /storage/uploads/{uploadId}:
+    delete:
+      tags: [Storage]
+      operationId: deleteUnlinkedUpload
+      summary: Delete a caller-owned upload that is not linked to a credential
+      description: |
+        Deletes a private upload only when the authenticated caller owns its
+        upload grant and no credential record, including a soft-deleted record,
+        references the object. Missing, linked, and unauthorized uploads share
+        the same 404 response so object existence and tenant ownership are not
+        disclosed.
+      parameters:
+        - name: uploadId
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      responses:
+        "204":
+          description: The unlinked private upload was deleted.
+        "401":
+          description: Not authenticated or the session is no longer valid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Upload not found, not caller-owned, or linked to any credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: Failed to delete the unlinked upload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /storage/objects/{objectPath}:
     get:
       tags: [Storage]
@@ -96,14 +135,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
-        "403":
-          description: Not allowed to access this object.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorEnvelope"
         "404":
-          description: Object not found.
+          description: Object not found or not visible to the authenticated caller.
           content:
             application/json:
               schema:
@@ -299,6 +332,12 @@ paths:
       operationId: totpSetup
       tags: [auth]
       summary: Begin enabling 2FA — returns the secret, QR image and a signed setup token (nothing persisted yet)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpSetupInput"
       responses:
         "200":
           description: Pending enrollment data
@@ -308,6 +347,8 @@ paths:
                 $ref: "#/components/schemas/TotpSetupData"
         "400":
           description: Two-factor authentication already enabled
+        "403":
+          description: Current-password step-up failed
 
   /auth/totp/verify-setup:
     post:
@@ -806,6 +847,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Employee"
+        "409":
+          description: Employee changed concurrently; reload before retrying
 
     delete:
       operationId: deleteEmployee
@@ -820,6 +863,8 @@ paths:
       responses:
         "204":
           description: Deleted
+        "409":
+          description: Employee changed concurrently; reload before retrying
 
   /employees/{id}/activate:
     post:
@@ -839,6 +884,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Employee"
+        "409":
+          description: Employee changed concurrently; reload before retrying
 
   /employees/{id}/deactivate:
     post:
@@ -858,6 +905,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Employee"
+        "409":
+          description: Employee changed concurrently; reload before retrying
 
   # Departments
   /departments:
@@ -1025,7 +1074,8 @@ paths:
         - name: userId
           in: query
           schema:
-            type: ["number", "null"]
+            type: ["integer", "null"]
+            minimum: 1
         - name: action
           in: query
           schema:
@@ -1041,12 +1091,15 @@ paths:
         - name: page
           in: query
           schema:
-            type: number
+            type: integer
+            minimum: 1
             default: 1
         - name: pageSize
           in: query
           schema:
-            type: number
+            type: integer
+            minimum: 1
+            maximum: 200
             default: 50
       responses:
         "200":
@@ -1219,6 +1272,14 @@ components:
         challengeToken:
           type: string
 
+    TotpSetupInput:
+      type: object
+      required: [currentPassword]
+      properties:
+        currentPassword:
+          type: string
+          format: password
+
     TotpSetupData:
       type: object
       required: [secret, otpauthUrl, qrDataUrl, setupToken]
@@ -1270,10 +1331,14 @@ components:
 
     TotpAdminDisableInput:
       type: object
-      required: [userId]
+      required: [userId, currentPassword, code]
       properties:
         userId:
           type: number
+        currentPassword:
+          type: string
+        code:
+          type: string
 
     ChangePasswordInput:
       type: object
@@ -1860,6 +1925,13 @@ components:
         facilityId:
           type: number
           description: Target facility; honored only for system administrators.
+        currentPassword:
+          type: string
+          format: password
+          description: Required with code when provisioning a manager role.
+        code:
+          type: string
+          description: Required with currentPassword when provisioning a manager role; accepts TOTP or a backup code.
 
     EmployeeUpdate:
       type: object
@@ -1882,6 +1954,13 @@ components:
           type: string
         isActive:
           type: boolean
+        currentPassword:
+          type: string
+          format: password
+          description: Required with code when role, departmentId, or supervisorId actually changes.
+        code:
+          type: string
+          description: Required with currentPassword when role, departmentId, or supervisorId actually changes; accepts TOTP or a backup code.
 
     # Department
     DepartmentSummary:

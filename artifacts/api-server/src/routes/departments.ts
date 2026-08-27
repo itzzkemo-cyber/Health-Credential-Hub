@@ -1,34 +1,63 @@
 import { Router, type IRouter } from "express";
-import { db, departmentsTable, usersTable } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import {
+  db,
+  auditLogsTable,
+  credentialPoliciesTable,
+  departmentsTable,
+  usersTable,
+  type Department,
+  type User,
+} from "@workspace/db";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { requireAuth, requireRole, getUser, ADMIN_ROLES } from "../lib/auth";
+import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
 import {
   getCredentialsFor,
   getPolicies,
   computeEmployeeStats,
   getScopedUsers,
-  logAudit,
 } from "../lib/helpers";
 
 const router: IRouter = Router();
 
-async function validateDepartmentHead(
-  headId: number | null,
-  facilityId: number,
-): Promise<boolean> {
-  if (headId == null) return true;
-  if (!Number.isSafeInteger(headId) || headId < 1) return false;
-  const head = await db
-    .select({ id: usersTable.id })
-    .from(usersTable)
-    .where(
-      and(
-        eq(usersTable.id, headId),
-        eq(usersTable.facilityId, facilityId),
-        eq(usersTable.isActive, true),
-      ),
-    );
-  return head.length === 1;
+function serializeDepartment(department: Department) {
+  return {
+    id: department.id,
+    name: department.name,
+    nameAr: department.nameAr,
+    facilityId: department.facilityId,
+    headId: department.headId,
+    createdAt: department.createdAt.toISOString(),
+  };
+}
+
+function isCurrentAdmin(actor: User | undefined): actor is User {
+  return Boolean(
+    actor?.isActive &&
+    ADMIN_ROLES.includes(actor.role as (typeof ADMIN_ROLES)[number]),
+  );
+}
+
+function departmentAuditValues(
+  actor: User,
+  action: string,
+  actionAr: string,
+  department: Department,
+  ipAddress: string | undefined,
+  details: string | null = null,
+) {
+  return {
+    userId: actor.id,
+    facilityId: department.facilityId,
+    userName: actor.name,
+    userNameAr: actor.nameAr,
+    action,
+    actionAr,
+    target: department.name,
+    targetAr: department.nameAr,
+    details,
+    ipAddress: ipAddress ?? null,
+  };
 }
 
 router.use("/departments", requireAuth);
@@ -50,7 +79,12 @@ router.get("/departments", async (req, res) => {
   const departments = await db
     .select()
     .from(departmentsTable)
-    .where(eq(departmentsTable.facilityId, facilityId));
+    .where(
+      and(
+        eq(departmentsTable.facilityId, facilityId),
+        isNull(departmentsTable.deletedAt),
+      ),
+    );
   const scopedUsers = (await getScopedUsers(user)).filter(
     (candidate) => candidate.facilityId === facilityId,
   );
@@ -58,7 +92,9 @@ router.get("/departments", async (req, res) => {
   const policies = await getPolicies(facilityId);
 
   const result = departments.map((d) => {
-    const members = scopedUsers.filter((u) => u.departmentId === d.id && u.isActive);
+    const members = scopedUsers.filter(
+      (u) => u.departmentId === d.id && u.isActive,
+    );
     let expiredCount = 0;
     let expiringCount = 0;
     let rateSum = 0;
@@ -69,14 +105,10 @@ router.get("/departments", async (req, res) => {
       rateSum += s.complianceRate;
     }
     return {
-      id: d.id,
-      name: d.name,
-      nameAr: d.nameAr,
-      facilityId: d.facilityId,
-      headId: d.headId,
-      createdAt: d.createdAt.toISOString(),
+      ...serializeDepartment(d),
       employeeCount: members.length,
-      complianceRate: members.length === 0 ? 100 : Math.round(rateSum / members.length),
+      complianceRate:
+        members.length === 0 ? 100 : Math.round(rateSum / members.length),
       expiredCount,
       expiringCount,
     };
@@ -85,46 +117,85 @@ router.get("/departments", async (req, res) => {
 });
 
 router.post("/departments", requireRole(...ADMIN_ROLES), async (req, res) => {
-  const user = getUser(req);
-  const { name, nameAr, headId } = req.body as {
-    name?: string;
-    nameAr?: string;
-    headId?: number | null;
-  };
+  const requestUser = getUser(req);
+  const body = req.body as Record<string, unknown>;
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  const nameAr = typeof body.nameAr === "string" ? body.nameAr.trim() : "";
   if (!name || !nameAr) {
     res.status(400).json({ message: "name and nameAr are required" });
     return;
   }
-  const normalizedHeadId = headId == null ? null : Number(headId);
-  if (!(await validateDepartmentHead(normalizedHeadId, user.facilityId))) {
+  const headId = body.headId == null ? null : Number(body.headId);
+  if (headId != null && (!Number.isSafeInteger(headId) || headId < 1)) {
     res.status(400).json({
       message: "Department head not found in this facility",
     });
     return;
   }
-  const inserted = await db
-    .insert(departmentsTable)
-    .values({
-      name,
-      nameAr,
-      facilityId: user.facilityId,
-      headId: normalizedHeadId,
-    })
-    .returning();
-  const dept = inserted[0];
-  if (!dept) {
-    res.status(500).json({ message: "Insert failed" });
+
+  const result = await db.transaction(async (tx) => {
+    const userIds = [...new Set([requestUser.id, ...(headId ? [headId] : [])])];
+    const lockedUsers = await tx
+      .select()
+      .from(usersTable)
+      .where(inArray(usersTable.id, userIds))
+      .orderBy(usersTable.id)
+      .for("share");
+    const actor = lockedUsers.find(
+      (candidate) => candidate.id === requestUser.id,
+    );
+    if (!isFreshActiveSessionActor(actor, requestUser)) {
+      return { kind: "unauthorized" as const };
+    }
+    if (!isCurrentAdmin(actor)) return { kind: "forbidden" as const };
+    const head =
+      headId == null
+        ? null
+        : lockedUsers.find(
+            (candidate) =>
+              candidate.id === headId &&
+              candidate.facilityId === actor.facilityId &&
+              candidate.isActive,
+          );
+    if (headId != null && !head) return { kind: "invalid_head" as const };
+
+    const department = (
+      await tx
+        .insert(departmentsTable)
+        .values({ name, nameAr, facilityId: actor.facilityId, headId })
+        .returning()
+    )[0];
+    if (!department) throw new Error("Department insert returned no row");
+
+    await tx
+      .insert(auditLogsTable)
+      .values(
+        departmentAuditValues(
+          actor,
+          "Created department",
+          "إنشاء قسم",
+          department,
+          req.ip,
+        ),
+      );
+    return { kind: "ok" as const, department };
+  });
+
+  if (result.kind === "forbidden") {
+    res.status(403).json({ message: "Forbidden" });
     return;
   }
-  await logAudit(user, "Created department", "إنشاء قسم", dept.name, dept.nameAr, undefined, req.ip);
-  res.status(201).json({
-    id: dept.id,
-    name: dept.name,
-    nameAr: dept.nameAr,
-    facilityId: dept.facilityId,
-    headId: dept.headId,
-    createdAt: dept.createdAt.toISOString(),
-  });
+  if (result.kind === "unauthorized") {
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+  if (result.kind === "invalid_head") {
+    res.status(400).json({
+      message: "Department head not found in this facility",
+    });
+    return;
+  }
+  res.status(201).json(serializeDepartment(result.department));
 });
 
 router.get("/departments/:id", async (req, res) => {
@@ -133,94 +204,296 @@ router.get("/departments/:id", async (req, res) => {
   const rows = await db
     .select()
     .from(departmentsTable)
-    .where(eq(departmentsTable.id, id));
-  const dept = rows[0];
-  if (!dept || dept.facilityId !== user.facilityId) {
+    .where(
+      and(
+        eq(departmentsTable.id, id),
+        eq(departmentsTable.facilityId, user.facilityId),
+        isNull(departmentsTable.deletedAt),
+      ),
+    );
+  const department = rows[0];
+  if (!department) {
     res.status(404).json({ message: "Department not found" });
     return;
   }
-  res.json({
-    id: dept.id,
-    name: dept.name,
-    nameAr: dept.nameAr,
-    facilityId: dept.facilityId,
-    headId: dept.headId,
-    createdAt: dept.createdAt.toISOString(),
-  });
+  res.json(serializeDepartment(department));
 });
 
-router.patch("/departments/:id", requireRole(...ADMIN_ROLES), async (req, res) => {
-  const user = getUser(req);
-  const id = Number(req.params.id);
-  const rows = await db
-    .select()
-    .from(departmentsTable)
-    .where(eq(departmentsTable.id, id));
-  const dept = rows[0];
-  if (!dept || dept.facilityId !== user.facilityId) {
-    res.status(404).json({ message: "Department not found" });
-    return;
-  }
-  const body = req.body as Record<string, unknown>;
-  const patch: Record<string, unknown> = {};
-  if (typeof body.name === "string" && body.name.trim())
-    patch.name = body.name.trim();
-  if (typeof body.nameAr === "string" && body.nameAr.trim())
-    patch.nameAr = body.nameAr.trim();
-  if ("headId" in body) {
-    const headId = body.headId == null ? null : Number(body.headId);
-    if (!(await validateDepartmentHead(headId, dept.facilityId))) {
+router.patch(
+  "/departments/:id",
+  requireRole(...ADMIN_ROLES),
+  async (req, res) => {
+    const requestUser = getUser(req);
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) {
+      res.status(404).json({ message: "Department not found" });
+      return;
+    }
+    const body = req.body as Record<string, unknown>;
+    const patch: { name?: string; nameAr?: string; headId?: number | null } =
+      {};
+    if (typeof body.name === "string" && body.name.trim())
+      patch.name = body.name.trim();
+    if (typeof body.nameAr === "string" && body.nameAr.trim())
+      patch.nameAr = body.nameAr.trim();
+    if ("headId" in body) {
+      const headId = body.headId == null ? null : Number(body.headId);
+      if (headId != null && (!Number.isSafeInteger(headId) || headId < 1)) {
+        res.status(400).json({
+          message: "Department head not found in this facility",
+        });
+        return;
+      }
+      patch.headId = headId;
+    }
+    if (Object.keys(patch).length === 0) {
+      res.status(400).json({ message: "No valid department fields supplied" });
+      return;
+    }
+
+    const result = await db.transaction(async (tx) => {
+      const initialActor = (
+        await tx
+          .select()
+          .from(usersTable)
+          .where(eq(usersTable.id, requestUser.id))
+      )[0];
+      if (!isCurrentAdmin(initialActor)) return { kind: "forbidden" as const };
+
+      // Department-referencing mutations lock the department before users. A
+      // concurrent employee assignment takes the same order, so deletion cannot
+      // miss a newly assigned user or form a department<->user deadlock.
+      const department = (
+        await tx
+          .select()
+          .from(departmentsTable)
+          .where(
+            and(
+              eq(departmentsTable.id, id),
+              eq(departmentsTable.facilityId, initialActor.facilityId),
+              isNull(departmentsTable.deletedAt),
+            ),
+          )
+          .for("update")
+      )[0];
+      if (!department) return { kind: "not_found" as const };
+
+      const userIds = [
+        ...new Set([
+          requestUser.id,
+          ...(typeof patch.headId === "number" ? [patch.headId] : []),
+        ]),
+      ];
+      const lockedUsers = await tx
+        .select()
+        .from(usersTable)
+        .where(inArray(usersTable.id, userIds))
+        .orderBy(usersTable.id)
+        .for("share");
+      const actor = lockedUsers.find(
+        (candidate) => candidate.id === requestUser.id,
+      );
+      if (!isFreshActiveSessionActor(actor, requestUser)) {
+        return { kind: "unauthorized" as const };
+      }
+      if (!isCurrentAdmin(actor)) return { kind: "forbidden" as const };
+      if (actor.facilityId !== department.facilityId)
+        return { kind: "not_found" as const };
+
+      if (typeof patch.headId === "number") {
+        const head = lockedUsers.find(
+          (candidate) =>
+            candidate.id === patch.headId &&
+            candidate.facilityId === department.facilityId &&
+            candidate.isActive,
+        );
+        if (!head) return { kind: "invalid_head" as const };
+      }
+
+      const updated = (
+        await tx
+          .update(departmentsTable)
+          .set(patch)
+          .where(
+            and(
+              eq(departmentsTable.id, department.id),
+              eq(departmentsTable.facilityId, department.facilityId),
+              isNull(departmentsTable.deletedAt),
+            ),
+          )
+          .returning()
+      )[0];
+      if (!updated) throw new Error("Department update returned no row");
+
+      await tx
+        .insert(auditLogsTable)
+        .values(
+          departmentAuditValues(
+            actor,
+            "Updated department",
+            "تحديث قسم",
+            updated,
+            req.ip,
+          ),
+        );
+      return { kind: "ok" as const, department: updated };
+    });
+
+    if (result.kind === "forbidden") {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
+    if (result.kind === "unauthorized") {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    if (result.kind === "not_found") {
+      res.status(404).json({ message: "Department not found" });
+      return;
+    }
+    if (result.kind === "invalid_head") {
       res.status(400).json({
         message: "Department head not found in this facility",
       });
       return;
     }
-    patch.headId = headId;
-  }
-  if (Object.keys(patch).length === 0) {
-    res.status(400).json({ message: "No valid department fields supplied" });
-    return;
-  }
-  const updated = await db
-    .update(departmentsTable)
-    .set(patch)
-    .where(eq(departmentsTable.id, id))
-    .returning();
-  const result = updated[0];
-  if (!result) {
-    res.status(500).json({ message: "Update failed" });
-    return;
-  }
-  await logAudit(user, "Updated department", "تحديث قسم", result.name, result.nameAr, undefined, req.ip);
-  res.json({
-    id: result.id,
-    name: result.name,
-    nameAr: result.nameAr,
-    facilityId: result.facilityId,
-    headId: result.headId,
-    createdAt: result.createdAt.toISOString(),
-  });
-});
+    res.json(serializeDepartment(result.department));
+  },
+);
 
-router.delete("/departments/:id", requireRole(...ADMIN_ROLES), async (req, res) => {
-  const user = getUser(req);
-  const id = Number(req.params.id);
-  const rows = await db
-    .select()
-    .from(departmentsTable)
-    .where(eq(departmentsTable.id, id));
-  const dept = rows[0];
-  if (!dept || dept.facilityId !== user.facilityId) {
-    res.status(404).json({ message: "Department not found" });
-    return;
-  }
-  await db
-    .update(usersTable)
-    .set({ departmentId: null })
-    .where(eq(usersTable.departmentId, id));
-  await db.delete(departmentsTable).where(eq(departmentsTable.id, id));
-  await logAudit(user, "Deleted department", "حذف قسم", dept.name, dept.nameAr, undefined, req.ip);
-  res.status(204).end();
-});
+router.delete(
+  "/departments/:id",
+  requireRole(...ADMIN_ROLES),
+  async (req, res) => {
+    const requestUser = getUser(req);
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) {
+      res.status(404).json({ message: "Department not found" });
+      return;
+    }
+
+    const result = await db.transaction(async (tx) => {
+      const initialActor = (
+        await tx
+          .select()
+          .from(usersTable)
+          .where(eq(usersTable.id, requestUser.id))
+      )[0];
+      if (!isCurrentAdmin(initialActor)) return { kind: "forbidden" as const };
+
+      // Lock the department before any user row. Employee assignments use the
+      // same order and re-check that this record is still active while locked.
+      const department = (
+        await tx
+          .select()
+          .from(departmentsTable)
+          .where(
+            and(
+              eq(departmentsTable.id, id),
+              eq(departmentsTable.facilityId, initialActor.facilityId),
+              isNull(departmentsTable.deletedAt),
+            ),
+          )
+          .for("update")
+      )[0];
+      if (!department) return { kind: "not_found" as const };
+
+      const lockedUsers = await tx
+        .select()
+        .from(usersTable)
+        .where(
+          or(
+            eq(usersTable.id, requestUser.id),
+            and(
+              eq(usersTable.facilityId, department.facilityId),
+              eq(usersTable.departmentId, department.id),
+            ),
+          ),
+        )
+        .orderBy(usersTable.id)
+        .for("update");
+      const actor = lockedUsers.find(
+        (candidate) => candidate.id === requestUser.id,
+      );
+      if (!isFreshActiveSessionActor(actor, requestUser)) {
+        return { kind: "unauthorized" as const };
+      }
+      if (!isCurrentAdmin(actor)) return { kind: "forbidden" as const };
+      if (actor.facilityId !== department.facilityId)
+        return { kind: "not_found" as const };
+
+      const detachedUsers = await tx
+        .update(usersTable)
+        .set({
+          departmentId: null,
+          // Removing a department changes every member's organizational
+          // scope; revoke sessions in the same atomic update.
+          sessionVersion: sql`${usersTable.sessionVersion} + 1`,
+        })
+        .where(
+          and(
+            eq(usersTable.facilityId, department.facilityId),
+            eq(usersTable.departmentId, department.id),
+          ),
+        )
+        .returning({ id: usersTable.id });
+      const now = new Date();
+      const retiredPolicies = await tx
+        .update(credentialPoliciesTable)
+        .set({ deletedAt: now, deletedBy: actor.id })
+        .where(
+          and(
+            eq(credentialPoliciesTable.facilityId, department.facilityId),
+            eq(credentialPoliciesTable.departmentId, department.id),
+            isNull(credentialPoliciesTable.deletedAt),
+          ),
+        )
+        .returning({ id: credentialPoliciesTable.id });
+      const deleted = (
+        await tx
+          .update(departmentsTable)
+          .set({ deletedAt: now, deletedBy: actor.id })
+          .where(
+            and(
+              eq(departmentsTable.id, department.id),
+              eq(departmentsTable.facilityId, department.facilityId),
+              isNull(departmentsTable.deletedAt),
+            ),
+          )
+          .returning()
+      )[0];
+      if (!deleted) throw new Error("Department soft deletion returned no row");
+
+      await tx.insert(auditLogsTable).values(
+        departmentAuditValues(
+          actor,
+          "Deleted department",
+          "حذف قسم",
+          deleted,
+          req.ip,
+          JSON.stringify({
+            detachedEmployeeCount: detachedUsers.length,
+            retiredPolicyCount: retiredPolicies.length,
+          }),
+        ),
+      );
+      return { kind: "ok" as const };
+    });
+
+    if (result.kind === "forbidden") {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
+    if (result.kind === "unauthorized") {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    if (result.kind === "not_found") {
+      res.status(404).json({ message: "Department not found" });
+      return;
+    }
+    res.status(204).end();
+  },
+);
 
 export default router;

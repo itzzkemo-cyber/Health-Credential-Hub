@@ -61,6 +61,7 @@ function responseRecorder() {
 describe("temporary-password session gate", () => {
   beforeEach(() => {
     testState.user.mustChangePassword = true;
+    testState.user.sessionVersion = 0;
   });
 
   it("blocks ordinary API access until the temporary password is replaced", async () => {
@@ -113,5 +114,18 @@ describe("temporary-password session gate", () => {
 
     expect(next).toHaveBeenCalledOnce();
     expect(response.status).not.toHaveBeenCalled();
+  });
+
+  it("rejects an older token after the account session version is rotated", async () => {
+    testState.user.mustChangePassword = false;
+    testState.user.sessionVersion = 1;
+    const response = responseRecorder();
+    const next = vi.fn() as NextFunction;
+
+    await requireAuth(requestFor("/api/employees"), response, next);
+
+    expect(response.status).toHaveBeenCalledWith(401);
+    expect(response.json).toHaveBeenCalledWith({ message: "Unauthorized" });
+    expect(next).not.toHaveBeenCalled();
   });
 });

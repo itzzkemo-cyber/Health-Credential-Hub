@@ -1,7 +1,7 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ApiError } from '@workspace/api-client-react';
+import { ApiError, useGetMe } from '@workspace/api-client-react';
 import { clearAuthSession, getAuthUser, isAuthenticated, setAuthSession } from '@/lib/auth';
-import { lazy, Suspense, type ReactNode } from 'react';
+import { lazy, Suspense, type ReactNode, useEffect, useState } from 'react';
 import { Toaster } from 'sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Link, Route, Switch, Router as WouterRouter } from 'wouter';
@@ -104,6 +104,30 @@ function RouteFallback() {
   );
 }
 
+function AuthSessionGate({ children }: { children: ReactNode }) {
+  const { data: user, isError, isSuccess } = useGetMe();
+  const [isResolved, setIsResolved] = useState(false);
+
+  useEffect(() => {
+    if (isSuccess) {
+      setAuthSession(user);
+      setIsResolved(true);
+      return;
+    }
+
+    if (isError) {
+      // A missing, expired, revoked, or unverifiable cookie never inherits a
+      // browser-cached identity. Protected routes remain fail-closed.
+      clearAuthSession();
+      setIsResolved(true);
+    }
+  }, [isError, isSuccess, user]);
+
+  if (!isResolved) return <RouteFallback />;
+
+  return children;
+}
+
 // The session lives in an httpOnly cookie, so the client can't inspect it.
 // When it expires or is revoked the API answers 401 — drop the cached profile
 // and return to the login page.
@@ -199,9 +223,11 @@ function App() {
         <LanguageProvider>
           <TooltipProvider>
             <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-              <Suspense fallback={<RouteFallback />}>
-                <Router />
-              </Suspense>
+              <AuthSessionGate>
+                <Suspense fallback={<RouteFallback />}>
+                  <Router />
+                </Suspense>
+              </AuthSessionGate>
             </WouterRouter>
             <Toaster position="top-center" richColors />
           </TooltipProvider>

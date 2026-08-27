@@ -3,11 +3,12 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import { createHash, randomBytes } from "node:crypto";
 import {
   db,
+  auditLogsTable,
   usersTable,
   passwordResetTokensTable,
   type User,
 } from "@workspace/db";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import {
   signToken,
   signPurposeToken,
@@ -27,14 +28,14 @@ import {
   buildOtpauthUrl,
   verifyOtp,
   generateBackupCodes,
-  hashBackupCode,
-  looksLikeBackupCode,
 } from "../lib/totp";
 import QRCode from "qrcode";
 import { serializeUser, logAudit, syncExpiryNotifications } from "../lib/helpers";
 import { canManageTarget } from "../lib/roleHierarchy";
 import { sessionIssuanceCsrfGuard } from "../lib/csrf";
-import { decryptTotpSecret, encryptTotpSecret } from "../lib/totpSecret";
+import { encryptTotpSecret } from "../lib/totpSecret";
+import { consumeSecondFactor } from "../lib/secondFactor";
+import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
 import { logger } from "../lib/logger";
 import { safeErrorLogFields } from "../lib/safeError";
 import { rateLimit } from "../lib/rateLimit";
@@ -62,6 +63,35 @@ const totpSensitiveRateLimit = rateLimit({
   max: 10,
   windowMs: 10 * 60_000,
 });
+
+// A real bcrypt hash keeps nonexistent-account login attempts on the same
+// expensive verification path as known accounts. The plaintext used to create
+// this fixed hash is deliberately not accepted by any account.
+const INVALID_LOGIN_PASSWORD_HASH =
+  "$2b$10$mIJvHTDiPlLOecA3/wPLPOJRh2/PLKiiTnqSCIiSvC7EJyeg84qJ.";
+
+function auditEntry(
+  user: User,
+  action: string,
+  actionAr: string,
+  target: string,
+  targetAr: string,
+  ipAddress?: string,
+  facilityId: number = user.facilityId,
+) {
+  return {
+    userId: user.id,
+    facilityId,
+    userName: user.name,
+    userNameAr: user.nameAr,
+    action,
+    actionAr,
+    target,
+    targetAr,
+    details: null,
+    ipAddress: ipAddress ?? null,
+  };
+}
 
 /**
  * Complete a successful authentication: sync notifications, audit, then issue
@@ -96,12 +126,11 @@ router.post("/auth/login", loginRateLimit, sessionIssuanceCsrfGuard, async (req,
     .from(usersTable)
     .where(eq(usersTable.email, normalizedEmail));
   const user = rows[0];
-  if (!user || !user.isActive) {
-    res.status(401).json({ message: "Invalid credentials" });
-    return;
-  }
-  const ok = await comparePassword(password, user.passwordHash);
-  if (!ok) {
+  const ok = await comparePassword(
+    password,
+    user?.passwordHash ?? INVALID_LOGIN_PASSWORD_HASH,
+  );
+  if (!user || !user.isActive || !ok) {
     res.status(401).json({ message: "Invalid credentials" });
     return;
   }
@@ -134,25 +163,43 @@ function respondWithTwoFactorChallenge(user: User, res: Response): void {
 
 router.post("/auth/logout", requireAuth, async (req, res) => {
   const user = getUser(req);
-  const updated = (
-    await db
+  const result = await db.transaction(async (tx) => {
+    const locked = (
+      await tx
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.id, user.id))
+        .for("update")
+    )[0];
+    if (!isFreshActiveSessionActor(locked, user)) {
+      return { kind: "unauthorized" as const };
+    }
+    const row = (
+      await tx
       .update(usersTable)
       .set({ sessionVersion: sql`${usersTable.sessionVersion} + 1` })
-      .where(eq(usersTable.id, user.id))
+      .where(
+        and(
+          eq(usersTable.id, locked.id),
+          eq(usersTable.sessionVersion, locked.sessionVersion),
+        ),
+      )
       .returning()
-  )[0]!;
+    )[0];
+    if (!row) return { kind: "unauthorized" as const };
+    await tx.insert(auditLogsTable).values(
+      auditEntry(row, "Signed out", "تسجيل خروج", "Session", "الجلسة", req.ip),
+    );
+    return { kind: "signed_out" as const };
+  });
+  if (result.kind === "unauthorized") {
+    clearSessionCookie(res);
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
   // Logout is global for this account: revoke every bearer token/cookie, then
   // clear the current browser cookie as well.
   clearSessionCookie(res);
-  await logAudit(
-    updated,
-    "Signed out",
-    "تسجيل خروج",
-    "Session",
-    "الجلسة",
-    undefined,
-    req.ip,
-  );
   res.json({});
 });
 
@@ -170,12 +217,59 @@ router.post("/auth/change-password", requireAuth, changePasswordRateLimit, async
     res.status(400).json({ message: "Password must be at least 12 characters" });
     return;
   }
-  const ok = await comparePassword(currentPassword, user.passwordHash);
-  if (!ok) {
+  const nextPasswordHash = await hashPassword(newPassword);
+  const result = await db.transaction(async (tx) => {
+    const locked = (
+      await tx
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.id, user.id))
+        .for("update")
+    )[0];
+    if (!isFreshActiveSessionActor(locked, user)) {
+      return { kind: "unauthorized" as const };
+    }
+    if (!(await comparePassword(currentPassword, locked.passwordHash))) {
+      return { kind: "wrong_password" as const };
+    }
+    if (await comparePassword(newPassword, locked.passwordHash)) {
+      return { kind: "password_reused" as const };
+    }
+    const updated = (
+      await tx
+        .update(usersTable)
+        .set({
+          passwordHash: nextPasswordHash,
+          mustChangePassword: false,
+          // "Log out everywhere": revoke all sessions issued before this change…
+          sessionVersion: sql`${usersTable.sessionVersion} + 1`,
+        })
+        .where(eq(usersTable.id, locked.id))
+        .returning()
+    )[0];
+    if (!updated) return { kind: "wrong_password" as const };
+    await tx.insert(auditLogsTable).values(
+      auditEntry(
+        updated,
+        "Changed password",
+        "تغيير كلمة المرور",
+        "Account",
+        "الحساب",
+        req.ip,
+      ),
+    );
+    return { kind: "updated" as const, user: updated };
+  });
+  if (result.kind === "wrong_password") {
     res.status(400).json({ message: "Current password is incorrect" });
     return;
   }
-  if (await comparePassword(newPassword, user.passwordHash)) {
+  if (result.kind === "unauthorized") {
+    clearSessionCookie(res);
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+  if (result.kind === "password_reused") {
     res.status(400).json({
       code: "PASSWORD_REUSE_NOT_ALLOWED",
       message: "The new password must be different from the current password",
@@ -183,19 +277,7 @@ router.post("/auth/change-password", requireAuth, changePasswordRateLimit, async
     });
     return;
   }
-  const updated = (
-    await db
-      .update(usersTable)
-      .set({
-        passwordHash: await hashPassword(newPassword),
-        mustChangePassword: false,
-        // "Log out everywhere": revoke all sessions issued before this change…
-        sessionVersion: sql`${usersTable.sessionVersion} + 1`,
-      })
-      .where(eq(usersTable.id, user.id))
-      .returning()
-  )[0]!;
-  await logAudit(updated, "Changed password", "تغيير كلمة المرور", "Account", "الحساب");
+  const updated = result.user;
   // …but keep THIS browser alive with a new httpOnly cookie at the new
   // session version. The reusable JWT is deliberately absent from the body.
   const freshToken = signToken(updated.id, updated.sessionVersion);
@@ -223,63 +305,75 @@ function pruneChallengeState(): void {
   }
 }
 
-/**
- * Consume a second factor: either a TOTP code (with atomic replay protection
- * via totp_last_used_step) or a single-use backup code (atomically removed
- * from the jsonb array — concurrent reuse loses on the WHERE guard).
- * Returns the fresh user row on success, null on failure.
- */
-async function consumeSecondFactor(user: User, code: string): Promise<User | null> {
-  if (!user.totpSecret) return null;
-  if (looksLikeBackupCode(code)) {
-    const hash = hashBackupCode(code);
-    const rows = await db
-      .update(usersTable)
-      .set({ backupCodes: sql`${usersTable.backupCodes} - ${hash}` })
-      .where(
-        and(
-          eq(usersTable.id, user.id),
-          sql`${usersTable.backupCodes} ? ${hash}`,
-        ),
-      )
-      .returning();
-    return rows[0] ?? null;
-  }
-  const step = verifyOtp(decryptTotpSecret(user.totpSecret), code);
-  if (step === null) return null;
-  // Replay guard: each 30s time-step may only ever be accepted once, and only
-  // moving forward. The WHERE clause makes concurrent submissions race safely.
-  const rows = await db
-    .update(usersTable)
-    .set({ totpLastUsedStep: step })
-    .where(
-      and(
-        eq(usersTable.id, user.id),
-        sql`(${usersTable.totpLastUsedStep} IS NULL OR ${usersTable.totpLastUsedStep} < ${step})`,
-      ),
-    )
-    .returning();
-  return rows[0] ?? null;
-}
-
 // Step 1 of enabling: generate a secret and hand it back WITHOUT persisting.
 // The signed setup token carries the secret so verify-setup can trust it
 // unmodified; nothing touches the DB until the user proves their app works.
-router.post("/auth/totp/setup", requireAuth, totpSensitiveRateLimit, async (req, res) => {
-  const user = getUser(req);
-  if (user.totpEnabled) {
-    res.status(400).json({
-      message: "Two-factor authentication is already enabled",
-      messageAr: "المصادقة الثنائية مفعّلة مسبقاً",
+router.post(
+  "/auth/totp/setup",
+  requireAuth,
+  totpSensitiveRateLimit,
+  async (req, res) => {
+    const user = getUser(req);
+    const body = req.body as { currentPassword?: unknown };
+    const currentPassword =
+      typeof body.currentPassword === "string" ? body.currentPassword : "";
+    const verifiedActor = await db.transaction(async (tx) => {
+      const locked = (
+        await tx
+          .select()
+          .from(usersTable)
+          .where(eq(usersTable.id, user.id))
+          .for("update")
+      )[0];
+      if (!isFreshActiveSessionActor(locked, user)) {
+        return { kind: "unauthorized" as const };
+      }
+      if (locked.totpEnabled) return { kind: "already_enabled" as const };
+      if (
+        !currentPassword ||
+        !(await comparePassword(currentPassword, locked.passwordHash))
+      ) {
+        return { kind: "step_up_failed" as const };
+      }
+      return { kind: "verified" as const, actor: locked };
     });
-    return;
-  }
-  const secret = generateTotpSecret();
-  const otpauthUrl = buildOtpauthUrl(secret, user.email);
-  const qrDataUrl = await QRCode.toDataURL(otpauthUrl, { margin: 1, width: 240 });
-  const setupToken = signPurposeToken("totp_setup", user.id, { s: secret }, "10m");
-  res.json({ secret, otpauthUrl, qrDataUrl, setupToken });
-});
+    if (verifiedActor.kind === "unauthorized") {
+      clearSessionCookie(res);
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    if (verifiedActor.kind === "already_enabled") {
+      res.status(400).json({
+        message: "Two-factor authentication is already enabled",
+        messageAr: "المصادقة الثنائية مفعّلة مسبقاً",
+      });
+      return;
+    }
+    if (verifiedActor.kind === "step_up_failed") {
+      res.status(403).json({
+        code: "step_up_failed",
+        message: "Current-password verification failed",
+        messageAr: "فشل التحقق من كلمة المرور الحالية",
+      });
+      return;
+    }
+
+    const actor = verifiedActor.actor;
+    const secret = generateTotpSecret();
+    const otpauthUrl = buildOtpauthUrl(secret, actor.email);
+    const qrDataUrl = await QRCode.toDataURL(otpauthUrl, {
+      margin: 1,
+      width: 240,
+    });
+    const setupToken = signPurposeToken(
+      "totp_setup",
+      actor.id,
+      { s: secret, v: actor.sessionVersion },
+      "10m",
+    );
+    res.json({ secret, otpauthUrl, qrDataUrl, setupToken });
+  },
+);
 
 // Step 2 of enabling: first valid OTP activates 2FA and issues backup codes.
 router.post("/auth/totp/verify-setup", requireAuth, totpSensitiveRateLimit, async (req, res) => {
@@ -314,24 +408,66 @@ router.post("/auth/totp/verify-setup", requireAuth, totpSensitiveRateLimit, asyn
     return;
   }
   const codes = generateBackupCodes();
-  await db
-    .update(usersTable)
-    .set({
-      totpSecret: encryptTotpSecret(secret),
-      totpEnabled: true,
-      backupCodes: codes.hashes,
-      totpLastUsedStep: step,
-    })
-    .where(eq(usersTable.id, user.id));
-  await logAudit(
-    user,
-    "Enabled two-factor authentication",
-    "تفعيل المصادقة الثنائية",
-    "Account",
-    "الحساب",
-    undefined,
-    req.ip,
-  );
+  const enabledResult = await db.transaction(async (tx) => {
+    const locked = (
+      await tx
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.id, user.id))
+        .for("update")
+    )[0];
+    if (!isFreshActiveSessionActor(locked, user)) {
+      return { kind: "unauthorized" as const };
+    }
+    if (
+      locked.totpEnabled ||
+      (typeof payload.v === "number" ? payload.v : -1) !==
+        locked.sessionVersion
+    ) {
+      return { kind: "state_changed" as const };
+    }
+    const updated = (
+      await tx
+        .update(usersTable)
+        .set({
+          totpSecret: encryptTotpSecret(secret),
+          totpEnabled: true,
+          backupCodes: codes.hashes,
+          totpLastUsedStep: step,
+          // Existing sessions authenticated without the newly enabled factor.
+          // Revoke them and refresh only this step-up-confirmed browser below.
+          sessionVersion: sql`${usersTable.sessionVersion} + 1`,
+        })
+        .where(eq(usersTable.id, locked.id))
+        .returning()
+    )[0];
+    if (!updated) return { kind: "state_changed" as const };
+    await tx.insert(auditLogsTable).values(
+      auditEntry(
+        updated,
+        "Enabled two-factor authentication",
+        "تفعيل المصادقة الثنائية",
+        "Account",
+        "الحساب",
+        req.ip,
+      ),
+    );
+    return { kind: "enabled" as const, user: updated };
+  });
+  if (enabledResult.kind === "unauthorized") {
+    clearSessionCookie(res);
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+  if (enabledResult.kind === "state_changed") {
+    res.status(409).json({
+      message: "Two-factor authentication state changed — start again",
+      messageAr: "تغيرت حالة المصادقة الثنائية — ابدأ من جديد",
+    });
+    return;
+  }
+  const enabled = enabledResult.user;
+  setSessionCookie(res, signToken(enabled.id, enabled.sessionVersion));
   res.json({ backupCodes: codes.plaintext });
 });
 
@@ -384,24 +520,38 @@ router.post("/auth/totp/challenge", loginRateLimit, sessionIssuanceCsrfGuard, as
   let succeeded = false;
   try {
     const userId = Number(payload.sub);
-    const rows = Number.isFinite(userId)
-      ? await db.select().from(usersTable).where(eq(usersTable.id, userId))
-      : [];
-    const user = rows[0];
-    // The version pin voids challenges issued before a password reset/change.
-    if (
-      !user ||
-      !user.isActive ||
-      !user.totpEnabled ||
-      !user.totpSecret ||
-      (typeof payload.v === "number" ? payload.v : -1) !== user.sessionVersion
-    ) {
+    const consumed = Number.isFinite(userId) && code
+      ? await db.transaction(async (tx) => {
+          const locked = (
+            await tx
+              .select()
+              .from(usersTable)
+              .where(eq(usersTable.id, userId))
+              .for("update")
+          )[0];
+          // The version pin voids challenges issued before a password
+          // reset/change. Recheck it while holding the account lock.
+          if (
+            !locked ||
+            !locked.isActive ||
+            !locked.totpEnabled ||
+            !locked.totpSecret ||
+            (typeof payload.v === "number" ? payload.v : -1) !==
+              locked.sessionVersion
+          ) {
+            return { kind: "expired" as const };
+          }
+          const fresh = await consumeSecondFactor(tx, locked, code);
+          return fresh
+            ? { kind: "accepted" as const, user: fresh }
+            : { kind: "invalid" as const };
+        })
+      : { kind: "expired" as const };
+    if (consumed.kind === "expired") {
       expired();
       return;
     }
-
-    const fresh = code ? await consumeSecondFactor(user, code) : null;
-    if (!fresh) {
+    if (consumed.kind === "invalid") {
       res.status(401).json({
         code: "invalid_code",
         message: "The verification code is incorrect",
@@ -411,7 +561,13 @@ router.post("/auth/totp/challenge", loginRateLimit, sessionIssuanceCsrfGuard, as
     }
     challengeAttempts.delete(jti);
     succeeded = true;
-    await issueSession(fresh, req, res, "Signed in (2FA)", "تسجيل دخول (تحقق ثنائي)");
+    await issueSession(
+      consumed.user,
+      req,
+      res,
+      "Signed in (2FA)",
+      "تسجيل دخول (تحقق ثنائي)",
+    );
   } finally {
     // Any non-success exit releases the in-flight claim so the user can retry
     // with the same challenge; the attempt above stays counted either way.
@@ -427,14 +583,67 @@ router.delete("/auth/totp/disable", requireAuth, totpSensitiveRateLimit, async (
   const currentPassword =
     typeof body.currentPassword === "string" ? body.currentPassword : "";
   const code = typeof body.code === "string" ? body.code.trim() : "";
-  if (!user.totpEnabled) {
+  const result = await db.transaction(async (tx) => {
+    const locked = (
+      await tx
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.id, user.id))
+        .for("update")
+    )[0];
+    if (!isFreshActiveSessionActor(locked, user)) {
+      return { kind: "unauthorized" as const };
+    }
+    if (!locked.totpEnabled || !locked.totpSecret) {
+      return { kind: "not_enabled" as const };
+    }
+    if (
+      !currentPassword ||
+      !(await comparePassword(currentPassword, locked.passwordHash))
+    ) {
+      return { kind: "wrong_password" as const };
+    }
+    const fresh = code ? await consumeSecondFactor(tx, locked, code) : null;
+    if (!fresh) return { kind: "invalid_code" as const };
+    const updated = (
+      await tx
+        .update(usersTable)
+        .set({
+          totpSecret: null,
+          totpEnabled: false,
+          backupCodes: null,
+          totpLastUsedStep: null,
+          sessionVersion: sql`${usersTable.sessionVersion} + 1`,
+        })
+        .where(eq(usersTable.id, locked.id))
+        .returning()
+    )[0];
+    if (!updated) return { kind: "not_enabled" as const };
+    await tx.insert(auditLogsTable).values(
+      auditEntry(
+        updated,
+        "Disabled two-factor authentication",
+        "إلغاء تفعيل المصادقة الثنائية",
+        "Account",
+        "الحساب",
+        req.ip,
+      ),
+    );
+    return { kind: "disabled" as const, user: updated };
+  });
+  if (result.kind === "not_enabled") {
     res.status(400).json({
       message: "Two-factor authentication is not enabled",
       messageAr: "المصادقة الثنائية غير مفعّلة",
     });
     return;
   }
-  if (!currentPassword || !(await comparePassword(currentPassword, user.passwordHash))) {
+  if (result.kind === "unauthorized") {
+    clearSessionCookie(res);
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+  if (result.kind === "wrong_password") {
     res.status(400).json({
       code: "wrong_password",
       message: "Current password is incorrect",
@@ -442,8 +651,7 @@ router.delete("/auth/totp/disable", requireAuth, totpSensitiveRateLimit, async (
     });
     return;
   }
-  const fresh = code ? await consumeSecondFactor(user, code) : null;
-  if (!fresh) {
+  if (result.kind === "invalid_code") {
     res.status(400).json({
       code: "invalid_code",
       message: "The verification code is incorrect",
@@ -451,24 +659,7 @@ router.delete("/auth/totp/disable", requireAuth, totpSensitiveRateLimit, async (
     });
     return;
   }
-  await db
-    .update(usersTable)
-    .set({
-      totpSecret: null,
-      totpEnabled: false,
-      backupCodes: null,
-      totpLastUsedStep: null,
-    })
-    .where(eq(usersTable.id, user.id));
-  await logAudit(
-    user,
-    "Disabled two-factor authentication",
-    "إلغاء تفعيل المصادقة الثنائية",
-    "Account",
-    "الحساب",
-    undefined,
-    req.ip,
-  );
+  setSessionCookie(res, signToken(result.user.id, result.user.sessionVersion));
   res.json({});
 });
 
@@ -480,14 +671,62 @@ router.post("/auth/totp/regenerate-backup", requireAuth, totpSensitiveRateLimit,
   const currentPassword =
     typeof body.currentPassword === "string" ? body.currentPassword : "";
   const code = typeof body.code === "string" ? body.code.trim() : "";
-  if (!user.totpEnabled || !user.totpSecret) {
+  const codes = generateBackupCodes();
+  const result = await db.transaction(async (tx) => {
+    const locked = (
+      await tx
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.id, user.id))
+        .for("update")
+    )[0];
+    if (!isFreshActiveSessionActor(locked, user)) {
+      return "unauthorized" as const;
+    }
+    if (!locked.totpEnabled || !locked.totpSecret) {
+      return "not_enabled" as const;
+    }
+    if (
+      !currentPassword ||
+      !(await comparePassword(currentPassword, locked.passwordHash))
+    ) {
+      return "wrong_password" as const;
+    }
+    const fresh = code ? await consumeSecondFactor(tx, locked, code) : null;
+    if (!fresh) return "invalid_code" as const;
+    const updated = (
+      await tx
+        .update(usersTable)
+        .set({ backupCodes: codes.hashes })
+        .where(eq(usersTable.id, locked.id))
+        .returning()
+    )[0];
+    if (!updated) return "not_enabled" as const;
+    await tx.insert(auditLogsTable).values(
+      auditEntry(
+        updated,
+        "Regenerated 2FA backup codes",
+        "إعادة توليد الرموز الاحتياطية للمصادقة الثنائية",
+        "Account",
+        "الحساب",
+        req.ip,
+      ),
+    );
+    return "regenerated" as const;
+  });
+  if (result === "not_enabled") {
     res.status(400).json({
       message: "Two-factor authentication is not enabled",
       messageAr: "المصادقة الثنائية غير مفعّلة",
     });
     return;
   }
-  if (!currentPassword || !(await comparePassword(currentPassword, user.passwordHash))) {
+  if (result === "unauthorized") {
+    clearSessionCookie(res);
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+  if (result === "wrong_password") {
     res.status(400).json({
       code: "wrong_password",
       message: "Current password is incorrect",
@@ -495,8 +734,7 @@ router.post("/auth/totp/regenerate-backup", requireAuth, totpSensitiveRateLimit,
     });
     return;
   }
-  const fresh = code ? await consumeSecondFactor(user, code) : null;
-  if (!fresh) {
+  if (result === "invalid_code") {
     res.status(400).json({
       code: "invalid_code",
       message: "The verification code is incorrect",
@@ -504,25 +742,12 @@ router.post("/auth/totp/regenerate-backup", requireAuth, totpSensitiveRateLimit,
     });
     return;
   }
-  const codes = generateBackupCodes();
-  await db
-    .update(usersTable)
-    .set({ backupCodes: codes.hashes })
-    .where(eq(usersTable.id, user.id));
-  await logAudit(
-    user,
-    "Regenerated 2FA backup codes",
-    "إعادة توليد الرموز الاحتياطية للمصادقة الثنائية",
-    "Account",
-    "الحساب",
-    undefined,
-    req.ip,
-  );
   res.json({ backupCodes: codes.plaintext });
 });
 
-// Admin recovery path: an account admin can switch 2FA off for a locked-out
-// user (no password/OTP — the admin's own authenticated role is the authority).
+// Admin recovery path: a fully stepped-up administrator can switch 2FA off for
+// a lower-ranked, in-scope account. A long-lived/stolen session is insufficient:
+// the actor must re-prove their password and their own second factor.
 router.post(
   "/auth/totp/admin-disable",
   requireAuth,
@@ -530,7 +755,14 @@ router.post(
   totpSensitiveRateLimit,
   async (req, res) => {
     const admin = getUser(req);
-    const body = req.body as { userId?: unknown };
+    const body = req.body as {
+      userId?: unknown;
+      currentPassword?: unknown;
+      code?: unknown;
+    };
+    const currentPassword =
+      typeof body.currentPassword === "string" ? body.currentPassword : "";
+    const code = typeof body.code === "string" ? body.code.trim() : "";
     const targetId =
       typeof body.userId === "number" &&
       Number.isInteger(body.userId) &&
@@ -541,19 +773,9 @@ router.post(
       res.status(400).json({ message: "userId is required" });
       return;
     }
-    const target = (
-      await db.select().from(usersTable).where(eq(usersTable.id, targetId))
-    )[0];
-    if (!target) {
-      res.status(404).json({
-        message: "Employee not found",
-        messageAr: "الموظف غير موجود",
-      });
-      return;
-    }
     // The recovery path must never become a self-service bypass of the
     // password+second-factor requirement in /auth/totp/disable.
-    if (target.id === admin.id) {
+    if (targetId === admin.id) {
       res.status(403).json({
         message:
           "Use the regular disable flow (password + code) for your own account",
@@ -562,44 +784,108 @@ router.post(
       });
       return;
     }
+    const result = await db.transaction(async (tx) => {
+      // Stable lock order prevents role/facility changes from racing the final
+      // recovery decision and avoids actor/target deadlocks.
+      const lockedUsers = await tx
+        .select()
+        .from(usersTable)
+        .where(inArray(usersTable.id, [admin.id, targetId]))
+        .orderBy(usersTable.id)
+        .for("update");
+      const actor = lockedUsers.find((entry) => entry.id === admin.id);
+      const target = lockedUsers.find((entry) => entry.id === targetId);
+      if (!isFreshActiveSessionActor(actor, admin)) {
+        return { kind: "unauthorized" as const };
+      }
+      if (
+        !ADMIN_ROLES.includes(actor.role) ||
+        !target ||
+        !canManageTarget(actor, target)
+      ) {
+        return { kind: "not_found" as const };
+      }
+      if (!target.totpEnabled) return { kind: "not_enabled" as const };
+      if (!actor.totpEnabled || !actor.totpSecret) {
+        return { kind: "admin_mfa_required" as const };
+      }
+      if (
+        !currentPassword ||
+        !(await comparePassword(currentPassword, actor.passwordHash))
+      ) {
+        return { kind: "step_up_failed" as const };
+      }
+      const steppedUp = code
+        ? await consumeSecondFactor(tx, actor, code)
+        : null;
+      if (!steppedUp) return { kind: "step_up_failed" as const };
+
+      const updated = (
+        await tx
+          .update(usersTable)
+          .set({
+            totpSecret: null,
+            totpEnabled: false,
+            backupCodes: null,
+            totpLastUsedStep: null,
+            // Administrative recovery is a high-impact account change. Revoke
+            // every target session and any outstanding 2FA challenge token.
+            sessionVersion: sql`${usersTable.sessionVersion} + 1`,
+          })
+          .where(eq(usersTable.id, target.id))
+          .returning()
+      )[0];
+      if (!updated) return { kind: "not_found" as const };
+      await tx.insert(auditLogsTable).values(
+        auditEntry(
+          actor,
+          `Disabled two-factor authentication for ${target.name}`,
+          `إلغاء تفعيل المصادقة الثنائية للموظف ${target.nameAr}`,
+          "Account",
+          "الحساب",
+          req.ip,
+          target.facilityId,
+        ),
+      );
+      return { kind: "disabled" as const };
+    });
     // Do not reveal whether an out-of-scope or equal/higher-ranked account
     // exists. System admins remain the only global recovery authority.
-    if (!canManageTarget(admin, target)) {
+    if (result.kind === "not_found") {
       res.status(404).json({
         message: "Employee not found",
         messageAr: "الموظف غير موجود",
       });
       return;
     }
-    if (!target.totpEnabled) {
+    if (result.kind === "unauthorized") {
+      clearSessionCookie(res);
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    if (result.kind === "not_enabled") {
       res.status(400).json({
         message: "Two-factor authentication is not enabled for this account",
         messageAr: "المصادقة الثنائية غير مفعّلة لهذا الحساب",
       });
       return;
     }
-    await db
-      .update(usersTable)
-      .set({
-        totpSecret: null,
-        totpEnabled: false,
-        backupCodes: null,
-        totpLastUsedStep: null,
-        // Administrative recovery is a high-impact account change. Revoke
-        // every target session and any outstanding 2FA challenge token.
-        sessionVersion: sql`${usersTable.sessionVersion} + 1`,
-      })
-      .where(eq(usersTable.id, target.id));
-    await logAudit(
-      admin,
-      `Disabled two-factor authentication for ${target.name}`,
-      `إلغاء تفعيل المصادقة الثنائية للموظف ${target.nameAr}`,
-      "Account",
-      "الحساب",
-      undefined,
-      req.ip,
-      target.facilityId,
-    );
+    if (result.kind === "admin_mfa_required") {
+      res.status(403).json({
+        code: "admin_mfa_required",
+        message: "Enable two-factor authentication on your admin account first",
+        messageAr: "فعّل المصادقة الثنائية لحساب المسؤول أولاً",
+      });
+      return;
+    }
+    if (result.kind === "step_up_failed") {
+      res.status(403).json({
+        code: "step_up_failed",
+        message: "Administrator step-up verification failed",
+        messageAr: "فشل التحقق الإضافي من هوية المسؤول",
+      });
+      return;
+    }
     res.json({});
   },
 );
@@ -614,36 +900,46 @@ router.post("/auth/forgot-password", recoveryRateLimit, async (req, res) => {
   res.json({});
   if (!email) return;
   try {
-    const rows = await db.select().from(usersTable).where(eq(usersTable.email, email));
-    const user = rows[0];
-    if (!user || !user.isActive) return;
-
     const rawToken = randomBytes(32).toString("hex");
     const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-    // Single-active-link policy: requesting a new link voids older unused ones.
-    await db
-      .update(passwordResetTokensTable)
-      .set({ usedAt: new Date() })
-      .where(
-        and(
-          eq(passwordResetTokensTable.userId, user.id),
-          isNull(passwordResetTokensTable.usedAt),
+    const user = await db.transaction(async (tx) => {
+      const locked = (
+        await tx
+          .select()
+          .from(usersTable)
+          .where(eq(usersTable.email, email))
+          .for("update")
+      )[0];
+      if (!locked || !locked.isActive) return null;
+      // Single-active-link policy: requesting a new link voids older unused
+      // ones in the same transaction that creates and audits the replacement.
+      await tx
+        .update(passwordResetTokensTable)
+        .set({ usedAt: new Date() })
+        .where(
+          and(
+            eq(passwordResetTokensTable.userId, locked.id),
+            isNull(passwordResetTokensTable.usedAt),
+          ),
+        );
+      await tx.insert(passwordResetTokensTable).values({
+        userId: locked.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+      });
+      await tx.insert(auditLogsTable).values(
+        auditEntry(
+          locked,
+          "Requested password reset",
+          "طلب إعادة تعيين كلمة المرور",
+          "Account",
+          "الحساب",
+          req.ip,
         ),
       );
-    await db.insert(passwordResetTokensTable).values({
-      userId: user.id,
-      tokenHash,
-      expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+      return locked;
     });
-    await logAudit(
-      user,
-      "Requested password reset",
-      "طلب إعادة تعيين كلمة المرور",
-      "Account",
-      "الحساب",
-      undefined,
-      req.ip,
-    );
+    if (!user) return;
 
     const resetUrl = getPasswordResetUrl(rawToken);
     if (!resetUrl || !isEmailConfigured() || isFixtureRecipient(user.email)) {
@@ -693,53 +989,73 @@ router.post("/auth/reset-password", recoveryRateLimit, sessionIssuanceCsrfGuard,
     });
 
   const tokenHash = createHash("sha256").update(token).digest("hex");
-  // Atomic claim: flipping usedAt in the WHERE-guarded UPDATE means a token
-  // can only ever be consumed once, even under concurrent submissions.
-  const claimed = await db
-    .update(passwordResetTokensTable)
-    .set({ usedAt: new Date() })
-    .where(
-      and(
-        eq(passwordResetTokensTable.tokenHash, tokenHash),
-        isNull(passwordResetTokensTable.usedAt),
-        gt(passwordResetTokensTable.expiresAt, new Date()),
+  const nextPasswordHash = await hashPassword(newPassword);
+  const updated = await db.transaction(async (tx) => {
+    const resetToken = (
+      await tx
+        .select()
+        .from(passwordResetTokensTable)
+        .where(
+          and(
+            eq(passwordResetTokensTable.tokenHash, tokenHash),
+            isNull(passwordResetTokensTable.usedAt),
+            gt(passwordResetTokensTable.expiresAt, new Date()),
+          ),
+        )
+    )[0];
+    if (!resetToken) return null;
+    // Lock accounts before reset-token rows, matching forgot-password's lock
+    // order. The later WHERE-guarded UPDATE is still the single-use claim.
+    const locked = (
+      await tx
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.id, resetToken.userId))
+        .for("update")
+    )[0];
+    if (!locked || !locked.isActive) return null;
+    const claimed = await tx
+      .update(passwordResetTokensTable)
+      .set({ usedAt: new Date() })
+      .where(
+        and(
+          eq(passwordResetTokensTable.id, resetToken.id),
+          isNull(passwordResetTokensTable.usedAt),
+          gt(passwordResetTokensTable.expiresAt, new Date()),
+        ),
+      )
+      .returning();
+    if (!claimed[0]) return null;
+    const row = (
+      await tx
+        .update(usersTable)
+        .set({
+          passwordHash: nextPasswordHash,
+          mustChangePassword: false,
+          // Revoke every existing session — a stolen cookie/token must not
+          // survive an account-recovery reset.
+          sessionVersion: sql`${usersTable.sessionVersion} + 1`,
+        })
+        .where(eq(usersTable.id, locked.id))
+        .returning()
+    )[0];
+    if (!row) return null;
+    await tx.insert(auditLogsTable).values(
+      auditEntry(
+        row,
+        "Reset password via email link",
+        "إعادة تعيين كلمة المرور عبر رابط البريد",
+        "Account",
+        "الحساب",
+        req.ip,
       ),
-    )
-    .returning();
-  const claimedToken = claimed[0];
-  if (!claimedToken) {
+    );
+    return row;
+  });
+  if (!updated) {
     invalid();
     return;
   }
-  const user = (
-    await db.select().from(usersTable).where(eq(usersTable.id, claimedToken.userId))
-  )[0];
-  if (!user || !user.isActive) {
-    invalid();
-    return;
-  }
-  const updated = (
-    await db
-      .update(usersTable)
-      .set({
-        passwordHash: await hashPassword(newPassword),
-        mustChangePassword: false,
-        // Revoke every existing session — a stolen cookie/token must not
-        // survive an account-recovery reset.
-        sessionVersion: sql`${usersTable.sessionVersion} + 1`,
-      })
-      .where(eq(usersTable.id, user.id))
-      .returning()
-  )[0]!;
-  await logAudit(
-    updated,
-    "Reset password via email link",
-    "إعادة تعيين كلمة المرور عبر رابط البريد",
-    "Account",
-    "الحساب",
-    undefined,
-    req.ip,
-  );
   // A password reset proves email control, not the second factor — 2FA
   // accounts still have to pass the OTP challenge before getting a session.
   if (updated.totpEnabled && !updated.totpSecret) {

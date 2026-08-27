@@ -1,4 +1,4 @@
-import { useDeferredValue, useState } from "react";
+import { useDeferredValue, useRef, useState } from "react";
 import {
   ApiError,
   type EmployeeWithStats,
@@ -22,6 +22,7 @@ import {
   Loader2,
   Plus,
   Search,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -63,8 +64,21 @@ import {
   getSupervisorOptions,
   getAssignableRoles,
   isPasswordDeliveryReady,
+  requiresEmployeeCreateStepUp,
 } from "./employee-list-state";
 import { getDepartmentQueryParams } from "./department-query";
+import {
+  ADMIN_MFA_CODE_FIELD,
+  ADMIN_MFA_CURRENT_PASSWORD_FIELD,
+  getAdminMfaStepUpErrorKey,
+  readAdminMfaStepUpCredentials,
+} from "./admin-mfa-step-up";
+
+function apiErrorCode(error: unknown): string | undefined {
+  return error instanceof ApiError
+    ? (error.data as { code?: string } | null)?.code
+    : undefined;
+}
 
 export default function EmployeesList() {
   const { t, isRTL } = useLanguage();
@@ -81,6 +95,11 @@ export default function EmployeesList() {
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
   const [passwordDeliveryAcknowledged, setPasswordDeliveryAcknowledged] =
     useState(false);
+  const [createFeedbackKey, setCreateFeedbackKey] = useState<string | null>(
+    null,
+  );
+  const createStepUpPasswordRef = useRef<HTMLInputElement>(null);
+  const createStepUpCodeRef = useRef<HTMLInputElement>(null);
   const [employeeForm, setEmployeeForm] = useState(() =>
     createEmptyEmployeeForm(isSystemAdmin ? user?.facilityId : undefined),
   );
@@ -119,7 +138,7 @@ export default function EmployeesList() {
       enabled: canCreateEmployee && isCreateOpen,
     },
   });
-  const createEmployee = useCreateEmployee();
+  const createEmployee = useCreateEmployee({ mutation: { gcTime: 0 } });
   const employees = employeesQuery.data ?? [];
   const assignableRoles = getAssignableRoles(user?.role ?? "");
   const managementDirectory = managementDirectoryQuery.data ?? [];
@@ -133,15 +152,35 @@ export default function EmployeesList() {
     null,
     selectedFacilityId,
   );
+  const createRequiresStepUp = requiresEmployeeCreateStepUp(employeeForm.role);
 
-  const openCreateEmployee = () => {
+  const clearCreateStepUpSecrets = () => {
+    if (createStepUpPasswordRef.current) {
+      createStepUpPasswordRef.current.value = "";
+    }
+    if (createStepUpCodeRef.current) createStepUpCodeRef.current.value = "";
+  };
+
+  const resetCreateEmployeeForm = () => {
+    clearCreateStepUpSecrets();
     createEmployee.reset();
     setEmployeeForm(
       createEmptyEmployeeForm(isSystemAdmin ? user?.facilityId : undefined),
     );
     setShowTemporaryPassword(false);
     setPasswordDeliveryAcknowledged(false);
+    setCreateFeedbackKey(null);
+  };
+
+  const openCreateEmployee = () => {
+    resetCreateEmployeeForm();
     setIsCreateOpen(true);
+  };
+
+  const closeCreateEmployee = () => {
+    if (createEmployee.isPending) return;
+    resetCreateEmployeeForm();
+    setIsCreateOpen(false);
   };
 
   const generatePassword = () => {
@@ -163,7 +202,7 @@ export default function EmployeesList() {
     }
   };
 
-  const handleCreateEmployee = (event: React.FormEvent) => {
+  const handleCreateEmployee = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (
       !isPasswordDeliveryReady(
@@ -174,12 +213,25 @@ export default function EmployeesList() {
       return;
     }
 
+    setCreateFeedbackKey(null);
+    const form = event.currentTarget;
+    const stepUp = createRequiresStepUp
+      ? readAdminMfaStepUpCredentials(new FormData(form))
+      : undefined;
+    if (createRequiresStepUp && !stepUp) {
+      setCreateFeedbackKey("employees_page.step_up_required");
+      createStepUpPasswordRef.current?.focus();
+      return;
+    }
+
     createEmployee.mutate(
       {
-        data: buildEmployeeInput(employeeForm),
+        data: buildEmployeeInput(employeeForm, stepUp ?? undefined),
       },
       {
         onSuccess: () => {
+          clearCreateStepUpSecrets();
+          createEmployee.reset();
           toast.success(t("employees_page.create_success"));
           setIsCreateOpen(false);
           setEmployeeForm(
@@ -189,19 +241,30 @@ export default function EmployeesList() {
           );
           setShowTemporaryPassword(false);
           setPasswordDeliveryAcknowledged(false);
+          setCreateFeedbackKey(null);
           void queryClient.invalidateQueries({
             queryKey: getListEmployeesQueryKey(),
           });
         },
+        onError: (error) => {
+          const fallbackKey =
+            error instanceof ApiError && error.status === 409
+              ? "employees_page.email_exists"
+              : "employees_page.create_failed";
+          const errorKey = getAdminMfaStepUpErrorKey(
+            apiErrorCode(error),
+            fallbackKey,
+          );
+          clearCreateStepUpSecrets();
+          createEmployee.reset();
+          setCreateFeedbackKey(errorKey);
+          requestAnimationFrame(() =>
+            createStepUpPasswordRef.current?.focus(),
+          );
+        },
       },
     );
   };
-
-  const createErrorKey =
-    createEmployee.error instanceof ApiError &&
-    createEmployee.error.status === 409
-      ? "employees_page.email_exists"
-      : "employees_page.create_failed";
 
   return (
     <div className="space-y-5 animate-in fade-in duration-500 sm:space-y-6">
@@ -316,20 +379,11 @@ export default function EmployeesList() {
       <Dialog
         open={isCreateOpen}
         onOpenChange={(open) => {
-          setIsCreateOpen(open);
-          if (!open) {
-            createEmployee.reset();
-            setEmployeeForm(
-              createEmptyEmployeeForm(
-                isSystemAdmin ? user?.facilityId : undefined,
-              ),
-            );
-            setShowTemporaryPassword(false);
-            setPasswordDeliveryAcknowledged(false);
-          }
+          if (open) setIsCreateOpen(true);
+          else closeCreateEmployee();
         }}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("employees_page.add_employee")}</DialogTitle>
             <DialogDescription>
@@ -446,9 +500,11 @@ export default function EmployeesList() {
                 </Label>
                 <Select
                   value={employeeForm.role}
-                  onValueChange={(role) =>
+                  onValueChange={(role) => {
+                    clearCreateStepUpSecrets();
+                    setCreateFeedbackKey(null);
                     setEmployeeForm((previous) => ({ ...previous, role }))
-                  }
+                  }}
                 >
                   <SelectTrigger id="employee-role" className="min-h-11">
                     <SelectValue />
@@ -539,6 +595,71 @@ export default function EmployeesList() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {createRequiresStepUp && (
+                <section
+                  className="space-y-4 rounded-xl border border-primary/20 bg-primary/5 p-4 sm:col-span-2"
+                  aria-labelledby="create-step-up-title"
+                  aria-describedby="create-step-up-description"
+                >
+                  <div className="flex items-start gap-3">
+                    <ShieldCheck
+                      className="mt-0.5 h-5 w-5 shrink-0 text-primary"
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0">
+                      <h3 id="create-step-up-title" className="font-semibold">
+                        {t("employees_page.step_up_title")}
+                      </h3>
+                      <p
+                        id="create-step-up-description"
+                        className="mt-1 text-sm leading-6 text-muted-foreground"
+                      >
+                        {t("employees_page.create_step_up_hint")}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="create-step-up-password">
+                        {t("twofa.current_password")}
+                      </Label>
+                      <Input
+                        ref={createStepUpPasswordRef}
+                        id="create-step-up-password"
+                        name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
+                        type="password"
+                        dir="ltr"
+                        autoComplete="current-password"
+                        aria-describedby="create-step-up-description"
+                        required
+                        className="min-h-11"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="create-step-up-code">
+                        {t("twofa.code_label")}
+                      </Label>
+                      <Input
+                        ref={createStepUpCodeRef}
+                        id="create-step-up-code"
+                        name={ADMIN_MFA_CODE_FIELD}
+                        type="text"
+                        dir="ltr"
+                        inputMode="text"
+                        autoComplete="one-time-code"
+                        autoCapitalize="characters"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        aria-describedby="create-step-up-description"
+                        placeholder="123456 / XXXXX-XXXXX"
+                        required
+                        className="min-h-11 font-mono"
+                      />
+                    </div>
+                  </div>
+                </section>
+              )}
 
               <div className="space-y-2 sm:col-span-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -634,12 +755,12 @@ export default function EmployeesList() {
               </div>
             </div>
 
-            {createEmployee.isError && (
+            {createFeedbackKey && (
               <p
                 className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
                 role="alert"
               >
-                {t(createErrorKey)}
+                {t(createFeedbackKey)}
               </p>
             )}
 
@@ -647,7 +768,7 @@ export default function EmployeesList() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setIsCreateOpen(false)}
+                onClick={closeCreateEmployee}
                 className="min-h-11 w-full sm:w-auto"
               >
                 {t("common.cancel")}

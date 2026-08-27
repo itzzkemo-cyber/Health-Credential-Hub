@@ -28,6 +28,7 @@ export const en = {
     actions: "Actions",
     all: "All",
     loading: "Loading…",
+    close: "Close",
     retry: "Try again",
     load_error_title: "We couldn't load this information",
     load_error_description:
@@ -119,8 +120,13 @@ export const en = {
     enable: "Enable two-factor authentication",
     disable: "Disable",
     regenerate: "New backup codes",
+    setup_password_title: "Confirm your identity before setup",
+    setup_password_hint:
+      "Enter your current password before creating a new two-factor authentication secret and QR code.",
+    setup_continue: "Continue secure setup",
     setup_title: "Enable two-factor authentication",
     setup_scan: "Scan the QR code with the authenticator app on your phone",
+    setup_qr_alt: "QR code for two-factor authentication setup",
     setup_manual: "Or enter this key manually in the app:",
     setup_code_label: "Then enter the 6-digit code shown in the app",
     activate: "Verify & enable",
@@ -129,6 +135,10 @@ export const en = {
       "Store these codes somewhere safe — they are shown only once and each works a single time. They are your only way in if you lose your phone.",
     codes_copy: "Copy codes",
     codes_copied: "Codes copied",
+    copy_failed:
+      "Copying failed. Select the key or codes and save them manually.",
+    secret_copy: "Copy the authenticator setup key",
+    secret_copied: "Authenticator setup key copied",
     codes_download: "Download as file",
     codes_saved: "I saved the codes — close",
     disable_title: "Disable two-factor authentication",
@@ -156,10 +166,16 @@ export const en = {
     admin_badge: "Two-factor authentication enabled",
     admin_disable: "Disable employee's 2FA",
     admin_disable_hint:
-      "Use only when the employee lost access to their authenticator app and backup codes. They will be able to sign in with password only and re-enable it.",
+      "Use only when the employee lost access to their authenticator app and backup codes. Confirm this recovery action with your current administrator password and your own verification code.",
     admin_disable_confirm: "Yes, disable it",
     admin_disabled_success:
       "Two-factor authentication disabled for this employee",
+    admin_mfa_required:
+      "Enable two-factor authentication on your administrator account before making this protected administrative change.",
+    admin_step_up_failed:
+      "We could not verify your administrator password and verification code.",
+    admin_disable_failed:
+      "Two-factor authentication could not be disabled. Check your access and try again.",
   },
   reset_password: {
     title: "Set a new password",
@@ -287,6 +303,13 @@ export const en = {
     no_department: "No department",
     supervisor: "Supervisor",
     no_supervisor: "No supervisor",
+    step_up_title: "Confirm protected administrative change",
+    create_step_up_hint:
+      "Creating an account with a supervisory or administrative role requires your current password and two-factor code or a backup code.",
+    update_step_up_hint:
+      "Changing the role, department, or supervisor requires your current password and two-factor code or a backup code.",
+    step_up_required:
+      "Enter your current administrator password and verification code to complete this change.",
     temporary_password: "Temporary password",
     generate_password: "Generate strong password",
     show_password: "Show temporary password",
@@ -378,7 +401,9 @@ export const en = {
     add_subtitle: "Upload a new professional certificate or license.",
     uploading_title: "Uploading document…",
     uploading_hint: "Keep this page open until the upload is complete",
-    upload_success: "File uploaded successfully",
+    saving_title: "Saving document…",
+    cleanup_failed:
+      "The document was not saved and cleanup could not be confirmed. Do not retry yet; contact your administrator.",
     employee_required: "The employee for this document could not be identified",
     date_order_error: "The expiry date must be after the issue date",
     invalid_date: "Invalid date",
@@ -388,14 +413,15 @@ export const en = {
     uploading_for: "Uploading for employee",
     owner_loading: "Loading the selected employee…",
     private_upload_notice:
-      "The document is uploaded to private encrypted storage. Do not share upload links or document images outside the platform.",
+      "The selected file stays on this device until you save. After upload, it remains private and can be viewed only by you and authorized staff within your facility.",
     manual_upload_hint: "Optional: attach an image or PDF (maximum 8 MB).",
     select_type: "Select document type",
     english: "English",
     arabic: "Arabic",
     save_document: "Save Document",
-    file_ready: "The file is ready to be saved with the document details",
+    file_ready: "Selected locally — it will upload only when you save",
     replace_file: "Replace File",
+    remove_file: "Remove File",
     choose_file: "Choose Image or PDF",
     load_error: "Could not load the document",
     deleted: "Document deleted",

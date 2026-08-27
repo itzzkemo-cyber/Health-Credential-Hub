@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetMe,
@@ -39,6 +39,14 @@ import {
 import { ShieldCheck, Copy, Download, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { QueryErrorState } from "@/components/QueryErrorState";
+import { copyTextToClipboard } from "@/lib/clipboard";
+import {
+  ADMIN_MFA_CODE_FIELD,
+  ADMIN_MFA_CURRENT_PASSWORD_FIELD,
+  readAdminMfaStepUpCredentials,
+  readCurrentPassword,
+  readVerificationCode,
+} from "@/pages/employees/admin-mfa-step-up";
 
 function apiErrorCode(err: unknown): string | undefined {
   return err instanceof ApiError
@@ -50,8 +58,9 @@ function apiErrorCode(err: unknown): string | undefined {
 function BackupCodesView({ codes, onDone }: { codes: string[]; onDone: () => void }) {
   const { t } = useLanguage();
   const copyAll = async () => {
-    await navigator.clipboard.writeText(codes.join("\n"));
-    toast.success(t("twofa.codes_copied"));
+    const copied = await copyTextToClipboard(codes.join("\n"));
+    if (copied) toast.success(t("twofa.codes_copied"));
+    else toast.error(t("twofa.copy_failed"));
   };
   const download = () => {
     const blob = new Blob(
@@ -79,10 +88,22 @@ function BackupCodesView({ codes, onDone }: { codes: string[]; onDone: () => voi
         ))}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={copyAll} className="gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={copyAll}
+          className="min-h-11 gap-2"
+        >
           <Copy className="h-4 w-4" /> {t("twofa.codes_copy")}
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={download} className="gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={download}
+          className="min-h-11 gap-2"
+        >
           <Download className="h-4 w-4" /> {t("twofa.codes_download")}
         </Button>
       </div>
@@ -101,35 +122,95 @@ export default function TwoFactorCard() {
   const { data: me, error, isError, isLoading, refetch } = useGetMe();
 
   // --- Enable flow ---
+  const [isSetupAuthOpen, setIsSetupAuthOpen] = useState(false);
   const [enrolling, setEnrolling] = useState<TotpSetupData | null>(null);
-  const [setupCode, setSetupCode] = useState("");
   const [freshCodes, setFreshCodes] = useState<string[] | null>(null);
-  const setupMutation = useTotpSetup();
-  const verifyMutation = useTotpVerifySetup();
+  const setupAuthFormRef = useRef<HTMLFormElement>(null);
+  const setupAuthPasswordRef = useRef<HTMLInputElement>(null);
+  const enrollmentFormRef = useRef<HTMLFormElement>(null);
+  const enrollmentCodeRef = useRef<HTMLInputElement>(null);
+  const setupMutation = useTotpSetup({ mutation: { gcTime: 0 } });
+  const verifyMutation = useTotpVerifySetup({ mutation: { gcTime: 0 } });
 
   // --- Disable / regenerate flows ---
   const [confirmMode, setConfirmMode] = useState<"disable" | "regen" | null>(null);
-  const [password, setPassword] = useState("");
-  const [confirmCode, setConfirmCode] = useState("");
-  const disableMutation = useTotpDisable();
-  const regenMutation = useTotpRegenerateBackup();
+  const confirmFormRef = useRef<HTMLFormElement>(null);
+  const confirmPasswordRef = useRef<HTMLInputElement>(null);
+  const disableMutation = useTotpDisable({ mutation: { gcTime: 0 } });
+  const regenMutation = useTotpRegenerateBackup({ mutation: { gcTime: 0 } });
 
   const refreshMe = () => queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
 
   const startEnable = () => {
-    setSetupCode("");
-    setupMutation.mutate(undefined, {
-      onSuccess: (data) => setEnrolling(data),
-      onError: () => toast.error(t("twofa.setup_expired")),
-    });
+    setupAuthFormRef.current?.reset();
+    setupMutation.reset();
+    setIsSetupAuthOpen(true);
   };
 
-  const submitVerify = (code: string) => {
-    if (!enrolling || code.length < 6 || verifyMutation.isPending) return;
+  const closeSetupAuthorization = () => {
+    if (setupMutation.isPending) return;
+    setupAuthFormRef.current?.reset();
+    setupMutation.reset();
+    setIsSetupAuthOpen(false);
+  };
+
+  const submitSetupAuthorization = (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    if (setupMutation.isPending) return;
+
+    const form = event.currentTarget;
+    const currentPassword = readCurrentPassword(new FormData(form));
+    if (!currentPassword) return;
+
+    setupMutation.mutate(
+      { data: { currentPassword } },
+      {
+        onSuccess: (data) => {
+          form.reset();
+          setupMutation.reset();
+          setIsSetupAuthOpen(false);
+          setEnrolling(data);
+        },
+        onError: (error) => {
+          const code = apiErrorCode(error);
+          form.reset();
+          setupMutation.reset();
+          requestAnimationFrame(() => setupAuthPasswordRef.current?.focus());
+          toast.error(
+            t(
+              code === "step_up_failed"
+                ? "twofa.wrong_password"
+                : "twofa.setup_expired",
+            ),
+          );
+        },
+      },
+    );
+  };
+
+  const closeEnrollment = () => {
+    if (verifyMutation.isPending) return;
+    enrollmentFormRef.current?.reset();
+    verifyMutation.reset();
+    setEnrolling(null);
+  };
+
+  const submitVerify = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!enrolling || verifyMutation.isPending) return;
+
+    const form = event.currentTarget;
+    const code = readVerificationCode(new FormData(form));
+    if (!code || code.length < 6) return;
+
     verifyMutation.mutate(
       { data: { setupToken: enrolling.setupToken, code } },
       {
         onSuccess: (res) => {
+          form.reset();
+          verifyMutation.reset();
           setEnrolling(null);
           setFreshCodes(res.backupCodes);
           refreshMe();
@@ -137,9 +218,11 @@ export default function TwoFactorCard() {
         },
         onError: (err) => {
           const code = apiErrorCode(err);
+          form.reset();
+          verifyMutation.reset();
           if (code === "invalid_code") {
             toast.error(t("twofa.invalid_code"));
-            setSetupCode("");
+            requestAnimationFrame(() => enrollmentCodeRef.current?.focus());
           } else {
             toast.error(t("twofa.setup_expired"));
             setEnrolling(null);
@@ -149,26 +232,48 @@ export default function TwoFactorCard() {
     );
   };
 
-  const closeConfirm = () => {
-    setConfirmMode(null);
-    setPassword("");
-    setConfirmCode("");
+  const openConfirm = (mode: "disable" | "regen") => {
+    confirmFormRef.current?.reset();
+    disableMutation.reset();
+    regenMutation.reset();
+    setConfirmMode(mode);
   };
 
-  const submitConfirm = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!password || !confirmCode) return;
+  const closeConfirm = () => {
+    if (disableMutation.isPending || regenMutation.isPending) return;
+    confirmFormRef.current?.reset();
+    disableMutation.reset();
+    regenMutation.reset();
+    setConfirmMode(null);
+  };
+
+  const submitConfirm = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!confirmMode || disableMutation.isPending || regenMutation.isPending) {
+      return;
+    }
+
+    const form = event.currentTarget;
+    const credentials = readAdminMfaStepUpCredentials(new FormData(form));
+    if (!credentials) return;
+
     const onError = (err: unknown) => {
       const code = apiErrorCode(err);
+      form.reset();
+      disableMutation.reset();
+      regenMutation.reset();
+      requestAnimationFrame(() => confirmPasswordRef.current?.focus());
       if (code === "wrong_password") toast.error(t("twofa.wrong_password"));
       else toast.error(t("twofa.invalid_code"));
     };
     if (confirmMode === "disable") {
       disableMutation.mutate(
-        { data: { currentPassword: password, code: confirmCode } },
+        { data: credentials },
         {
           onSuccess: () => {
-            closeConfirm();
+            form.reset();
+            disableMutation.reset();
+            setConfirmMode(null);
             refreshMe();
             toast.success(t("twofa.disabled_success"));
           },
@@ -177,10 +282,12 @@ export default function TwoFactorCard() {
       );
     } else {
       regenMutation.mutate(
-        { data: { currentPassword: password, code: confirmCode } },
+        { data: credentials },
         {
           onSuccess: (res) => {
-            closeConfirm();
+            form.reset();
+            regenMutation.reset();
+            setConfirmMode(null);
             setFreshCodes(res.backupCodes);
             toast.success(t("twofa.regen_success"));
           },
@@ -224,14 +331,14 @@ export default function TwoFactorCard() {
                   variant="outline"
                   size="sm"
                   className="gap-2"
-                  onClick={() => setConfirmMode("regen")}
+                  onClick={() => openConfirm("regen")}
                 >
                   <KeyRound className="h-4 w-4" /> {t("twofa.regenerate")}
                 </Button>
                 <Button
                   variant="destructive"
                   size="sm"
-                  onClick={() => setConfirmMode("disable")}
+                  onClick={() => openConfirm("disable")}
                 >
                   {t("twofa.disable")}
                 </Button>
@@ -249,9 +356,77 @@ export default function TwoFactorCard() {
         )}
       </CardContent>
 
+      {/* Confirm the current password before issuing a new MFA secret. */}
+      <Dialog
+        open={isSetupAuthOpen}
+        onOpenChange={(open) => {
+          if (open) setIsSetupAuthOpen(true);
+          else closeSetupAuthorization();
+        }}
+      >
+        <DialogContent
+          className="max-h-[90dvh] max-w-md overflow-y-auto"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            setupAuthPasswordRef.current?.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{t("twofa.setup_password_title")}</DialogTitle>
+            <DialogDescription>
+              {t("twofa.setup_password_hint")}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            ref={setupAuthFormRef}
+            onSubmit={submitSetupAuthorization}
+            className="space-y-4"
+          >
+            <div className="space-y-2">
+              <Label htmlFor="twofa-setup-password">
+                {t("twofa.current_password")}
+              </Label>
+              <Input
+                ref={setupAuthPasswordRef}
+                id="twofa-setup-password"
+                name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
+                type="password"
+                dir="ltr"
+                autoComplete="current-password"
+                required
+                className="min-h-11"
+              />
+            </div>
+            <DialogFooter className="gap-2 sm:space-x-0">
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 w-full sm:w-auto"
+                disabled={setupMutation.isPending}
+                onClick={closeSetupAuthorization}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="submit"
+                className="min-h-11 w-full sm:w-auto"
+                disabled={setupMutation.isPending}
+              >
+                {setupMutation.isPending
+                  ? t("common.loading")
+                  : t("twofa.setup_continue")}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       {/* Enrollment: QR + first OTP */}
-      <Dialog open={!!enrolling} onOpenChange={(open) => !open && setEnrolling(null)}>
-        <DialogContent className="max-w-md">
+      <Dialog
+        open={!!enrolling}
+        onOpenChange={(open) => !open && closeEnrollment()}
+      >
+        <DialogContent className="max-h-[90dvh] max-w-md overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("twofa.setup_title")}</DialogTitle>
             <DialogDescription>{t("twofa.setup_scan")}</DialogDescription>
@@ -261,48 +436,83 @@ export default function TwoFactorCard() {
               <div className="flex justify-center">
                 <img
                   src={enrolling.qrDataUrl}
-                  alt="TOTP QR"
-                  className="h-56 w-56 rounded-lg border bg-white p-2"
+                  alt={t("twofa.setup_qr_alt")}
+                  className="h-auto w-full max-w-56 rounded-lg border bg-white p-2"
                 />
               </div>
               <div className="space-y-1">
                 <p className="text-sm text-muted-foreground">{t("twofa.setup_manual")}</p>
-                <button
-                  type="button"
-                  dir="ltr"
-                  className="w-full rounded-md border bg-muted/40 px-3 py-2 text-center font-mono text-xs tracking-widest break-all hover:bg-muted"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(enrolling.secret);
-                    toast.success(t("twofa.codes_copied"));
-                  }}
-                >
-                  {enrolling.secret}
-                </button>
-              </div>
-              <div className="space-y-2">
-                <Label>{t("twofa.setup_code_label")}</Label>
-                <div className="flex justify-center" dir="ltr">
-                  <InputOTP
-                    maxLength={6}
-                    value={setupCode}
-                    onChange={setSetupCode}
-                    onComplete={(v: string) => submitVerify(v)}
+                <div className="flex items-stretch gap-2">
+                  <code
+                    dir="ltr"
+                    className="flex min-h-11 min-w-0 flex-1 select-all items-center justify-center rounded-md border bg-muted/40 px-3 py-2 text-center text-xs tracking-widest break-all"
                   >
-                    <InputOTPGroup>
-                      {[0, 1, 2, 3, 4, 5].map((i) => (
-                        <InputOTPSlot key={i} index={i} className="h-11 w-11" />
-                      ))}
-                    </InputOTPGroup>
-                  </InputOTP>
+                    {enrolling.secret}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label={t("twofa.secret_copy")}
+                    title={t("twofa.secret_copy")}
+                    className="size-11 shrink-0 touch-manipulation"
+                    onClick={async () => {
+                      const copied = await copyTextToClipboard(
+                        enrolling.secret,
+                      );
+                      if (copied) {
+                        toast.success(t("twofa.secret_copied"));
+                      } else {
+                        toast.error(t("twofa.copy_failed"));
+                      }
+                    }}
+                  >
+                    <Copy className="h-4 w-4" aria-hidden="true" />
+                  </Button>
                 </div>
               </div>
-              <Button
-                className="w-full"
-                disabled={setupCode.length < 6 || verifyMutation.isPending}
-                onClick={() => submitVerify(setupCode)}
+              <form
+                ref={enrollmentFormRef}
+                onSubmit={submitVerify}
+                className="space-y-4"
               >
-                {verifyMutation.isPending ? t("common.loading") : t("twofa.activate")}
-              </Button>
+                <div className="space-y-2">
+                  <Label htmlFor="twofa-setup-code">
+                    {t("twofa.setup_code_label")}
+                  </Label>
+                  <div className="flex justify-center" dir="ltr">
+                    <InputOTP
+                      ref={enrollmentCodeRef}
+                      id="twofa-setup-code"
+                      name={ADMIN_MFA_CODE_FIELD}
+                      maxLength={6}
+                      minLength={6}
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      required
+                    >
+                      <InputOTPGroup>
+                        {[0, 1, 2, 3, 4, 5].map((i) => (
+                          <InputOTPSlot
+                            key={i}
+                            index={i}
+                            className="h-11 w-10 sm:w-11"
+                          />
+                        ))}
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
+                </div>
+                <Button
+                  type="submit"
+                  className="min-h-11 w-full"
+                  disabled={verifyMutation.isPending}
+                >
+                  {verifyMutation.isPending
+                    ? t("common.loading")
+                    : t("twofa.activate")}
+                </Button>
+              </form>
             </div>
           )}
         </DialogContent>
@@ -321,8 +531,17 @@ export default function TwoFactorCard() {
       </Dialog>
 
       {/* Disable / regenerate confirmation (password + second factor) */}
-      <Dialog open={!!confirmMode} onOpenChange={(open) => !open && closeConfirm()}>
-        <DialogContent className="max-w-md">
+      <Dialog
+        open={!!confirmMode}
+        onOpenChange={(open) => !open && closeConfirm()}
+      >
+        <DialogContent
+          className="max-h-[90dvh] max-w-md overflow-y-auto"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            confirmPasswordRef.current?.focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>
               {confirmMode === "disable" ? t("twofa.disable_title") : t("twofa.regen_title")}
@@ -331,35 +550,56 @@ export default function TwoFactorCard() {
               {confirmMode === "disable" ? t("twofa.disable_hint") : t("twofa.regen_hint")}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitConfirm} className="space-y-4">
+          <form
+            ref={confirmFormRef}
+            onSubmit={submitConfirm}
+            className="space-y-4"
+          >
             <div className="space-y-2">
               <Label htmlFor="twofa-password">{t("twofa.current_password")}</Label>
               <Input
+                ref={confirmPasswordRef}
                 id="twofa-password"
+                name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
                 type="password"
                 dir="ltr"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoFocus
+                autoComplete="current-password"
+                required
+                className="min-h-11"
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="twofa-code">{t("twofa.code_label")}</Label>
               <Input
                 id="twofa-code"
+                name={ADMIN_MFA_CODE_FIELD}
+                type="text"
                 dir="ltr"
-                className="font-mono"
-                value={confirmCode}
-                onChange={(e) => setConfirmCode(e.target.value)}
+                inputMode="text"
+                autoComplete="one-time-code"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                className="min-h-11 font-mono"
                 placeholder="123456 / XXXXX-XXXXX"
+                required
               />
             </div>
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:space-x-0">
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11 w-full sm:w-auto"
+                disabled={confirmPending}
+                onClick={closeConfirm}
+              >
+                {t("common.cancel")}
+              </Button>
               <Button
                 type="submit"
                 variant={confirmMode === "disable" ? "destructive" : "default"}
-                className="w-full"
-                disabled={!password || !confirmCode || confirmPending}
+                className="min-h-11 w-full sm:w-auto"
+                disabled={confirmPending}
               >
                 {confirmPending
                   ? t("common.loading")

@@ -8,4 +8,6 @@
 
 export interface TotpAdminDisableInput {
   userId: number;
+  currentPassword: string;
+  code: string;
 }

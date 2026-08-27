@@ -28,6 +28,29 @@ export interface PreparedUpload {
   kind: "pdf" | "image";
 }
 
+/**
+ * Build headers for the direct object upload. Same-origin filesystem uploads
+ * use the authenticated session cookie, so they must carry the application's
+ * CSRF marker. Cloud presigned URLs are cross-origin and must not receive that
+ * private marker (or require it in bucket CORS/signing rules).
+ */
+export function buildUploadRequestHeaders(
+  requiredHeaders: Record<string, string>,
+  contentType: string,
+  uploadUrl: string,
+  pageOrigin: string,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    ...requiredHeaders,
+    "Content-Type": contentType,
+  };
+  const targetOrigin = new URL(uploadUrl, pageOrigin).origin;
+  if (targetOrigin === new URL(pageOrigin).origin) {
+    headers["X-Requested-With"] = "HealthCredentialHub";
+  }
+  return headers;
+}
+
 function canvasToJpegBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   return new Promise((resolve, reject) => {
     canvas.toBlob(

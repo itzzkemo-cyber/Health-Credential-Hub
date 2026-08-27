@@ -76,6 +76,7 @@ export * from './totpAdminDisableInput';
 export * from './totpChallengeInput';
 export * from './totpConfirmInput';
 export * from './totpSetupData';
+export * from './totpSetupInput';
 export * from './totpVerifySetupInput';
 export * from './twoFactorPending';
 export * from './unreadCount';

@@ -1,10 +1,5 @@
-
 import { describe, expect, it, vi } from "vitest";
-import type {
-  CredentialPolicyRow,
-  CredentialRow,
-  User,
-} from "@workspace/db";
+import type { CredentialPolicyRow, CredentialRow, User } from "@workspace/db";
 
 // The helpers under test are pure, but their module also exports database
 // helpers. Stub those imports so this unit suite never requires a real DB.
@@ -33,9 +28,7 @@ const employee = {
   role: "employee",
 } as User;
 
-function credential(
-  overrides: Partial<CredentialRow> = {},
-): CredentialRow {
+function credential(overrides: Partial<CredentialRow> = {}): CredentialRow {
   return {
     id: 11,
     employeeId: employee.id,
@@ -76,6 +69,8 @@ function policy(
     departmentId: null,
     roles: [],
     isRequired: true,
+    deletedAt: null,
+    deletedBy: null,
     createdAt: new Date("2025-01-01T00:00:00Z"),
     ...overrides,
   };
@@ -87,7 +82,9 @@ describe("credential policy compliance", () => {
     const policies = [policy("BLS")];
 
     expect(missingTypesFor(employee, creds, policies)).toEqual(["BLS"]);
-    expect(computeEmployeeStats(employee, creds, policies).complianceRate).toBe(0);
+    expect(computeEmployeeStats(employee, creds, policies).complianceRate).toBe(
+      0,
+    );
   });
 
   it("does not satisfy a requirement with an expired verified credential", () => {
@@ -95,7 +92,9 @@ describe("credential policy compliance", () => {
     const policies = [policy("BLS")];
 
     expect(missingTypesFor(employee, creds, policies)).toEqual(["BLS"]);
-    expect(computeEmployeeStats(employee, creds, policies).complianceRate).toBe(0);
+    expect(computeEmployeeStats(employee, creds, policies).complianceRate).toBe(
+      0,
+    );
   });
 
   it("does not count a soft-deleted credential or satisfy compliance with it", () => {
@@ -135,7 +134,9 @@ describe("credential policy compliance", () => {
   it("reports full compliance when no policy applies", () => {
     const policies = [policy("BLS", { departmentId: 99 })];
 
-    expect(computeEmployeeStats(employee, [], policies).complianceRate).toBe(100);
+    expect(computeEmployeeStats(employee, [], policies).complianceRate).toBe(
+      100,
+    );
   });
 });
 
@@ -220,7 +221,10 @@ describe("material credential changes", () => {
   });
 
   it.each([
-    { patch: { fileUrl: "/objects/uploads/replacement.pdf" }, kind: "replacement" },
+    {
+      patch: { fileUrl: "/objects/uploads/replacement.pdf" },
+      kind: "replacement",
+    },
     { patch: { fileUrl: null }, kind: "removal" },
     { patch: { expiryDate: "2999-02-01" }, kind: "factual edit" },
     { patch: { fileType: "image/png" }, kind: "file metadata edit" },

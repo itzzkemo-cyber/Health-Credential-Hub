@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "nodeEnv": "production",
+  "bindHost": "127.0.0.1",
+  "port": 3000,
+  "publicAppUrl": "https://app.wathaiqihealth.com",
+  "nodePath": "C:\\Program Files\\nodejs\\node.exe",
+  "postgresBin": "C:\\Program Files\\PostgreSQL\\16\\bin",
+  "runtimeRoot": "C:\\ProgramData\\WathaiqiHealth\\runtime",
+  "objectStorageProvider": "filesystem",
+  "objectStorageRoot": "C:\\ProgramData\\WathaiqiHealth\\objects",
+  "quarantineRoot": "C:\\ProgramData\\WathaiqiHealth\\quarantine",
+  "privateObjectDir": "/wathaiqi-health-private/private",
+  "windowsDefenderMpCmdRunPath": "C:\\ProgramData\\Microsoft\\Windows Defender\\Platform\\<CURRENT-VERSION>\\MpCmdRun.exe",
+  "malwareScanTimeoutMs": 60000,
+  "maxDefenderSignatureAgeHours": 48,
+  "postgresDataRoot": "C:\\ProgramData\\WathaiqiHealth\\postgresql-data",
+  "backupRoot": "E:\\WathaiqiHealthBackups",
+  "maxVolumeAttestationAgeDays": 7,
+  "maxRestoreEvidenceAgeDays": 30,
+  "database": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "name": "wathaiqi_health",
+    "appUser": "wathaiqi_app",
+    "appRole": "wathaiqi_app_dml",
+    "migratorUser": "wathaiqi_migrator",
+    "migratorRole": "wathaiqi_migrator_ddl",
+    "windowsServiceSid": "",
+    "sslMode": "disable"
+  }
+}

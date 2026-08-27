@@ -23,4 +23,8 @@ export interface EmployeeInput {
   phone?: string;
   /** Target facility; honored only for system administrators. */
   facilityId?: number;
+  /** Required with code when provisioning a manager role. */
+  currentPassword?: string;
+  /** Required with currentPassword when provisioning a manager role; accepts TOTP or a backup code. */
+  code?: string;
 }

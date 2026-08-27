@@ -44,6 +44,24 @@ export const RequestUploadUrlResponse = zod.object({
 
 
 /**
+ * Deletes a private upload only when the authenticated caller owns its
+ * upload grant and no credential record, including a soft-deleted record,
+ * references the object. Missing, linked, and unauthorized uploads share
+ * the same 404 response so object existence and tenant ownership are not
+ * disclosed.
+ * @summary Delete a caller-owned upload that is not linked to a credential
+ */
+export const deleteUnlinkedUploadPathUploadIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+
+
+export const DeleteUnlinkedUploadParams = zod.object({
+  "uploadId": zod.coerce.string().regex(deleteUnlinkedUploadPathUploadIdRegExp)
+})
+
+export const DeleteUnlinkedUploadResponse = zod.void()
+
+
+/**
  * Serves credential document files. Requires authentication; access is
  * limited to the file owner and manager roles.
  * @summary Serve an object entity from PRIVATE_OBJECT_DIR
@@ -211,6 +229,10 @@ export const ResetPasswordResponse = zod.object({
 /**
  * @summary Begin enabling 2FA — returns the secret, QR image and a signed setup token (nothing persisted yet)
  */
+export const TotpSetupBody = zod.object({
+  "currentPassword": zod.string()
+})
+
 export const TotpSetupResponse = zod.object({
   "secret": zod.string(),
   "otpauthUrl": zod.string(),
@@ -291,7 +313,9 @@ export const TotpRegenerateBackupResponse = zod.object({
  * @summary Admin recovery — disable 2FA for a lower-ranked account in scope
  */
 export const TotpAdminDisableBody = zod.object({
-  "userId": zod.number()
+  "userId": zod.number(),
+  "currentPassword": zod.string(),
+  "code": zod.string()
 })
 
 export const TotpAdminDisableResponse = zod.unknown()
@@ -875,7 +899,9 @@ export const CreateEmployeeBody = zod.object({
   "jobTitleAr": zod.string(),
   "employeeNumber": zod.string(),
   "phone": zod.string().optional(),
-  "facilityId": zod.number().optional().describe('Target facility; honored only for system administrators.')
+  "facilityId": zod.number().optional().describe('Target facility; honored only for system administrators.'),
+  "currentPassword": zod.string().optional().describe('Required with code when provisioning a manager role.'),
+  "code": zod.string().optional().describe('Required with currentPassword when provisioning a manager role; accepts TOTP or a backup code.')
 })
 
 export const CreateEmployeeResponse = zod.object({
@@ -1001,7 +1027,9 @@ export const UpdateEmployeeBody = zod.object({
   "jobTitle": zod.string().optional(),
   "jobTitleAr": zod.string().optional(),
   "phone": zod.string().optional(),
-  "isActive": zod.boolean().optional()
+  "isActive": zod.boolean().optional(),
+  "currentPassword": zod.string().optional().describe('Required with code when role, departmentId, or supervisorId actually changes.'),
+  "code": zod.string().optional().describe('Required with currentPassword when role, departmentId, or supervisorId actually changes; accepts TOTP or a backup code.')
 })
 
 export const UpdateEmployeeResponse = zod.object({
@@ -1239,16 +1267,21 @@ export const MarkNotificationReadResponse = zod.unknown()
 /**
  * @summary List audit logs
  */
+
 export const listAuditLogsQueryPageDefault = 1;
+
 export const listAuditLogsQueryPageSizeDefault = 50;
+export const listAuditLogsQueryPageSizeMax = 200;
+
+
 
 export const ListAuditLogsQueryParams = zod.object({
-  "userId": zod.coerce.number().nullish(),
+  "userId": zod.coerce.number().int().min(1).nullish(),
   "action": zod.coerce.string().optional(),
   "dateFrom": zod.coerce.string().optional(),
   "dateTo": zod.coerce.string().optional(),
-  "page": zod.coerce.number().default(listAuditLogsQueryPageDefault),
-  "pageSize": zod.coerce.number().default(listAuditLogsQueryPageSizeDefault)
+  "page": zod.coerce.number().int().min(1).default(listAuditLogsQueryPageDefault),
+  "pageSize": zod.coerce.number().int().min(1).max(listAuditLogsQueryPageSizeMax).default(listAuditLogsQueryPageSizeDefault)
 })
 
 export const ListAuditLogsResponse = zod.object({

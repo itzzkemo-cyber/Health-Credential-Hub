@@ -1,26 +1,47 @@
-
 import { Readable } from "stream";
+import { pipeline } from "node:stream/promises";
 import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
-import { Router, type IRouter, type Request, type Response } from "express";
-import { db, credentialsTable, uploadGrantsTable } from "@workspace/db";
+import {
+  raw,
+  Router,
+  type IRouter,
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
+import {
+  auditLogsTable,
+  credentialsTable,
+  db,
+  uploadGrantsTable,
+  usersTable,
+} from "@workspace/db";
 import { and, eq, isNull } from "drizzle-orm";
 
 import { requireAuth, getUser, MANAGER_ROLES } from "../lib/auth";
 import { getCredentialScopedUsers, logAudit } from "../lib/helpers";
 import { rateLimit } from "../lib/rateLimit";
 import { safeErrorLogFields } from "../lib/safeError";
+import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
 import { ObjectPermission } from "../lib/objectAcl";
 import {
+  getObjectStorageProvider,
   ObjectNotFoundError,
   ObjectStorageService,
 } from "../lib/objectStorage";
 import {
   ALLOWED_UPLOAD_CONTENT_TYPE,
   findActiveUploadGrant,
+  hasAllowedUploadSignature,
+  MalwareDetectedError,
+  MalwareQuarantineCleanupError,
+  MalwareScanBusyError,
+  MalwareScanUnavailableError,
   MAX_UPLOAD_BYTES,
+  scanUploadForMalware,
   UPLOAD_GRANT_TTL_MS,
 } from "../lib/uploadSecurity";
 
@@ -31,6 +52,147 @@ const uploadUrlRateLimit = rateLimit({
   max: 30,
   windowMs: 10 * 60_000,
 });
+const localUploadRateLimit = rateLimit({
+  name: "local-object-upload",
+  max: 30,
+  windowMs: 10 * 60_000,
+});
+export const MAX_ACTIVE_LOCAL_UPLOADS = 1;
+let activeLocalUploads = 0;
+
+function requireFilesystemUploadProvider(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (getObjectStorageProvider() !== "filesystem") {
+    res.status(404).json({ error: "Upload endpoint is not enabled" });
+    return;
+  }
+  next();
+}
+
+/**
+ * Acquire the single local Defender/upload slot before express.raw retains an
+ * up-to-8MB body. Concurrent callers fail fast instead of building an
+ * in-process queue of sensitive document buffers.
+ */
+function requireLocalUploadSlot(
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  if (activeLocalUploads >= MAX_ACTIVE_LOCAL_UPLOADS) {
+    res.setHeader("Retry-After", "1");
+    res.status(503).json({ error: "Upload security scanning is busy" });
+    return;
+  }
+
+  activeLocalUploads += 1;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    activeLocalUploads -= 1;
+  };
+  res.once("finish", release);
+  res.once("close", release);
+  next();
+}
+
+/**
+ * PUT /storage/uploads/local/:uploadId
+ *
+ * The no-payment single-host profile stores bytes on the API host. The URL is
+ * same-origin, session-authenticated, CSRF-guarded, and backed by the same
+ * short-lived database grant as cloud presigned uploads. Production scripts
+ * keep the storage directory outside the repository with restricted ACLs.
+ */
+router.put(
+  "/storage/uploads/local/:uploadId",
+  requireAuth,
+  localUploadRateLimit,
+  requireFilesystemUploadProvider,
+  requireLocalUploadSlot,
+  raw({ type: () => true, limit: MAX_UPLOAD_BYTES }),
+  async (req: Request, res: Response) => {
+    const uploadId = req.params.uploadId;
+    if (typeof uploadId !== "string" || !/^[0-9a-f-]{36}$/.test(uploadId)) {
+      res.status(400).json({ error: "Invalid upload identifier" });
+      return;
+    }
+    if (req.get("if-none-match") !== "*") {
+      res.status(428).json({ error: "Create-only upload header is required" });
+      return;
+    }
+
+    const objectPath = `/objects/uploads/${uploadId}`;
+    const user = getUser(req);
+    const grant = await findActiveUploadGrant(objectPath, user.id);
+    if (!grant) {
+      res.status(403).json({ error: "Upload grant is missing or expired" });
+      return;
+    }
+    const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const contentType = (req.get("content-type") ?? "")
+      .split(";", 1)[0]
+      .trim()
+      .toLowerCase();
+    if (
+      bytes.length !== grant.declaredSize ||
+      bytes.length <= 0 ||
+      bytes.length > MAX_UPLOAD_BYTES ||
+      contentType !== grant.declaredContentType.toLowerCase() ||
+      !ALLOWED_UPLOAD_CONTENT_TYPE.test(contentType) ||
+      !hasAllowedUploadSignature(bytes, contentType)
+    ) {
+      res.status(400).json({ error: "Uploaded file does not match its grant" });
+      return;
+    }
+
+    try {
+      // The filesystem profile has no cloud-provider scanning hook. Stage the
+      // exact in-memory bytes under a random quarantine name and require a
+      // clean local Defender verdict before making the object durable.
+      await scanUploadForMalware(bytes);
+      await objectStorageService.writeFilesystemObject(
+        objectPath,
+        bytes,
+        contentType,
+      );
+      res.status(204).end();
+    } catch (error) {
+      if (error instanceof MalwareDetectedError) {
+        res.status(422).json({ error: "Uploaded file failed security checks" });
+        return;
+      }
+      if (error instanceof MalwareScanBusyError) {
+        res.setHeader("Retry-After", "1");
+        res.status(503).json({ error: "Upload security scanning is busy" });
+        return;
+      }
+      if (
+        error instanceof MalwareScanUnavailableError ||
+        error instanceof MalwareQuarantineCleanupError
+      ) {
+        req.log.error(
+          safeErrorLogFields(error),
+          "Local upload security scan failed closed",
+        );
+        res
+          .status(503)
+          .json({ error: "Upload security scanning is unavailable" });
+        return;
+      }
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        res.status(409).json({ error: "Object already exists" });
+        return;
+      }
+      req.log.error(safeErrorLogFields(error), "Error storing local object");
+      res.status(500).json({ error: "Failed to store object" });
+    }
+  },
+);
 
 /**
  * Defense-in-depth for user-uploaded content served in-browser: never let the
@@ -85,7 +247,9 @@ router.post(
       const { name, size, contentType } = parsed.data;
 
       const { uploadURL, requiredHeaders } =
-        await objectStorageService.getObjectEntityUploadURL(contentType.toLowerCase());
+        await objectStorageService.getObjectEntityUploadURL(
+          contentType.toLowerCase(),
+        );
       const objectPath =
         objectStorageService.normalizeObjectEntityPath(uploadURL);
       const user = getUser(req);
@@ -107,11 +271,126 @@ router.post(
         }),
       );
     } catch (error) {
+      req.log.error(safeErrorLogFields(error), "Error generating upload URL");
+      res.status(500).json({ error: "Failed to generate upload URL" });
+    }
+  },
+);
+
+/**
+ * DELETE /storage/uploads/:uploadId
+ *
+ * Remove an abandoned private upload without creating an object-existence
+ * oracle. The actor and upload grant are locked in the same order used by the
+ * credential mutation flow, so a concurrent credential link either completes
+ * first (and blocks deletion) or observes that the grant was removed.
+ */
+router.delete(
+  "/storage/uploads/:uploadId",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    const uploadId = req.params.uploadId;
+    if (
+      typeof uploadId !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        uploadId,
+      )
+    ) {
+      res.status(404).json({ error: "Upload not found" });
+      return;
+    }
+
+    const objectPath = `/objects/uploads/${uploadId}`;
+    const requestUser = getUser(req);
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        const actor = (
+          await tx
+            .select()
+            .from(usersTable)
+            .where(eq(usersTable.id, requestUser.id))
+            .for("update")
+        )[0];
+        if (!isFreshActiveSessionActor(actor, requestUser)) {
+          return { kind: "unauthorized" as const };
+        }
+
+        // Ownership is derived only from the server-issued database grant.
+        // Manager and system-admin roles never gain delete access to another
+        // employee's abandoned upload, regardless of facility scope.
+        const grant = (
+          await tx
+            .select()
+            .from(uploadGrantsTable)
+            .where(
+              and(
+                eq(uploadGrantsTable.objectPath, objectPath),
+                eq(uploadGrantsTable.requestedBy, actor.id),
+              ),
+            )
+            .for("update")
+        )[0];
+        if (!grant) return { kind: "not_found" as const };
+
+        // Deliberately include soft-deleted credentials. Their retained audit
+        // history still owns the private object until the approved retention
+        // workflow removes both records.
+        const linkedCredential = (
+          await tx
+            .select({ id: credentialsTable.id })
+            .from(credentialsTable)
+            .where(eq(credentialsTable.fileUrl, objectPath))
+            .limit(1)
+        )[0];
+        if (linkedCredential) return { kind: "not_found" as const };
+
+        const objectFile =
+          await objectStorageService.getObjectEntityFile(objectPath);
+        await objectStorageService.deleteObject(objectFile);
+        await tx
+          .delete(uploadGrantsTable)
+          .where(
+            and(
+              eq(uploadGrantsTable.id, grant.id),
+              eq(uploadGrantsTable.requestedBy, actor.id),
+              eq(uploadGrantsTable.objectPath, objectPath),
+            ),
+          );
+        await tx.insert(auditLogsTable).values({
+          userId: actor.id,
+          facilityId: actor.facilityId,
+          userName: actor.name,
+          userNameAr: actor.nameAr,
+          action: "Deleted unlinked private upload",
+          actionAr: "حذف رفع خاص غير مرتبط",
+          target: "Unlinked private upload",
+          targetAr: "رفع خاص غير مرتبط",
+          details: null,
+          ipAddress: req.ip ?? null,
+        });
+        return { kind: "deleted" as const };
+      });
+
+      if (result.kind === "unauthorized") {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+      if (result.kind === "not_found") {
+        res.status(404).json({ error: "Upload not found" });
+        return;
+      }
+      res.status(204).end();
+    } catch (error) {
+      if (error instanceof ObjectNotFoundError) {
+        res.status(404).json({ error: "Upload not found" });
+        return;
+      }
       req.log.error(
         safeErrorLogFields(error),
-        "Error generating upload URL",
+        "Error deleting unlinked private upload",
       );
-      res.status(500).json({ error: "Failed to generate upload URL" });
+      res.status(500).json({ error: "Failed to delete unlinked upload" });
     }
   },
 );
@@ -162,19 +441,16 @@ router.get(
       let auditFacilityId = user.facilityId;
       if (!isOwner && MANAGER_ROLES.includes(user.role)) {
         const linkedIds = new Set(linked.map((entry) => entry.employeeId));
-        const linkedOwner = (await getCredentialScopedUsers(user)).find((employee) =>
-          linkedIds.has(employee.id),
+        const linkedOwner = (await getCredentialScopedUsers(user)).find(
+          (employee) => linkedIds.has(employee.id),
         );
         canManage = linkedOwner != null;
         if (linkedOwner) auditFacilityId = linkedOwner.facilityId;
       }
       if (!isOwner && !canManage) {
-        // Retained objects with no active credential link must not be
-        // distinguishable from absent documents after soft deletion.
-        const notFound = linked.length === 0 && pendingGrant == null;
-        res.status(notFound ? 404 : 403).json({
-          error: notFound ? "Object not found" : "Forbidden",
-        });
+        // Do not expose whether a guessed object path exists, is linked to a
+        // credential, or belongs to another facility/team.
+        res.status(404).json({ error: "Object not found" });
         return;
       }
 
@@ -203,11 +479,21 @@ router.get(
         const nodeStream = Readable.fromWeb(
           response.body as ReadableStream<Uint8Array>,
         );
-        nodeStream.pipe(res);
+        await pipeline(nodeStream, res);
       } else {
         res.end();
       }
     } catch (error) {
+      if (res.headersSent || res.destroyed) {
+        req.log.error(
+          safeErrorLogFields(error),
+          "Error streaming private object",
+        );
+        if (!res.destroyed) {
+          res.destroy(error instanceof Error ? error : undefined);
+        }
+        return;
+      }
       if (error instanceof ObjectNotFoundError) {
         req.log.warn(safeErrorLogFields(error), "Object not found");
         res.status(404).json({ error: "Object not found" });

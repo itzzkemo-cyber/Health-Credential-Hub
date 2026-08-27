@@ -19,8 +19,10 @@
 - Node.js 24
 - pnpm 11.19.0 (Corepack is fine)
 - PostgreSQL for API runtime
-- A private object-storage bucket for document uploads (Google Cloud Storage
-  or Oracle Object Storage in Riyadh)
+- Private document storage: the encrypted single-host filesystem acceptance
+  profile described below. GCS and Oracle Object Storage drivers are present,
+  but must stay disabled for real documents until bounded ingress, malware
+  quarantine, and auditable orphan cleanup are implemented and accepted.
 
 ## Local setup
 
@@ -65,14 +67,27 @@ pnpm --filter @workspace/api-spec run codegen
 
 ## Production checklist
 
-The repository supports Google Cloud in Dammam and an OCI Riyadh alternative.
+The repository contains guarded Google Cloud Dammam and OCI Riyadh reference
+paths. They are not approved for real credential uploads in this release.
 See [docs/GOOGLE_CLOUD_DEPLOYMENT.md](docs/GOOGLE_CLOUD_DEPLOYMENT.md) or
 [infra/oci/README.md](infra/oci/README.md). The Google path includes a reviewed
 Cloud Shell bootstrap; the OCI path remains gated on a verified tenancy and
-explicit charge approval. Data flows,
+explicit charge approval. Direct GCS/OCI browser uploads currently lack a
+provider-side byte cap and malware quarantine, so those profiles are synthetic
+acceptance references only. Data flows,
 provider setup, retention assumptions, and remaining approval decisions for
 GCS/Oracle Object Storage, Gemini, Resend, and workflow automation are documented in
 [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md).
+
+When managed-cloud billing is unavailable, the repository also includes a
+Windows single-host **acceptance** profile in
+[infra/local-production/README.md](infra/local-production/README.md), exposed
+only through the named Cloudflare Tunnel documented in
+[infra/cloudflare/README.md](infra/cloudflare/README.md). It uses loopback-only
+PostgreSQL, encrypted private filesystem storage, restricted ACLs, local
+Windows Defender screening, backups, and a restore drill. This profile is for
+controlled delivery/acceptance and is not managed healthcare production: it
+has one host, no HA/PITR, and no off-site disaster recovery by itself.
 
 إنشاء أول حساب إدارة في قاعدة جديدة مسار مستقل ومحمي بلا كلمة مرور افتراضية؛
 اتبع قسم **First production administrator** في دليل Google Cloud ولا ترسل كلمة

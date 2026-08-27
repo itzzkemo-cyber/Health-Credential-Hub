@@ -1,0 +1,24 @@
+tenancy_id     = "ocid1.tenancy.oc1..REPLACE"
+compartment_id = "ocid1.compartment.oc1..REPLACE"
+
+# Safety lock: this directory does not implement the free acceptance profile.
+# Leave these values unchanged while the project uses a no-cost local tunnel.
+# A separately funded and approved managed deployment must deliberately set:
+# deployment_profile       = "PAID_PRODUCTION"
+# confirm_paid_production  = "CREATE_PAID_PRODUCTION"
+deployment_profile      = "FREE_ACCEPTANCE"
+confirm_paid_production = ""
+
+# Import or issue this in OCI Certificates first. Do not pass PEM/private keys
+# to Terraform variables or commit them.
+tls_certificate_id = "ocid1.certificate.oc1.me-riyadh-1.REPLACE"
+
+# First apply: leave false so Terraform creates the Vault without needing a
+# circular secret dependency. Then create the password secret in that Vault,
+# fill its OCID/version below, set true, and apply a reviewed second plan.
+enable_database = false
+# db_admin_secret_id      = "ocid1.vaultsecret.oc1.me-riyadh-1.REPLACE"
+# db_admin_secret_version = 1
+
+# Optional only when the tenancy's displayed AD must be pinned explicitly.
+# availability_domain = "REPLACE:RUH-AD-1"

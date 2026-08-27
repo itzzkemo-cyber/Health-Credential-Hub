@@ -1,5 +1,5 @@
 import * as OTPAuth from "otpauth";
-import { createHash, randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 
 // Authenticator apps show the issuer + label; keep the issuer ASCII so every
 // app renders it correctly (the Arabic brand name stays in our own UI).
@@ -44,14 +44,22 @@ export function verifyOtp(secretBase32: string, code: string): number | null {
 }
 
 // --- Backup codes ------------------------------------------------------------
-// 8 single-use codes shown exactly once; only sha256 hashes are stored.
+// 8 single-use codes shown exactly once. Codes carry 128 bits of entropy and
+// only a versioned, server-peppered HMAC is stored in PostgreSQL.
 
 const BACKUP_CODE_COUNT = 8;
+const BACKUP_CODE_BYTES = 16;
+const BACKUP_HASH_PREFIX = "hmac:v2:";
+const BACKUP_HASH_CONTEXT = "wathaiqi-health-backup-code-v2";
+const DEVELOPMENT_ONLY_PEPPER = Buffer.from(
+  "development-only-backup-code-pepper",
+  "utf8",
+);
 
 export interface BackupCodeSet {
-  /** Plaintext codes formatted XXXXX-XXXXX — returned to the user once. */
+  /** Plaintext codes formatted XXXX-...-XXXX — returned to the user once. */
   plaintext: string[];
-  /** sha256 hex digests of the normalized codes — what gets persisted. */
+  /** Versioned, peppered HMAC digests — what gets persisted. */
   hashes: string[];
 }
 
@@ -59,23 +67,47 @@ export function normalizeBackupCode(code: string): string {
   return code.replace(/[\s-]/g, "").toLowerCase();
 }
 
-export function hashBackupCode(code: string): string {
-  return createHash("sha256").update(normalizeBackupCode(code)).digest("hex");
+function backupCodePepper(env: NodeJS.ProcessEnv): Buffer {
+  const encoded = env.TOTP_ENCRYPTION_KEY?.trim();
+  if (!encoded) {
+    if (env.NODE_ENV === "production") {
+      throw new Error("TOTP_ENCRYPTION_KEY is required to hash backup codes");
+    }
+    return DEVELOPMENT_ONLY_PEPPER;
+  }
+  const encryptionKey = Buffer.from(encoded, "base64");
+  if (encryptionKey.length !== 32) {
+    throw new Error("TOTP_ENCRYPTION_KEY must be a Base64-encoded 32-byte key");
+  }
+  return createHmac("sha256", encryptionKey)
+    .update(BACKUP_HASH_CONTEXT, "utf8")
+    .digest();
 }
 
-export function generateBackupCodes(): BackupCodeSet {
+export function hashBackupCode(
+  code: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return `${BACKUP_HASH_PREFIX}${createHmac("sha256", backupCodePepper(env))
+    .update(normalizeBackupCode(code), "utf8")
+    .digest("hex")}`;
+}
+
+export function generateBackupCodes(
+  env: NodeJS.ProcessEnv = process.env,
+): BackupCodeSet {
   const plaintext: string[] = [];
   const hashes: string[] = [];
   for (let i = 0; i < BACKUP_CODE_COUNT; i++) {
-    const raw = randomBytes(5).toString("hex").toUpperCase(); // 10 hex chars
-    const formatted = `${raw.slice(0, 5)}-${raw.slice(5)}`;
+    const raw = randomBytes(BACKUP_CODE_BYTES).toString("hex").toUpperCase();
+    const formatted = raw.match(/.{1,4}/g)?.join("-") ?? raw;
     plaintext.push(formatted);
-    hashes.push(hashBackupCode(formatted));
+    hashes.push(hashBackupCode(formatted, env));
   }
   return { plaintext, hashes };
 }
 
 /** Looks like a backup code (rather than a 6-digit OTP)? */
 export function looksLikeBackupCode(code: string): boolean {
-  return /^[0-9a-f]{10}$/.test(normalizeBackupCode(code));
+  return /^[0-9a-f]{32}$/.test(normalizeBackupCode(code));
 }

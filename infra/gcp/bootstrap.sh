@@ -9,6 +9,9 @@ SERVICE="${SERVICE:-health-credential-hub}"
 SQL_INSTANCE="${SQL_INSTANCE:-healthdocs-postgres}"
 DATABASE="${DATABASE:-healthdocs}"
 DATABASE_USER="${DATABASE_USER:-healthdocs_app}"
+DATABASE_ROLE="${DATABASE_ROLE:-healthdocs_app_dml}"
+MIGRATOR_DATABASE_USER="${MIGRATOR_DATABASE_USER:-healthdocs_migrator}"
+MIGRATOR_DATABASE_ROLE="${MIGRATOR_DATABASE_ROLE:-healthdocs_migrator_ddl}"
 BUCKET="${BUCKET:-${PROJECT_ID}-healthdocs-private}"
 REPOSITORY="${REPOSITORY:-healthdocs}"
 SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-healthdocs-runtime}"
@@ -71,12 +74,45 @@ if [[ "${AUTOMATION_OUTBOX_ENABLED}" == "true" ]]; then
   }
 fi
 
-for required_command in gcloud openssl git grep tail tr curl mktemp; do
+for database_identifier in DATABASE DATABASE_USER DATABASE_ROLE MIGRATOR_DATABASE_USER MIGRATOR_DATABASE_ROLE; do
+  if [[ ! "${!database_identifier}" =~ ^[a-z_][a-z0-9_]{0,62}$ ]]; then
+    echo "${database_identifier} must be a lowercase PostgreSQL identifier" >&2
+    exit 1
+  fi
+done
+database_identities=(
+  "${DATABASE_USER}"
+  "${DATABASE_ROLE}"
+  "${MIGRATOR_DATABASE_USER}"
+  "${MIGRATOR_DATABASE_ROLE}"
+)
+for ((i = 0; i < ${#database_identities[@]}; i++)); do
+  for ((j = i + 1; j < ${#database_identities[@]}; j++)); do
+    if [[ "${database_identities[i]}" == "${database_identities[j]}" ]]; then
+      echo "Application and migration database identities must all be distinct" >&2
+      exit 1
+    fi
+  done
+done
+unset database_identities i j
+
+for required_command in gcloud openssl git grep tail tr curl mktemp chmod rm; do
   command -v "${required_command}" >/dev/null || {
     echo "${required_command} is required" >&2
     exit 1
   }
 done
+
+TEMP_FILES=()
+cleanup_temp_files() {
+  local temp_file
+  for temp_file in "${TEMP_FILES[@]:-}"; do
+    if [[ -n "${temp_file}" ]]; then
+      rm -f -- "${temp_file}"
+    fi
+  done
+}
+trap cleanup_temp_files EXIT
 
 # This is intentionally read-only and runs before enabling services or creating
 # paid resources. It also avoids leaking the active account or billing account.
@@ -195,29 +231,78 @@ ensure_secret() {
   fi
 }
 
+ensure_secret_value() {
+  local name="$1"
+  local value="$2"
+  local current_value
+  if ! gcloud secrets describe "${name}" >/dev/null 2>&1; then
+    printf %s "${value}" | gcloud secrets create "${name}" \
+      --replication-policy=user-managed \
+      --locations="${REGION}" \
+      --data-file=- >/dev/null
+    return
+  fi
+  current_value="$(gcloud secrets versions access latest --secret="${name}")"
+  if [[ "${current_value}" != "${value}" ]]; then
+    printf %s "${value}" | gcloud secrets versions add "${name}" \
+      --data-file=- >/dev/null
+  fi
+  unset current_value
+}
+
+ensure_sql_user() {
+  local user="$1"
+  local password="$2"
+  local password_flags_file
+  local yaml_password
+  if [[ "${password}" == *$'\n'* ]] || [[ "${password}" == *$'\r'* ]]; then
+    echo "Cloud SQL passwords must not contain line breaks" >&2
+    exit 1
+  fi
+  password_flags_file="$(mktemp)"
+  TEMP_FILES+=("${password_flags_file}")
+  chmod 600 "${password_flags_file}"
+  yaml_password="${password//\'/\'\'}"
+  printf "password: '%s'\n" "${yaml_password}" > "${password_flags_file}"
+  if gcloud sql users list --instance="${SQL_INSTANCE}" \
+    --filter="name=${user}" --format='value(name)' | grep -qx "${user}"; then
+    gcloud sql users set-password "${user}" \
+      --instance="${SQL_INSTANCE}" \
+      --flags-file="${password_flags_file}" >/dev/null
+  else
+    gcloud sql users create "${user}" \
+      --instance="${SQL_INSTANCE}" \
+      --flags-file="${password_flags_file}" >/dev/null
+  fi
+  rm -f -- "${password_flags_file}"
+  unset password password_flags_file yaml_password
+}
+
 if ! gcloud secrets describe healthdocs-db-password >/dev/null 2>&1; then
   ensure_secret healthdocs-db-password "$(openssl rand -hex 32)"
 fi
-DB_PASSWORD="$(gcloud secrets versions access latest --secret=healthdocs-db-password)"
-
-if gcloud sql users list --instance="${SQL_INSTANCE}" \
-  --filter="name=${DATABASE_USER}" --format='value(name)' | grep -qx "${DATABASE_USER}"; then
-  gcloud sql users set-password "${DATABASE_USER}" \
-    --instance="${SQL_INSTANCE}" \
-    --password="${DB_PASSWORD}"
-else
-  gcloud sql users create "${DATABASE_USER}" \
-    --instance="${SQL_INSTANCE}" \
-    --password="${DB_PASSWORD}"
+if ! gcloud secrets describe healthdocs-migrator-db-password >/dev/null 2>&1; then
+  ensure_secret healthdocs-migrator-db-password "$(openssl rand -hex 32)"
 fi
+APP_DB_PASSWORD="$(gcloud secrets versions access latest --secret=healthdocs-db-password)"
+MIGRATOR_DB_PASSWORD="$(gcloud secrets versions access latest --secret=healthdocs-migrator-db-password)"
+
+# Cloud SQL grants cloudsqlsuperuser to new built-in users. The first migration
+# run uses that bootstrap privilege to establish ownership and custom roles.
+# The supported Cloud SQL Admin API then replaces all broad memberships before
+# a strict second run verifies least privilege and before public deployment.
+ensure_sql_user "${DATABASE_USER}" "${APP_DB_PASSWORD}"
+ensure_sql_user "${MIGRATOR_DATABASE_USER}" "${MIGRATOR_DB_PASSWORD}"
 
 CONNECTION_NAME="$(gcloud sql instances describe "${SQL_INSTANCE}" --format='value(connectionName)')"
-DATABASE_URL="postgresql://${DATABASE_USER}:${DB_PASSWORD}@/${DATABASE}?host=/cloudsql/${CONNECTION_NAME}"
-ensure_secret healthdocs-database-url "${DATABASE_URL}"
+APP_DATABASE_URL="postgresql://${DATABASE_USER}:${APP_DB_PASSWORD}@/${DATABASE}?host=/cloudsql/${CONNECTION_NAME}"
+MIGRATOR_DATABASE_URL="postgresql://${MIGRATOR_DATABASE_USER}:${MIGRATOR_DB_PASSWORD}@/${DATABASE}?host=/cloudsql/${CONNECTION_NAME}"
+ensure_secret_value healthdocs-database-url "${APP_DATABASE_URL}"
+ensure_secret_value healthdocs-migrator-database-url "${MIGRATOR_DATABASE_URL}"
 ensure_secret healthdocs-session-secret "$(openssl rand -hex 48)"
 ensure_secret healthdocs-totp-key "$(openssl rand -base64 32 | tr -d '\n')"
 ensure_secret healthdocs-automation-webhook-secret "$(openssl rand -base64 32 | tr -d '\n')"
-unset DB_PASSWORD DATABASE_URL
+unset APP_DB_PASSWORD MIGRATOR_DB_PASSWORD APP_DATABASE_URL MIGRATOR_DATABASE_URL
 
 # Grant the runtime access only to the secrets this service consumes. Avoid a
 # project-wide secretAccessor role so unrelated secrets remain unreadable.
@@ -235,12 +320,25 @@ for secret in healthdocs-database-url healthdocs-automation-webhook-secret; do
     --role=roles/secretmanager.secretAccessor >/dev/null
 done
 
-# Migration and first-admin identities can read only the database connection.
-for member in "${MIGRATOR_SERVICE_ACCOUNT_EMAIL}" "${BOOTSTRAP_ADMIN_SERVICE_ACCOUNT_EMAIL}"; do
-  gcloud secrets add-iam-policy-binding healthdocs-database-url \
-    --member="serviceAccount:${member}" \
+# The migrator receives only the DDL connection. First-admin receives the same
+# DML-only connection as the API and cannot apply schema changes.
+gcloud secrets add-iam-policy-binding healthdocs-migrator-database-url \
+  --member="serviceAccount:${MIGRATOR_SERVICE_ACCOUNT_EMAIL}" \
+  --role=roles/secretmanager.secretAccessor >/dev/null
+# Remove the legacy shared-connection grant when upgrading an existing
+# bootstrap. A migrator must never be able to fetch the application's DML URL.
+if gcloud secrets get-iam-policy healthdocs-database-url \
+  --flatten='bindings[].members' \
+  --filter="bindings.role=roles/secretmanager.secretAccessor AND bindings.members=serviceAccount:${MIGRATOR_SERVICE_ACCOUNT_EMAIL}" \
+  --format='value(bindings.members)' | \
+  grep -Fqx "serviceAccount:${MIGRATOR_SERVICE_ACCOUNT_EMAIL}"; then
+  gcloud secrets remove-iam-policy-binding healthdocs-database-url \
+    --member="serviceAccount:${MIGRATOR_SERVICE_ACCOUNT_EMAIL}" \
     --role=roles/secretmanager.secretAccessor >/dev/null
-done
+fi
+gcloud secrets add-iam-policy-binding healthdocs-database-url \
+  --member="serviceAccount:${BOOTSTRAP_ADMIN_SERVICE_ACCOUNT_EMAIL}" \
+  --role=roles/secretmanager.secretAccessor >/dev/null
 
 if ! gcloud storage buckets describe "gs://${BUCKET}" >/dev/null 2>&1; then
   gcloud storage buckets create "gs://${BUCKET}" \
@@ -254,6 +352,12 @@ gcloud storage buckets update "gs://${BUCKET}" \
 gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
   --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
   --role=roles/storage.objectUser >/dev/null
+# Runtime readiness checks call storage.buckets.get. legacyBucketReader is the
+# narrow predefined bucket-metadata role; storage.admin is intentionally not
+# granted.
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
+  --member="serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+  --role=roles/storage.legacyBucketReader >/dev/null
 
 if ! gcloud artifacts repositories describe "${REPOSITORY}" --location="${REGION}" >/dev/null 2>&1; then
   gcloud artifacts repositories create "${REPOSITORY}" \
@@ -294,20 +398,50 @@ if [[ ! "${IMAGE_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
 fi
 IMAGE_REF="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
 
-COMMON_ENV="^|^NODE_ENV=production|GOOGLE_CLOUD_PROJECT=${PROJECT_ID}|DB_POOL_MAX=10|PRIVATE_OBJECT_DIR=/${BUCKET}/private|STORAGE_API_ENDPOINT=https://storage.${REGION}.rep.googleapis.com|SESSION_COOKIE_SAME_SITE=lax|EMAIL_ALERTS_DISABLED=1|AUTOMATION_OUTBOX_ENABLED=${AUTOMATION_OUTBOX_ENABLED}|AUTOMATION_FACILITY_ALLOWLIST=${AUTOMATION_FACILITY_ALLOWLIST}"
+COMMON_ENV="^|^NODE_ENV=production|BIND_HOST=0.0.0.0|GOOGLE_CLOUD_PROJECT=${PROJECT_ID}|DB_POOL_MAX=10|OBJECT_STORAGE_PROVIDER=gcs|PRIVATE_OBJECT_DIR=/${BUCKET}/private|STORAGE_API_ENDPOINT=https://storage.${REGION}.rep.googleapis.com|SESSION_COOKIE_SAME_SITE=lax|EMAIL_ALERTS_DISABLED=1|AUTOMATION_OUTBOX_ENABLED=${AUTOMATION_OUTBOX_ENABLED}|AUTOMATION_FACILITY_ALLOWLIST=${AUTOMATION_FACILITY_ALLOWLIST}"
 
 gcloud run jobs deploy "${SERVICE}-migrate" \
   --image="${IMAGE_REF}" \
   --region="${REGION}" \
   --service-account="${MIGRATOR_SERVICE_ACCOUNT_EMAIL}" \
   --set-cloudsql-instances="${CONNECTION_NAME}" \
-  --set-secrets="DATABASE_URL=healthdocs-database-url:latest" \
-  --set-env-vars="MIGRATIONS_DIR=/app/migrations,DB_POOL_MAX=2" \
+  --set-secrets="DATABASE_URL=healthdocs-migrator-database-url:latest" \
+  --set-env-vars="^|^NODE_ENV=production|MIGRATIONS_DIR=/app/migrations|DB_POOL_MAX=2|APP_DATABASE_USER=${DATABASE_USER}|APP_DATABASE_ROLE=${DATABASE_ROLE}|MIGRATOR_DATABASE_USER=${MIGRATOR_DATABASE_USER}|MIGRATOR_DATABASE_ROLE=${MIGRATOR_DATABASE_ROLE}" \
   --command=node \
   --args=dist/migrate.mjs \
   --max-retries=0 \
   --task-timeout=10m
+
+# PostgreSQL 16 requires SET membership in an object's current owner before
+# REASSIGN OWNED. Add the application login temporarily without replacing the
+# migrator's bootstrap membership; the final assignment below removes both.
+gcloud sql users assign-roles "${MIGRATOR_DATABASE_USER}" \
+  --instance="${SQL_INSTANCE}" \
+  --type=BUILT_IN \
+  --database-roles="${DATABASE_USER}" >/dev/null
 gcloud run jobs execute "${SERVICE}-migrate" --region="${REGION}" --wait
+
+# Replace the automatic cloudsqlsuperuser membership only after the custom
+# roles exist. This is idempotent and ensures future releases start with the
+# same reviewed DDL/DML boundary.
+gcloud sql users assign-roles "${DATABASE_USER}" \
+  --instance="${SQL_INSTANCE}" \
+  --type=BUILT_IN \
+  --database-roles="${DATABASE_ROLE}" \
+  --revoke-existing-roles >/dev/null
+gcloud sql users assign-roles "${MIGRATOR_DATABASE_USER}" \
+  --instance="${SQL_INSTANCE}" \
+  --type=BUILT_IN \
+  --database-roles="${MIGRATOR_DATABASE_ROLE}" \
+  --revoke-existing-roles >/dev/null
+
+# Re-run under the final role assignments. The override makes the entrypoint
+# fail closed if either login still has cloudsqlsuperuser, CREATEROLE,
+# CREATEDB, replication/BYPASSRLS, or an unexpected direct membership.
+gcloud run jobs execute "${SERVICE}-migrate" \
+  --region="${REGION}" \
+  --update-env-vars=VERIFY_DATABASE_ROLE_BOUNDARY=true \
+  --wait
 
 # Inert until an operator supplies the exact guarded environment and a
 # short-lived password secret. Missing BOOTSTRAP_CONFIRM makes accidental runs
@@ -395,7 +529,7 @@ gcloud run services update "${SERVICE}" \
   --update-env-vars="PUBLIC_APP_URL=${SERVICE_URL},APP_ORIGINS=${SERVICE_URL}" >/dev/null
 
 CORS_FILE="$(mktemp)"
-trap 'rm -f "${CORS_FILE}"' EXIT
+TEMP_FILES+=("${CORS_FILE}")
 printf '[{"origin":["%s"],"method":["PUT"],"responseHeader":["Content-Type","x-goog-if-generation-match"],"maxAgeSeconds":900}]' \
   "${SERVICE_URL}" > "${CORS_FILE}"
 gcloud storage buckets update "gs://${BUCKET}" --cors-file="${CORS_FILE}" >/dev/null

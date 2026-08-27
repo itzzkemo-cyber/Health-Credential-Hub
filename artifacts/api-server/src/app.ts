@@ -59,6 +59,7 @@ app.use(
         }
       : false,
     referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    xFrameOptions: { action: "deny" },
   }),
 );
 
@@ -106,6 +107,15 @@ app.use(express.json({ limit: "1mb" }));
 
 // csrfOriginGuard (lib/csrf.ts) protects cookie-authenticated mutations;
 // the session-issuing login routes carry their own guard route-side.
+// API responses can contain workforce and credential data. Prevent browsers,
+// intermediary proxies, and Cloudflare from retaining any API response unless
+// an individual route deliberately overrides this with an even stricter
+// private policy (for example credential document downloads).
+app.use("/api", (_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  next();
+});
 app.use("/api", csrfOriginGuard, router);
 
 // Never let unknown API paths fall through to the SPA's HTML entry point.

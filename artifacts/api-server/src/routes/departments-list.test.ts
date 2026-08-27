@@ -43,19 +43,27 @@ const testState = vi.hoisted(() => ({
 vi.mock("drizzle-orm", () => ({
   and: vi.fn((...conditions: unknown[]) => conditions),
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
+  isNull: vi.fn((column: unknown) => ({ column, value: null })),
 }));
 
 vi.mock("@workspace/db", () => ({
-  departmentsTable: { facilityId: "departments.facilityId" },
+  departmentsTable: {
+    facilityId: "departments.facilityId",
+    deletedAt: "departments.deletedAt",
+  },
   usersTable: {},
   db: {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(
-          async (condition: { column: unknown; value: unknown }) => {
-            testState.departmentConditions.push(condition);
+          async (conditions: Array<{ column: unknown; value: unknown }>) => {
+            testState.departmentConditions.push(...conditions);
+            const facilityCondition = conditions.find(
+              (condition) => condition.column === "departments.facilityId",
+            );
             return testState.departments.filter(
-              (department) => department.facilityId === condition.value,
+              (department) =>
+                department.facilityId === facilityCondition?.value,
             );
           },
         ),
@@ -121,9 +129,7 @@ describe("department list facility scope", () => {
     if (!address || typeof address === "string") {
       throw new Error("Expected a disposable TCP listener");
     }
-    return fetch(
-      `http://127.0.0.1:${address.port}/api/departments${query}`,
-    );
+    return fetch(`http://127.0.0.1:${address.port}/api/departments${query}`);
   }
 
   it("lets a system administrator request a target facility", async () => {
@@ -132,6 +138,7 @@ describe("department list facility scope", () => {
     expect(response.status).toBe(200);
     expect(testState.departmentConditions).toEqual([
       { column: "departments.facilityId", value: 20 },
+      { column: "departments.deletedAt", value: null },
     ]);
     expect(testState.getCredentialsFor).toHaveBeenCalledWith([21]);
     expect(testState.getPolicies).toHaveBeenCalledWith(20);
@@ -148,6 +155,7 @@ describe("department list facility scope", () => {
     expect(response.status).toBe(200);
     expect(testState.departmentConditions).toEqual([
       { column: "departments.facilityId", value: 10 },
+      { column: "departments.deletedAt", value: null },
     ]);
     expect(testState.getCredentialsFor).toHaveBeenCalledWith([11]);
     expect(testState.getPolicies).toHaveBeenCalledWith(10);
@@ -164,6 +172,7 @@ describe("department list facility scope", () => {
     expect(response.status).toBe(200);
     expect(testState.departmentConditions).toEqual([
       { column: "departments.facilityId", value: 10 },
+      { column: "departments.deletedAt", value: null },
     ]);
   });
 
@@ -173,6 +182,7 @@ describe("department list facility scope", () => {
     expect(response.status).toBe(200);
     expect(testState.departmentConditions).toEqual([
       { column: "departments.facilityId", value: 10 },
+      { column: "departments.deletedAt", value: null },
     ]);
   });
 

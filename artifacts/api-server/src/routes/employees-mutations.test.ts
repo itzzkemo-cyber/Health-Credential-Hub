@@ -10,7 +10,27 @@ const testState = vi.hoisted(() => ({
     id: 1,
     role: "hospital_admin",
     facilityId: 10,
+    departmentId: null as number | null,
+    supervisorId: null as number | null,
     isActive: true,
+    sessionVersion: 4,
+    passwordHash: "admin-password-hash",
+    totpEnabled: true,
+    totpSecret: "encrypted-secret",
+    name: "Facility Admin",
+    nameAr: "مدير المنشأة",
+  },
+  lockedActor: {
+    id: 1,
+    role: "hospital_admin",
+    facilityId: 10,
+    departmentId: null as number | null,
+    supervisorId: null as number | null,
+    isActive: true,
+    sessionVersion: 4,
+    passwordHash: "admin-password-hash",
+    totpEnabled: true,
+    totpSecret: "encrypted-secret",
     name: "Facility Admin",
     nameAr: "مدير المنشأة",
   },
@@ -21,22 +41,33 @@ const testState = vi.hoisted(() => ({
     isActive: true,
     name: "Managed Employee",
     nameAr: "موظف مُدار",
-    departmentId: null,
-    supervisorId: null,
+    departmentId: null as number | null,
+    supervisorId: null as number | null,
     sessionVersion: 1,
     createdAt: new Date("2026-08-27T00:00:00.000Z"),
   },
-  selectResults: [] as Array<Array<Record<string, unknown>>>,
+  extraUsers: [] as Array<Record<string, unknown>>,
+  departmentRows: [{ id: 7, facilityId: 10 }] as Array<Record<string, unknown>>,
+  lockSequence: [] as string[],
+  lockedUserBatches: [] as Array<{
+    ids: number[];
+    orderBy: unknown;
+    strength: string;
+  }>,
   transactionCount: 0,
   transactionRolledBack: false,
   committedUpdate: null as Record<string, unknown> | null,
   committedAudit: null as Record<string, unknown> | null,
+  updateCondition: null as unknown,
   failAudit: false,
+  casConflict: false,
+  consumeSecondFactor: vi.fn(async (_tx: unknown, actor: unknown) => actor),
 }));
 
 vi.mock("drizzle-orm", () => ({
   and: vi.fn((...conditions: unknown[]) => conditions),
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
+  inArray: vi.fn((column: unknown, values: unknown[]) => ({ column, values })),
   isNull: vi.fn(),
   sql: vi.fn((strings: TemplateStringsArray) => strings.join("")),
 }));
@@ -51,16 +82,18 @@ vi.mock("@workspace/db", () => {
     sessionVersion: "users.sessionVersion",
   };
   const auditLogsTable = { kind: "auditLogs" };
+  const departmentsTable = {
+    id: "departments.id",
+    facilityId: "departments.facilityId",
+    deletedAt: "departments.deletedAt",
+  };
 
   return {
     usersTable,
     auditLogsTable,
     credentialsTable: {},
     facilitiesTable: { id: "facilities.id" },
-    departmentsTable: {
-      id: "departments.id",
-      facilityId: "departments.facilityId",
-    },
+    departmentsTable,
     USER_ROLES: [
       "employee",
       "supervisor",
@@ -71,40 +104,75 @@ vi.mock("@workspace/db", () => {
     db: {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
-          where: vi.fn(async () => testState.selectResults.shift() ?? []),
+          where: vi.fn(async () => []),
         })),
       })),
       transaction: vi.fn(
-        async (
-          callback: (transaction: {
-            update: (table: unknown) => {
-              set: (values: Record<string, unknown>) => {
-                where: (condition: unknown) => PromiseLike<void> & {
-                  returning: () => Promise<Array<Record<string, unknown>>>;
-                };
-              };
-            };
-            insert: (table: unknown) => {
-              values: (values: Record<string, unknown>) => Promise<void>;
-            };
-          }) => Promise<unknown>,
-        ) => {
+        async (callback: (transaction: any) => Promise<unknown>) => {
           testState.transactionCount += 1;
           let stagedUpdate: Record<string, unknown> | null = null;
           let stagedAudit: Record<string, unknown> | null = null;
 
           const transaction = {
+            select: (_selection?: unknown) => ({
+              from: (table: unknown) => ({
+                where: (condition: unknown) => {
+                  if (table === usersTable) {
+                    const ids =
+                      typeof condition === "object" &&
+                      condition !== null &&
+                      "values" in condition &&
+                      Array.isArray(condition.values)
+                        ? (condition.values as number[])
+                        : [];
+                    return {
+                      orderBy: (column: unknown) => ({
+                        for: async (strength: string) => {
+                          testState.lockSequence.push(`users:${strength}`);
+                          testState.lockedUserBatches.push({
+                            ids: [...ids],
+                            orderBy: column,
+                            strength,
+                          });
+                          return [
+                            testState.lockedActor,
+                            testState.target,
+                            ...testState.extraUsers,
+                          ]
+                            .filter((entry) => ids.includes(entry.id as number))
+                            .sort(
+                              (left, right) =>
+                                (left.id as number) - (right.id as number),
+                            );
+                        },
+                      }),
+                    };
+                  }
+                  if (table === departmentsTable) {
+                    return {
+                      for: async (strength: string) => {
+                        testState.lockSequence.push(`department:${strength}`);
+                        return testState.departmentRows;
+                      },
+                    };
+                  }
+                  throw new Error("Unexpected select table");
+                },
+              }),
+            }),
             update: (table: unknown) => {
               if (table !== usersTable)
                 throw new Error("Unexpected update table");
               return {
                 set: (values: Record<string, unknown>) => ({
-                  where: (_condition: unknown) => {
+                  where: (condition: unknown) => {
+                    testState.updateCondition = condition;
                     stagedUpdate = { ...testState.target, ...values };
                     const completion = Promise.resolve() as Promise<void> & {
                       returning: () => Promise<Array<Record<string, unknown>>>;
                     };
-                    completion.returning = async () => [stagedUpdate!];
+                    completion.returning = async () =>
+                      testState.casConflict ? [] : [stagedUpdate!];
                     return completion;
                   },
                 }),
@@ -148,6 +216,7 @@ vi.mock("../lib/auth", () => ({
   ],
   getUser: vi.fn(() => testState.actor),
   hashPassword: vi.fn(),
+  comparePassword: vi.fn(async (password: string) => password === "admin-password"),
   requireAuth: (_req: Request, _res: Response, next: NextFunction) => next(),
   requireRole:
     (...roles: string[]) =>
@@ -158,6 +227,10 @@ vi.mock("../lib/auth", () => ({
       }
       next();
     },
+}));
+
+vi.mock("../lib/secondFactor", () => ({
+  consumeSecondFactor: testState.consumeSecondFactor,
 }));
 
 vi.mock("../lib/helpers", () => ({
@@ -178,15 +251,37 @@ describe("administrative employee mutations", () => {
   let server: ReturnType<express.Express["listen"]> | undefined;
 
   beforeEach(() => {
+    testState.actor.id = 1;
     testState.actor.role = "hospital_admin";
+    testState.actor.facilityId = 10;
+    testState.actor.departmentId = null;
+    testState.actor.supervisorId = null;
+    testState.actor.isActive = true;
+    testState.actor.sessionVersion = 4;
+    Object.assign(testState.lockedActor, testState.actor, {
+      departmentId: null,
+      supervisorId: null,
+      sessionVersion: 4,
+    });
+    testState.target.id = 2;
     testState.target.role = "employee";
+    testState.target.facilityId = 10;
+    testState.target.departmentId = null;
+    testState.target.supervisorId = null;
     testState.target.isActive = true;
-    testState.selectResults = [];
+    testState.target.sessionVersion = 1;
+    testState.extraUsers = [];
+    testState.departmentRows = [{ id: 7, facilityId: 10 }];
+    testState.lockSequence = [];
+    testState.lockedUserBatches = [];
     testState.transactionCount = 0;
     testState.transactionRolledBack = false;
     testState.committedUpdate = null;
     testState.committedAudit = null;
+    testState.updateCondition = null;
     testState.failAudit = false;
+    testState.casConflict = false;
+    testState.consumeSecondFactor.mockClear();
   });
 
   afterEach(async () => {
@@ -241,6 +336,15 @@ describe("administrative employee mutations", () => {
     },
   );
 
+  it("rejects an invalid employee identifier before opening a transaction", async () => {
+    const response = await request("PATCH", "/employees/not-an-id", {
+      name: "Invalid Target",
+    });
+
+    expect(response.status).toBe(404);
+    expect(testState.transactionCount).toBe(0);
+  });
+
   it("commits a profile update and its audit event in one transaction", async () => {
     const response = await request("PATCH", "/employees/2", {
       name: "Updated Employee",
@@ -248,9 +352,16 @@ describe("administrative employee mutations", () => {
 
     expect(response.status).toBe(200);
     expect(testState.transactionCount).toBe(1);
+    expect(testState.lockedUserBatches).toEqual([
+      { ids: [1, 2], orderBy: "users.id", strength: "update" },
+    ]);
     expect(testState.committedUpdate).toEqual(
       expect.objectContaining({ id: 2, name: "Updated Employee" }),
     );
+    expect(testState.updateCondition).toEqual([
+      { column: "users.id", value: 2 },
+      { column: "users.sessionVersion", value: 1 },
+    ]);
     expect(testState.committedAudit).toEqual(
       expect.objectContaining({
         action: "Updated employee",
@@ -276,9 +387,13 @@ describe("administrative employee mutations", () => {
   it("records a non-sensitive old/new role change in the atomic audit", async () => {
     const response = await request("PATCH", "/employees/2", {
       role: "supervisor",
+      currentPassword: "admin-password",
+      code: "123456",
     });
 
     expect(response.status).toBe(200);
+    expect(testState.committedUpdate?.sessionVersion).not.toBe(1);
+    expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
     expect(testState.committedAudit).toEqual(
       expect.objectContaining({
         details: JSON.stringify({
@@ -300,7 +415,9 @@ describe("administrative employee mutations", () => {
   ])(
     "rejects assigning an ineligible $label supervisor",
     async ({ supervisor }) => {
-      testState.selectResults = [[supervisor]];
+      testState.extraUsers = [
+        { ...supervisor, facilityId: 10, sessionVersion: 1 },
+      ];
 
       const response = await request("PATCH", "/employees/2", {
         supervisorId: 3,
@@ -311,13 +428,12 @@ describe("administrative employee mutations", () => {
         message:
           "Supervisor must be an active non-employee in the employee facility",
       });
-      expect(testState.transactionCount).toBe(0);
+      expect(testState.transactionCount).toBe(1);
+      expect(testState.committedUpdate).toBeNull();
     },
   );
 
   it("commits soft deletion and its audit event in one transaction", async () => {
-    testState.selectResults = [[testState.target]];
-
     const response = await request("DELETE", "/employees/2");
 
     expect(response.status).toBe(204);
@@ -336,7 +452,6 @@ describe("administrative employee mutations", () => {
   });
 
   it("rolls soft deletion back when its audit insert fails", async () => {
-    testState.selectResults = [[testState.target]];
     testState.failAudit = true;
 
     const response = await request("DELETE", "/employees/2");
@@ -357,6 +472,7 @@ describe("administrative employee mutations", () => {
     expect(testState.committedUpdate).toEqual(
       expect.objectContaining({ isActive: true }),
     );
+    expect(testState.committedUpdate?.sessionVersion).not.toBe(1);
     expect(testState.committedAudit).toEqual(
       expect.objectContaining({
         action: "Activated employee",
@@ -375,6 +491,150 @@ describe("administrative employee mutations", () => {
     expect(response.status).toBe(500);
     expect(testState.transactionRolledBack).toBe(true);
     expect(testState.committedUpdate).toBeNull();
+    expect(testState.committedAudit).toBeNull();
+  });
+
+  it("locks actor, target, and proposed supervisor together in stable ID order", async () => {
+    testState.actor.id = 9;
+    testState.lockedActor.id = 9;
+    testState.extraUsers = [
+      {
+        id: 3,
+        role: "supervisor",
+        facilityId: 10,
+        isActive: true,
+        sessionVersion: 2,
+      },
+    ];
+
+    const response = await request("PATCH", "/employees/2", {
+      supervisorId: 3,
+      currentPassword: "admin-password",
+      code: "123456",
+    });
+
+    expect(response.status).toBe(200);
+    expect(testState.committedUpdate?.sessionVersion).not.toBe(1);
+    expect(testState.lockedUserBatches).toEqual([
+      { ids: [2, 3, 9], orderBy: "users.id", strength: "update" },
+    ]);
+  });
+
+  it("locks the proposed department before users and rechecks its facility", async () => {
+    const response = await request("PATCH", "/employees/2", {
+      departmentId: 7,
+      currentPassword: "admin-password",
+      code: "123456",
+    });
+
+    expect(response.status).toBe(200);
+    expect(testState.lockSequence).toEqual([
+      "department:key share",
+      "users:update",
+    ]);
+    expect(testState.committedUpdate).toEqual(
+      expect.objectContaining({ departmentId: 7 }),
+    );
+    expect(testState.committedUpdate?.sessionVersion).not.toBe(1);
+  });
+
+  it("requires MFA step-up before an actual organizational change", async () => {
+    const response = await request("PATCH", "/employees/2", {
+      role: "supervisor",
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "step_up_failed" }),
+    );
+    expect(testState.committedUpdate).toBeNull();
+    expect(testState.committedAudit).toBeNull();
+  });
+
+  it("does not rotate the target session on an idempotent active-state request", async () => {
+    const response = await request("POST", "/employees/2/activate");
+
+    expect(response.status).toBe(200);
+    expect(testState.committedUpdate).toBeNull();
+    expect(testState.committedAudit).toBeNull();
+  });
+
+  it("rejects a stale administrator session after the locked actor was demoted", async () => {
+    testState.lockedActor.role = "department_manager";
+
+    const response = await request("DELETE", "/employees/2");
+
+    expect(response.status).toBe(403);
+    expect(testState.transactionCount).toBe(1);
+    expect(testState.committedUpdate).toBeNull();
+    expect(testState.committedAudit).toBeNull();
+  });
+
+  it("rejects a mutation after the locked actor was deactivated", async () => {
+    testState.lockedActor.isActive = false;
+
+    const response = await request("PATCH", "/employees/2", {
+      name: "Must Not Commit",
+    });
+
+    expect(response.status).toBe(401);
+    expect(testState.committedUpdate).toBeNull();
+  });
+
+  it("rejects a mutation after the actor session was revoked", async () => {
+    testState.lockedActor.sessionVersion = 5;
+
+    const response = await request("POST", "/employees/2/deactivate");
+
+    expect(response.status).toBe(401);
+    expect(testState.committedUpdate).toBeNull();
+    expect(testState.committedAudit).toBeNull();
+  });
+
+  it("rechecks the locked target facility instead of trusting pre-transaction scope", async () => {
+    testState.target.facilityId = 11;
+
+    const response = await request("PATCH", "/employees/2", {
+      name: "Cross Facility",
+    });
+
+    expect(response.status).toBe(404);
+    expect(testState.committedUpdate).toBeNull();
+  });
+
+  it("rechecks a department manager's team scope from the locked rows", async () => {
+    testState.actor.role = "department_manager";
+    testState.actor.departmentId = 5;
+    testState.lockedActor.role = "department_manager";
+    testState.lockedActor.departmentId = 5;
+    testState.target.departmentId = 6;
+
+    const response = await request("PATCH", "/employees/2", {
+      name: "Other Department",
+    });
+
+    expect(response.status).toBe(404);
+    expect(testState.committedUpdate).toBeNull();
+    expect(testState.committedAudit).toBeNull();
+  });
+
+  it("rechecks the locked target rank before writing", async () => {
+    testState.target.role = "hospital_admin";
+
+    const response = await request("POST", "/employees/2/deactivate");
+
+    expect(response.status).toBe(403);
+    expect(testState.committedUpdate).toBeNull();
+  });
+
+  it("returns a conflict and omits the audit when the conditional update loses CAS", async () => {
+    testState.casConflict = true;
+
+    const response = await request("PATCH", "/employees/2", {
+      name: "Conflicting Employee",
+    });
+
+    expect(response.status).toBe(409);
     expect(testState.committedAudit).toBeNull();
   });
 });

@@ -23,6 +23,7 @@ const testState = vi.hoisted(() => ({
   logAudit: vi.fn(async () => undefined),
   setSessionCookie: vi.fn(),
   reuseNewPassword: false,
+  actorAvailable: true,
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -40,41 +41,63 @@ vi.mock("@workspace/db", () => {
     sessionVersion: "users.sessionVersion",
   };
   const passwordResetTokensTable = {
+    id: "passwordResetTokens.id",
+    userId: "passwordResetTokens.userId",
     tokenHash: "passwordResetTokens.tokenHash",
     usedAt: "passwordResetTokens.usedAt",
     expiresAt: "passwordResetTokens.expiresAt",
   };
+  const auditLogsTable = { id: "auditLogs.id" };
+  const select = vi.fn(() => ({
+    from: vi.fn((table: unknown) => {
+      const rows =
+        table === passwordResetTokensTable
+          ? [{ id: 1, userId: testState.actor.id }]
+          : testState.actorAvailable
+            ? [testState.actor]
+            : [];
+      const terminal = Promise.resolve(rows);
+      return {
+        where: vi.fn(() => ({
+          for: vi.fn(async () => rows),
+          then: terminal.then.bind(terminal),
+        })),
+      };
+    }),
+  }));
+  const insert = vi.fn(() => ({ values: vi.fn(async () => undefined) }));
+  const update = vi.fn((table: unknown) => ({
+    set: vi.fn((values: Record<string, unknown>) => ({
+      where: vi.fn(() => ({
+        returning: vi.fn(async () => {
+          const tableName =
+            table === passwordResetTokensTable ? "resetTokens" : "users";
+          testState.updateCalls.push({ table: tableName, values });
+          if (tableName === "resetTokens") {
+            return [{ id: 1, userId: testState.actor.id }];
+          }
+          return [
+            {
+              ...testState.actor,
+              ...values,
+              sessionVersion: testState.actor.sessionVersion + 1,
+              mustChangePassword: false,
+            },
+          ];
+        }),
+      })),
+    })),
+  }));
+  const tx = { select, insert, update };
   return {
     usersTable,
     passwordResetTokensTable,
+    auditLogsTable,
     db: {
-      select: vi.fn(() => ({
-        from: vi.fn(() => ({
-          where: vi.fn(async () => [testState.actor]),
-        })),
-      })),
-      update: vi.fn((table: unknown) => ({
-        set: vi.fn((values: Record<string, unknown>) => ({
-          where: vi.fn(() => ({
-            returning: vi.fn(async () => {
-              const tableName =
-                table === passwordResetTokensTable ? "resetTokens" : "users";
-              testState.updateCalls.push({ table: tableName, values });
-              if (tableName === "resetTokens") {
-                return [{ id: 1, userId: testState.actor.id }];
-              }
-              return [
-                {
-                  ...testState.actor,
-                  ...values,
-                  sessionVersion: testState.actor.sessionVersion + 1,
-                  mustChangePassword: false,
-                },
-              ];
-            }),
-          })),
-        })),
-      })),
+      ...tx,
+      transaction: vi.fn(async (callback: (executor: typeof tx) => unknown) =>
+        callback(tx),
+      ),
     },
   };
 });
@@ -125,6 +148,7 @@ vi.mock("../lib/logger", () => ({
 }));
 
 import router from "./auth";
+import { comparePassword } from "../lib/auth";
 
 describe("clearing the temporary-password requirement", () => {
   let server: ReturnType<express.Express["listen"]> | undefined;
@@ -134,6 +158,8 @@ describe("clearing the temporary-password requirement", () => {
     testState.logAudit.mockClear();
     testState.setSessionCookie.mockClear();
     testState.reuseNewPassword = false;
+    testState.actorAvailable = true;
+    vi.mocked(comparePassword).mockClear();
   });
 
   afterEach(async () => {
@@ -204,6 +230,21 @@ describe("clearing the temporary-password requirement", () => {
     expect(testState.setSessionCookie).toHaveBeenCalledWith(
       expect.anything(),
       "fresh-session",
+    );
+  });
+
+  it("runs bcrypt verification against a fixed hash for an unknown account", async () => {
+    testState.actorAvailable = false;
+
+    const response = await post("/auth/login", {
+      email: "missing@example.sa",
+      password: "incorrect-password",
+    });
+
+    expect(response.status).toBe(401);
+    expect(comparePassword).toHaveBeenCalledWith(
+      "incorrect-password",
+      expect.stringMatching(/^\$2b\$10\$/),
     );
   });
 

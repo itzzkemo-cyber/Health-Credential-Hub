@@ -12,7 +12,9 @@ import {
   getEmployeeDisplayName,
   getEmployeeInitial,
   getSupervisorOptions,
+  hasEmployeeOrganizationalChanges,
   isPasswordDeliveryReady,
+  requiresEmployeeCreateStepUp,
 } from "./employee-list-state";
 
 describe("employee list presentation", () => {
@@ -87,6 +89,41 @@ describe("employee list presentation", () => {
     expect(payload.supervisorId).toBeNull();
   });
 
+  it("requires step-up for every role that can manage another account", () => {
+    expect(requiresEmployeeCreateStepUp("employee")).toBe(false);
+    expect(requiresEmployeeCreateStepUp("supervisor")).toBe(true);
+    expect(requiresEmployeeCreateStepUp("department_manager")).toBe(true);
+    expect(requiresEmployeeCreateStepUp("hospital_admin")).toBe(true);
+    expect(requiresEmployeeCreateStepUp("system_admin")).toBe(true);
+  });
+
+  it("adds step-up credentials only when the submit handler supplies them", () => {
+    const form = {
+      name: "Noura",
+      nameAr: "نورة",
+      email: "noura@hospital.sa",
+      password: "manager-entered-secret",
+      role: "supervisor",
+      departmentId: "4",
+      supervisorId: "",
+      facilityId: "3",
+      jobTitle: "Nurse",
+      jobTitleAr: "ممرضة",
+      employeeNumber: "N-204",
+    };
+
+    expect(buildEmployeeInput(form)).not.toHaveProperty("currentPassword");
+    expect(
+      buildEmployeeInput(form, {
+        currentPassword: " administrator password ",
+        code: "123456",
+      }),
+    ).toMatchObject({
+      currentPassword: " administrator password ",
+      code: "123456",
+    });
+  });
+
   it("generates a strong temporary password without a fixed value", () => {
     const password = generateTemporaryPassword();
 
@@ -132,6 +169,61 @@ describe("employee list presentation", () => {
       phone: "0500000000",
     });
     expect(payload).not.toHaveProperty("facilityId");
+  });
+
+  it("detects only actual organizational changes for update step-up", () => {
+    const employee = {
+      role: "employee",
+      departmentId: 4,
+      supervisorId: null,
+    };
+    const unchanged = {
+      role: "employee",
+      departmentId: "4",
+      supervisorId: "",
+    };
+
+    expect(hasEmployeeOrganizationalChanges(employee, unchanged)).toBe(false);
+    expect(
+      hasEmployeeOrganizationalChanges(employee, {
+        ...unchanged,
+        role: "supervisor",
+      }),
+    ).toBe(true);
+    expect(
+      hasEmployeeOrganizationalChanges(employee, {
+        ...unchanged,
+        departmentId: "5",
+      }),
+    ).toBe(true);
+    expect(
+      hasEmployeeOrganizationalChanges(employee, {
+        ...unchanged,
+        supervisorId: "8",
+      }),
+    ).toBe(true);
+  });
+
+  it("includes step-up credentials in an organizational update payload", () => {
+    const payload = buildEmployeeUpdate(
+      {
+        name: "Noura",
+        nameAr: "نورة",
+        role: "supervisor",
+        departmentId: "4",
+        supervisorId: "8",
+        jobTitle: "Nurse",
+        jobTitleAr: "ممرضة",
+        phone: "",
+      },
+      true,
+      { currentPassword: "administrator password", code: "123456" },
+    );
+
+    expect(payload).toMatchObject({
+      currentPassword: "administrator password",
+      code: "123456",
+    });
   });
 
   it("prevents self organizational edits and respects the admin hierarchy", () => {

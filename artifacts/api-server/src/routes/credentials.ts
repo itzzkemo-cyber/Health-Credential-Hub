@@ -14,6 +14,7 @@ import {
 } from "@workspace/db";
 import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { requireAuth, getUser, MANAGER_ROLES } from "../lib/auth";
+import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
 import {
   computeStatus,
   daysUntil,
@@ -286,8 +287,7 @@ router.post("/credentials/ocr", async (req, res) => {
       res.status(422).json({ message: "File too large for AI reading" });
       return;
     }
-    const downloaded = await objectFile.download();
-    buffer = downloaded[0];
+    buffer = metadata.bytes;
   } catch (error) {
     if (error instanceof ObjectNotFoundError) {
       res.status(404).json({ message: "Document not found" });
@@ -557,7 +557,9 @@ router.post("/credentials", async (req, res) => {
         .orderBy(usersTable.id)
         .for("update");
       const actor = lockedUsers.find((entry) => entry.id === user.id);
-      if (!actor || !actor.isActive) return { kind: "forbidden" as const };
+      if (!isFreshActiveSessionActor(actor, user)) {
+        return { kind: "unauthorized" as const };
+      }
       const effectiveEmployeeId =
         actor.role === "employee" ? actor.id : requestedEmployeeId;
       const employee = lockedUsers.find(
@@ -698,6 +700,10 @@ router.post("/credentials", async (req, res) => {
 
   if (transactionResult.kind === "forbidden") {
     res.status(403).json({ message: "Employee not in your scope" });
+    return;
+  }
+  if (transactionResult.kind === "unauthorized") {
+    res.status(401).json({ message: "Unauthorized" });
     return;
   }
   res
@@ -882,7 +888,10 @@ router.patch("/credentials/:id", async (req, res) => {
       const owner = lockedUsers.find(
         (entry) => entry.id === current.employeeId,
       );
-      if (!actor || !owner || !canAccessCredentialOwner(actor, owner)) {
+      if (!isFreshActiveSessionActor(actor, user)) {
+        return { kind: "unauthorized" as const };
+      }
+      if (!owner || !canAccessCredentialOwner(actor, owner)) {
         return { kind: "forbidden" as const };
       }
       if (
@@ -1017,6 +1026,10 @@ router.patch("/credentials/:id", async (req, res) => {
     res.status(404).json({ message: "Credential not found" });
     return;
   }
+  if (transactionResult.kind === "unauthorized") {
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
   if (transactionResult.kind === "conflict") {
     res.status(409).json({
       message: "Credential changed — reload it and try again",
@@ -1035,7 +1048,7 @@ router.delete("/credentials/:id", async (req, res) => {
     res.status(404).json({ message: "Credential not found" });
     return;
   }
-  const deleted = await db.transaction(async (tx) => {
+  const deletion = await db.transaction(async (tx) => {
     const current = (
       await tx
         .select()
@@ -1048,7 +1061,7 @@ router.delete("/credentials/:id", async (req, res) => {
         )
         .for("update")
     )[0];
-    if (!current) return false;
+    if (!current) return { kind: "not_found" as const };
 
     const lockedUsers = await tx
       .select()
@@ -1058,8 +1071,11 @@ router.delete("/credentials/:id", async (req, res) => {
       .for("update");
     const actor = lockedUsers.find((entry) => entry.id === user.id);
     const owner = lockedUsers.find((entry) => entry.id === current.employeeId);
-    if (!actor || !owner || !canAccessCredentialOwner(actor, owner)) {
-      return false;
+    if (!isFreshActiveSessionActor(actor, user)) {
+      return { kind: "unauthorized" as const };
+    }
+    if (!owner || !canAccessCredentialOwner(actor, owner)) {
+      return { kind: "not_found" as const };
     }
 
     const rows = await tx
@@ -1078,7 +1094,7 @@ router.delete("/credentials/:id", async (req, res) => {
         ),
       )
       .returning({ id: credentialsTable.id });
-    if (!rows[0]) return false;
+    if (!rows[0]) return { kind: "not_found" as const };
 
     await tx
       .delete(notificationsTable)
@@ -1096,9 +1112,13 @@ router.delete("/credentials/:id", async (req, res) => {
         "Credential record and private object retained for the configured retention and cleanup process",
       ipAddress: req.ip ?? null,
     });
-    return true;
+    return { kind: "deleted" as const };
   });
-  if (!deleted) {
+  if (deletion.kind === "unauthorized") {
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+  if (deletion.kind === "not_found") {
     res.status(404).json({ message: "Credential not found" });
     return;
   }

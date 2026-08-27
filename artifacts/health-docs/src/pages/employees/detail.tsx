@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useLocation, useRoute } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -76,10 +76,25 @@ import {
   getDepartmentOptions,
   getEmployeeDisplayName,
   getSupervisorOptions,
+  hasEmployeeOrganizationalChanges,
 } from "./employee-list-state";
 import { getDepartmentQueryParams } from "./department-query";
+import {
+  ADMIN_MFA_CODE_FIELD,
+  ADMIN_MFA_CURRENT_PASSWORD_FIELD,
+  getAdminMfaDisableErrorKey,
+  getAdminMfaStepUpErrorKey,
+  readAdminMfaStepUpCredentials,
+  readAdminMfaStepUpInput,
+} from "./admin-mfa-step-up";
 
 const ADMIN_ROLES = ["hospital_admin", "system_admin"];
+
+function apiErrorCode(error: unknown): string | undefined {
+  return error instanceof ApiError
+    ? (error.data as { code?: string } | null)?.code
+    : undefined;
+}
 
 export default function EmployeeDetail() {
   const { t, isRTL } = useLanguage();
@@ -95,6 +110,13 @@ export default function EmployeeDetail() {
   const isAdmin = !!me?.role && ADMIN_ROLES.includes(me.role);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<EmployeeEditForm | null>(null);
+  const [editFeedbackKey, setEditFeedbackKey] = useState<string | null>(null);
+  const editStepUpPasswordRef = useRef<HTMLInputElement>(null);
+  const editStepUpCodeRef = useRef<HTMLInputElement>(null);
+  const [isAdminDisableOpen, setIsAdminDisableOpen] = useState(false);
+  const adminDisableFormRef = useRef<HTMLFormElement>(null);
+  const adminDisablePasswordRef = useRef<HTMLInputElement>(null);
+  const adminDisableTriggerRef = useRef<HTMLButtonElement>(null);
 
   const employeeQuery = useGetEmployee(id);
   const emp = employeeQuery.data;
@@ -119,10 +141,12 @@ export default function EmployeeDetail() {
       enabled: isAdmin && isEditOpen && emp != null,
     },
   });
-  const updateEmployee = useUpdateEmployee();
+  const updateEmployee = useUpdateEmployee({ mutation: { gcTime: 0 } });
   const activateEmployee = useActivateEmployee();
   const deactivateEmployee = useDeactivateEmployee();
-  const adminDisableMutation = useTotpAdminDisable();
+  const adminDisableMutation = useTotpAdminDisable({
+    mutation: { gcTime: 0 },
+  });
 
   const actor = me?.id != null && me.role ? { id: me.id, role: me.role } : null;
   const organizationEditable =
@@ -147,6 +171,11 @@ export default function EmployeeDetail() {
   const assignableRoles = emp
     ? [...new Set([emp.role, ...getAssignableRoles(me?.role ?? "")])]
     : [];
+  const editRequiresStepUp =
+    organizationEditable &&
+    emp != null &&
+    editForm != null &&
+    hasEmployeeOrganizationalChanges(emp, editForm);
   const facility = facilitiesQuery.data?.find(
     (candidate) => candidate.id === emp?.facilityId,
   );
@@ -158,28 +187,78 @@ export default function EmployeeDetail() {
     ]);
   };
 
+  const clearEditStepUpSecrets = () => {
+    if (editStepUpPasswordRef.current) {
+      editStepUpPasswordRef.current.value = "";
+    }
+    if (editStepUpCodeRef.current) editStepUpCodeRef.current.value = "";
+  };
+
   const openEdit = () => {
     if (!emp) return;
+    clearEditStepUpSecrets();
     updateEmployee.reset();
+    setEditFeedbackKey(null);
     setEditForm(createEmployeeEditForm(emp));
     setIsEditOpen(true);
   };
 
-  const handleUpdate = (event: React.FormEvent) => {
+  const closeEdit = () => {
+    if (updateEmployee.isPending) return;
+    clearEditStepUpSecrets();
+    updateEmployee.reset();
+    setEditFeedbackKey(null);
+    setEditForm(null);
+    setIsEditOpen(false);
+  };
+
+  const handleUpdate = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!editForm || !emp) return;
+
+    setEditFeedbackKey(null);
+    const stepUp = editRequiresStepUp
+      ? readAdminMfaStepUpCredentials(new FormData(event.currentTarget))
+      : undefined;
+    if (editRequiresStepUp && !stepUp) {
+      setEditFeedbackKey("employees_page.step_up_required");
+      editStepUpPasswordRef.current?.focus();
+      return;
+    }
+
     updateEmployee.mutate(
       {
         id: emp.id,
-        data: buildEmployeeUpdate(editForm, organizationEditable),
+        data: buildEmployeeUpdate(
+          editForm,
+          organizationEditable,
+          stepUp ?? undefined,
+        ),
       },
       {
         onSuccess: async () => {
+          clearEditStepUpSecrets();
+          updateEmployee.reset();
           await invalidateEmployeeQueries();
           setIsEditOpen(false);
+          setEditForm(null);
+          setEditFeedbackKey(null);
           toast.success(t("employees_page.update_success"));
         },
-        onError: () => toast.error(t("employees_page.update_failed")),
+        onError: (error) => {
+          const fallbackKey =
+            error instanceof ApiError && error.status === 403
+              ? "employees_page.update_forbidden"
+              : "employees_page.update_failed";
+          const errorKey = getAdminMfaStepUpErrorKey(
+            apiErrorCode(error),
+            fallbackKey,
+          );
+          clearEditStepUpSecrets();
+          updateEmployee.reset();
+          setEditFeedbackKey(errorKey);
+          requestAnimationFrame(() => editStepUpPasswordRef.current?.focus());
+        },
       },
     );
   };
@@ -205,17 +284,49 @@ export default function EmployeeDetail() {
     );
   };
 
-  const handleAdminDisable = () => {
+  const clearAdminDisableSecrets = () => {
+    adminDisableFormRef.current?.reset();
+    adminDisableMutation.reset();
+  };
+
+  const openAdminDisable = () => {
+    clearAdminDisableSecrets();
+    setIsAdminDisableOpen(true);
+  };
+
+  const closeAdminDisable = () => {
+    if (adminDisableMutation.isPending) return;
+    clearAdminDisableSecrets();
+    setIsAdminDisableOpen(false);
+  };
+
+  const handleAdminDisable = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (adminDisableMutation.isPending) return;
+
+    const form = event.currentTarget;
+    const data = readAdminMfaStepUpInput(new FormData(form), id);
+    if (!data) return;
+
     adminDisableMutation.mutate(
-      { data: { userId: id } },
+      { data },
       {
         onSuccess: () => {
+          form.reset();
+          adminDisableMutation.reset();
+          setIsAdminDisableOpen(false);
           void queryClient.invalidateQueries({
             queryKey: getGetEmployeeQueryKey(id),
           });
           toast.success(t("twofa.admin_disabled_success"));
         },
-        onError: () => toast.error(t("twofa.invalid_code")),
+        onError: (error) => {
+          const errorKey = getAdminMfaDisableErrorKey(apiErrorCode(error));
+          form.reset();
+          adminDisableMutation.reset();
+          requestAnimationFrame(() => adminDisablePasswordRef.current?.focus());
+          toast.error(t(errorKey));
+        },
       },
     );
   };
@@ -413,37 +524,101 @@ export default function EmployeeDetail() {
 
               {emp.totpEnabled && isAdmin && !isOwnAccount && (
                 <div className="border-b border-border py-6">
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="min-h-11 w-full border-destructive/40 text-destructive hover:bg-destructive/10"
-                        disabled={adminDisableMutation.isPending}
-                      >
-                        {t("twofa.admin_disable")}
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
+                  <Button
+                    ref={adminDisableTriggerRef}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11 w-full border-destructive/40 text-destructive hover:bg-destructive/10"
+                    disabled={adminDisableMutation.isPending}
+                    onClick={openAdminDisable}
+                  >
+                    {t("twofa.admin_disable")}
+                  </Button>
+                  <AlertDialog
+                    open={isAdminDisableOpen}
+                    onOpenChange={(open) =>
+                      open ? openAdminDisable() : closeAdminDisable()
+                    }
+                  >
+                    <AlertDialogContent
+                      className="max-h-[90vh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-md"
+                      onOpenAutoFocus={(event) => {
+                        event.preventDefault();
+                        adminDisablePasswordRef.current?.focus();
+                      }}
+                      onCloseAutoFocus={(event) => {
+                        event.preventDefault();
+                        adminDisableTriggerRef.current?.focus();
+                      }}
+                    >
                       <AlertDialogHeader>
                         <AlertDialogTitle>
                           {t("twofa.admin_disable")}
                         </AlertDialogTitle>
-                        <AlertDialogDescription>
+                        <AlertDialogDescription id="admin-mfa-disable-hint">
                           {t("twofa.admin_disable_hint")}
                         </AlertDialogDescription>
                       </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>
-                          {t("common.cancel")}
-                        </AlertDialogCancel>
-                        <AlertDialogAction
-                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          onClick={handleAdminDisable}
-                        >
-                          {t("twofa.admin_disable_confirm")}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
+                      <form
+                        ref={adminDisableFormRef}
+                        onSubmit={handleAdminDisable}
+                        className="space-y-4"
+                      >
+                        <div className="space-y-2">
+                          <Label htmlFor="admin-mfa-current-password">
+                            {t("twofa.current_password")}
+                          </Label>
+                          <Input
+                            ref={adminDisablePasswordRef}
+                            id="admin-mfa-current-password"
+                            name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
+                            type="password"
+                            dir="ltr"
+                            autoComplete="current-password"
+                            aria-describedby="admin-mfa-disable-hint"
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="admin-mfa-code">
+                            {t("twofa.code_label")}
+                          </Label>
+                          <Input
+                            id="admin-mfa-code"
+                            name={ADMIN_MFA_CODE_FIELD}
+                            type="text"
+                            dir="ltr"
+                            className="font-mono"
+                            autoComplete="one-time-code"
+                            autoCapitalize="characters"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            aria-describedby="admin-mfa-disable-hint"
+                            placeholder="123456"
+                            required
+                          />
+                        </div>
+                        <AlertDialogFooter className="gap-2 sm:space-x-0">
+                          <AlertDialogCancel
+                            type="button"
+                            className="min-h-11 w-full sm:w-auto"
+                            disabled={adminDisableMutation.isPending}
+                          >
+                            {t("common.cancel")}
+                          </AlertDialogCancel>
+                          <Button
+                            type="submit"
+                            variant="destructive"
+                            className="min-h-11 w-full sm:w-auto"
+                            disabled={adminDisableMutation.isPending}
+                          >
+                            {adminDisableMutation.isPending
+                              ? t("common.loading")
+                              : t("twofa.admin_disable_confirm")}
+                          </Button>
+                        </AlertDialogFooter>
+                      </form>
                     </AlertDialogContent>
                   </AlertDialog>
                 </div>
@@ -555,11 +730,8 @@ export default function EmployeeDetail() {
       <Dialog
         open={isEditOpen}
         onOpenChange={(open) => {
-          setIsEditOpen(open);
-          if (!open) {
-            updateEmployee.reset();
-            setEditForm(null);
-          }
+          if (open) setIsEditOpen(true);
+          else closeEdit();
         }}
       >
         <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto">
@@ -656,11 +828,13 @@ export default function EmployeeDetail() {
                   <Select
                     value={editForm.role}
                     disabled={!organizationEditable}
-                    onValueChange={(role) =>
+                    onValueChange={(role) => {
+                      clearEditStepUpSecrets();
+                      setEditFeedbackKey(null);
                       setEditForm((previous) =>
                         previous ? { ...previous, role } : previous,
                       )
-                    }
+                    }}
                   >
                     <SelectTrigger id="edit-role" className="min-h-11">
                       <SelectValue />
@@ -682,7 +856,9 @@ export default function EmployeeDetail() {
                   <Select
                     value={editForm.departmentId || "none"}
                     disabled={!organizationEditable}
-                    onValueChange={(departmentId) =>
+                    onValueChange={(departmentId) => {
+                      clearEditStepUpSecrets();
+                      setEditFeedbackKey(null);
                       setEditForm((previous) =>
                         previous
                           ? {
@@ -692,7 +868,7 @@ export default function EmployeeDetail() {
                             }
                           : previous,
                       )
-                    }
+                    }}
                   >
                     <SelectTrigger id="edit-department" className="min-h-11">
                       <SelectValue />
@@ -720,7 +896,9 @@ export default function EmployeeDetail() {
                   <Select
                     value={editForm.supervisorId || "none"}
                     disabled={!organizationEditable}
-                    onValueChange={(supervisorId) =>
+                    onValueChange={(supervisorId) => {
+                      clearEditStepUpSecrets();
+                      setEditFeedbackKey(null);
                       setEditForm((previous) =>
                         previous
                           ? {
@@ -730,7 +908,7 @@ export default function EmployeeDetail() {
                             }
                           : previous,
                       )
-                    }
+                    }}
                   >
                     <SelectTrigger id="edit-supervisor" className="min-h-11">
                       <SelectValue />
@@ -753,6 +931,71 @@ export default function EmployeeDetail() {
                 </div>
               </div>
 
+              {editRequiresStepUp && (
+                <section
+                  className="space-y-4 rounded-xl border border-primary/20 bg-primary/5 p-4"
+                  aria-labelledby="edit-step-up-title"
+                  aria-describedby="edit-step-up-description"
+                >
+                  <div className="flex items-start gap-3">
+                    <ShieldCheck
+                      className="mt-0.5 h-5 w-5 shrink-0 text-primary"
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0">
+                      <h3 id="edit-step-up-title" className="font-semibold">
+                        {t("employees_page.step_up_title")}
+                      </h3>
+                      <p
+                        id="edit-step-up-description"
+                        className="mt-1 text-sm leading-6 text-muted-foreground"
+                      >
+                        {t("employees_page.update_step_up_hint")}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-step-up-password">
+                        {t("twofa.current_password")}
+                      </Label>
+                      <Input
+                        ref={editStepUpPasswordRef}
+                        id="edit-step-up-password"
+                        name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
+                        type="password"
+                        dir="ltr"
+                        autoComplete="current-password"
+                        aria-describedby="edit-step-up-description"
+                        required
+                        className="min-h-11"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="edit-step-up-code">
+                        {t("twofa.code_label")}
+                      </Label>
+                      <Input
+                        ref={editStepUpCodeRef}
+                        id="edit-step-up-code"
+                        name={ADMIN_MFA_CODE_FIELD}
+                        type="text"
+                        dir="ltr"
+                        inputMode="text"
+                        autoComplete="one-time-code"
+                        autoCapitalize="characters"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        aria-describedby="edit-step-up-description"
+                        placeholder="123456 / XXXXX-XXXXX"
+                        required
+                        className="min-h-11 font-mono"
+                      />
+                    </div>
+                  </div>
+                </section>
+              )}
+
               {!organizationEditable && (
                 <p className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
                   {t(
@@ -763,17 +1006,12 @@ export default function EmployeeDetail() {
                 </p>
               )}
 
-              {updateEmployee.isError && (
+              {editFeedbackKey && (
                 <p
                   className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
                   role="alert"
                 >
-                  {t(
-                    updateEmployee.error instanceof ApiError &&
-                      updateEmployee.error.status === 403
-                      ? "employees_page.update_forbidden"
-                      : "employees_page.update_failed",
-                  )}
+                  {t(editFeedbackKey)}
                 </p>
               )}
 
@@ -781,7 +1019,7 @@ export default function EmployeeDetail() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setIsEditOpen(false)}
+                  onClick={closeEdit}
                   className="min-h-11 w-full sm:w-auto"
                 >
                   {t("common.cancel")}

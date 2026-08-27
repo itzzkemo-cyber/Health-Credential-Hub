@@ -1,0 +1,20 @@
+# Copy this file outside the repository, preferably to
+# C:\ProgramData\WathaiqiHealth\cloudflared\config.yml, then replace the UUID in
+# both locations. The matching JSON credential must be ACL-restricted and kept
+# beside this file. Never copy cert.pem into the service directory.
+tunnel: 00000000-0000-4000-8000-000000000000
+credentials-file: C:\ProgramData\WathaiqiHealth\cloudflared\00000000-0000-4000-8000-000000000000.json
+
+# Metrics stay on loopback. Do not expose this listener to the LAN.
+metrics: 127.0.0.1:20241
+loglevel: info
+transport-loglevel: warn
+no-autoupdate: true
+
+ingress:
+  - hostname: app.wathaiqihealth.com
+    service: http://127.0.0.1:3000
+    originRequest:
+      connectTimeout: 10s
+      tcpKeepAlive: 30s
+  - service: http_status:404

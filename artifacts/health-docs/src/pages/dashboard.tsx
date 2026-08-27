@@ -47,7 +47,13 @@ export default function Dashboard() {
 
   if (isLoading) {
     return (
-      <div className="space-y-5" aria-busy="true">
+      <div
+        className="space-y-5"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <span className="sr-only">{t("common.loading")}</span>
         <Skeleton className="h-24 w-full rounded-2xl" />
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           {[1, 2, 3, 4].map((item) => (
@@ -61,7 +67,11 @@ export default function Dashboard() {
   if (isError || !stats) {
     return (
       <Card className="mx-auto max-w-lg">
-        <CardContent className="flex flex-col items-center gap-4 p-8 text-center">
+        <CardContent
+          className="flex flex-col items-center gap-4 p-8 text-center"
+          role="alert"
+          aria-live="assertive"
+        >
           <ShieldAlert
             className="h-10 w-10 text-destructive"
             aria-hidden="true"

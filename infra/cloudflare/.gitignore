@@ -1,0 +1,6 @@
+# Local Cloudflare state is sensitive and must never be committed.
+config.yml
+*.json
+cert.pem
+*.log
+*.pid

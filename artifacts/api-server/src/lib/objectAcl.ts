@@ -77,8 +77,10 @@ export async function setObjectAclPolicy(
     throw new Error(`Object not found: ${objectFile.name}`);
   }
 
+  const [currentMetadata] = await objectFile.getMetadata();
   await objectFile.setMetadata({
     metadata: {
+      ...(currentMetadata.metadata ?? {}),
       [ACL_POLICY_METADATA_KEY]: JSON.stringify(aclPolicy),
     },
   });

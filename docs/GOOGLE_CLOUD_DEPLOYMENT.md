@@ -1,9 +1,20 @@
 # Google Cloud deployment (Saudi Arabia)
 
-This is the supported production path for Health Credential Hub. It does not
-use Replit. The web application and API run together on Cloud Run, PostgreSQL
-data is held in Cloud SQL, and credential documents are held in a private Cloud
-Storage bucket. All three resources should use `me-central2` (Dammam).
+This is a guarded Google Cloud reference path for Health Credential Hub. It
+does not use Replit. The web application and API run together on Cloud Run,
+PostgreSQL data is held in Cloud SQL, and credential documents are held in a
+private Cloud Storage bucket. All three resources should use `me-central2`
+(Dammam).
+
+> **Release gate:** this path is not approved for real credential documents in
+> the current release. Signed direct uploads do not enforce the 8 MiB limit at
+> provider ingress and do not pass through malware quarantine. Keep deployments
+> synthetic-only until bounded ingress, malware scanning, orphan cleanup, and a
+> restore drill are implemented and accepted. Do not treat a successful
+> bootstrap as production security approval.
+
+The manual GitHub deployment workflow also stays disabled until the protected
+`MANAGED_CLOUD_UPLOAD_SECURITY_APPROVED=true` variable is set after that review.
 
 ## Before provisioning
 
@@ -40,7 +51,7 @@ Build source archives use a private regional bucket with seven-day automatic
 deletion; build logs go to Cloud Logging. The script also creates an Artifact
 Registry repository, a migration job, and a one-instance Cloud Run service. It
 finishes by calling `/api/readyz` and prints the generated HTTPS URL. It does
-  not create application accounts automatically.
+not create application accounts automatically.
 
 The authenticated `gcloud` principal must be allowed to enable services,
 manage the listed IAM bindings, create the resources, submit Cloud Builds, and
@@ -175,35 +186,79 @@ deploying the corresponding API build.
 
 ## Custom domain
 
-For production, put a global external HTTPS Application Load Balancer with a
-serverless NEG in front of the Dammam Cloud Run service. Use a reserved global
-IP, Google-managed certificate, TLS 1.2+, and point the domain's DNS record to
-that IP. Update these values after the certificate is active:
+Production uses `app.wathaiqihealth.com` behind a global external HTTPS
+Application Load Balancer and a serverless NEG that points to the Dammam Cloud
+Run service. The reviewed script provisions a reserved global IPv4 address,
+an external-managed HTTP backend with Cloud CDN disabled, the URL map, a
+Google-managed certificate, a Modern TLS policy with TLS 1.2 minimum, the HTTPS
+proxy, and a port-443-only forwarding rule.
 
-- Cloud Run: `PUBLIC_APP_URL=https://your-domain` and
-  `APP_ORIGINS=https://your-domain`.
-- Cloud Storage bucket CORS: allow `PUT` from exactly that HTTPS origin.
-- Resend, if enabled: verify the sending domain, store `RESEND_API_KEY` in
-  Secret Manager, set `EMAIL_FROM`, then change `EMAIL_ALERTS_DISABLED=0`.
+This creates billable resources and changes the public network boundary. Run it
+only after `bootstrap.sh` has completed, `/api/readyz` works on the generated
+acceptance URL, and the domain owner has approved the production hostname:
 
-After the load balancer, certificate, DNS, CORS, and custom-domain readiness
-check all succeed, prevent clients from bypassing the load balancer:
+```bash
+export GOOGLE_CLOUD_PROJECT="your-project-id"
+export REGION="me-central2"
+export DOMAIN="app.wathaiqihealth.com"
+export DOMAIN_CONFIRM="CONNECT_app.wathaiqihealth.com"
+
+bash infra/gcp/domain.sh
+```
+
+The first run normally creates the load-balancer resources, prints the reserved
+IP and exits with status `2`. In Squarespace Domains, add exactly this DNS
+record while leaving Google Workspace mail records unchanged:
+
+```text
+Type: A
+Host: app
+Value: <reserved IP printed by domain.sh>
+```
+
+Wait for DNS propagation and for the managed certificate to become `ACTIVE`,
+then rerun the same `domain.sh` command. It is idempotent: existing resources
+must match the reviewed type, region, service, certificate, TLS policy, IP,
+backend, and port or the script fails without replacing them. It also refuses
+to continue when the document bucket is outside Dammam, lacks public access
+prevention or uniform bucket-level access, or the Cloud Run service is not
+ready/publicly invokable at the edge.
+
+On the successful second run, the script:
+
+1. confirms that DNS resolves to the reserved IP and the certificate is active;
+2. sets `PUBLIC_APP_URL` and `APP_ORIGINS` to the exact HTTPS hostname;
+3. replaces bucket CORS with an exact-origin, `PUT`-only rule;
+4. smoke-tests `https://app.wathaiqihealth.com/api/readyz`;
+5. restricts Cloud Run to internal/load-balancer ingress and disables the
+   generated `run.app` URL; and
+6. repeats the custom-domain readiness check after the restriction, restoring
+   open ingress and the `run.app` recovery URL automatically if that final
+   check fails.
+
+The application remains protected by its own authentication, CSRF controls,
+and tenant authorization; the load balancer is an additional network boundary,
+not a replacement. Do not use Cloud Run's preview domain-mapping feature for
+production.
+
+The script attempts automatic recovery if the final post-restriction readiness
+check fails. If it reports that recovery also failed, restore the acceptance
+path immediately before investigating DNS, certificate, NEG, or backend state:
 
 ```bash
 gcloud run services update "health-credential-hub" \
   --project="${GOOGLE_CLOUD_PROJECT}" \
   --region="me-central2" \
-  --ingress="internal-and-cloud-load-balancing" \
-  --no-default-url
+  --ingress="all" \
+  --default-url
 ```
 
-Run this only after the custom-domain smoke test succeeds; otherwise it removes
-the generated `run.app` acceptance URL. Keep the service's application-level
-authentication and tenant authorization in place—the load balancer is an
-additional network boundary, not a replacement.
+After the application domain is stable, configure Resend only if separately
+approved: verify its sending domain, store `RESEND_API_KEY` in Secret Manager,
+set `EMAIL_FROM`, and only then change `EMAIL_ALERTS_DISABLED=0`.
 
-Do not use Cloud Run's preview domain-mapping feature for a production domain;
-use the load balancer so the certificate and TLS policy are production-grade.
+The script does not edit Squarespace DNS, buy a domain, enable email, or add a
+Cloud Armor policy. Those remain explicit operator actions.
 
 ## Release verification
 

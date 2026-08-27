@@ -1,6 +1,17 @@
 import { Router, type IRouter } from "express";
 import { db, auditLogsTable } from "@workspace/db";
-import { desc, eq } from "drizzle-orm";
+import { ListAuditLogsQueryParams } from "@workspace/api-zod";
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  ilike,
+  lt,
+  or,
+  type SQL,
+} from "drizzle-orm";
 import { requireAuth, requireRole, getUser, ADMIN_ROLES } from "../lib/auth";
 
 const router: IRouter = Router();
@@ -9,49 +20,78 @@ router.use("/audit-logs", requireAuth);
 
 router.get("/audit-logs", requireRole(...ADMIN_ROLES), async (req, res) => {
   const current = getUser(req);
-  const { userId, action, dateFrom, dateTo } = req.query as Record<
-    string,
-    string | undefined
-  >;
-  let rows;
-  if (current.role === "system_admin") {
-    rows = await db
-      .select()
-      .from(auditLogsTable)
-      .orderBy(desc(auditLogsTable.createdAt))
-      .limit(2000);
-  } else {
-    rows = await db
-      .select()
-      .from(auditLogsTable)
-      .where(eq(auditLogsTable.facilityId, current.facilityId))
-      .orderBy(desc(auditLogsTable.createdAt))
-      .limit(2000);
+  const parsed = ListAuditLogsQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid audit log query" });
+    return;
+  }
+  const { userId, dateFrom, dateTo } = parsed.data;
+  const action = parsed.data.action?.trim();
+  const page = parsed.data.page;
+  const pageSize = parsed.data.pageSize;
+  if (
+    !Number.isInteger(page) ||
+    page < 1 ||
+    !Number.isInteger(pageSize) ||
+    pageSize < 1 ||
+    pageSize > 200 ||
+    (userId != null && (!Number.isInteger(userId) || userId < 1)) ||
+    (action?.length ?? 0) > 200
+  ) {
+    res.status(400).json({ error: "Invalid audit log query" });
+    return;
   }
 
-  if (userId) rows = rows.filter((r) => r.userId === Number(userId));
+  const parseDate = (value: string | undefined): Date | null => {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const date = new Date(`${value}T00:00:00.000Z`);
+    return Number.isNaN(date.getTime()) ||
+      date.toISOString().slice(0, 10) !== value
+      ? null
+      : date;
+  };
+  const from = parseDate(dateFrom);
+  const to = parseDate(dateTo);
+  if ((dateFrom && !from) || (dateTo && !to) || (from && to && from > to)) {
+    res.status(400).json({ error: "Invalid audit log date range" });
+    return;
+  }
+
+  const conditions: SQL[] = [];
+  if (current.role !== "system_admin") {
+    conditions.push(eq(auditLogsTable.facilityId, current.facilityId));
+  }
+  if (userId != null) conditions.push(eq(auditLogsTable.userId, userId));
   if (action) {
-    const q = action.toLowerCase();
-    rows = rows.filter(
-      (r) => r.action.toLowerCase().includes(q) || r.actionAr.includes(action),
+    const escaped = action.replace(/[\\%_]/g, "\\$&");
+    const actionSearch = or(
+      ilike(auditLogsTable.action, `%${escaped}%`),
+      ilike(auditLogsTable.actionAr, `%${escaped}%`),
     );
+    if (actionSearch) conditions.push(actionSearch);
   }
-  if (dateFrom) {
-    const from = new Date(`${dateFrom}T00:00:00Z`).getTime();
-    rows = rows.filter((r) => r.createdAt.getTime() >= from);
+  if (from) conditions.push(gte(auditLogsTable.createdAt, from));
+  if (to) {
+    const exclusiveEnd = new Date(to);
+    exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1);
+    conditions.push(lt(auditLogsTable.createdAt, exclusiveEnd));
   }
-  if (dateTo) {
-    const to = new Date(`${dateTo}T23:59:59Z`).getTime();
-    rows = rows.filter((r) => r.createdAt.getTime() <= to);
-  }
+  const where = and(...conditions);
 
-  const page = Math.max(1, Number(req.query.page ?? 1));
-  const pageSize = Math.min(200, Math.max(1, Number(req.query.pageSize ?? 50)));
-  const total = rows.length;
-  const slice = rows.slice((page - 1) * pageSize, page * pageSize);
+  const [totalRows, rows] = await Promise.all([
+    db.select({ total: count() }).from(auditLogsTable).where(where),
+    db
+      .select()
+      .from(auditLogsTable)
+      .where(where)
+      .orderBy(desc(auditLogsTable.createdAt))
+      .limit(pageSize)
+      .offset((page - 1) * pageSize),
+  ]);
+  const total = Number(totalRows[0]?.total ?? 0);
 
   res.json({
-    data: slice.map((r) => ({
+    data: rows.map((r) => ({
       id: r.id,
       userId: r.userId,
       userName: r.userName,

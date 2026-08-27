@@ -18,4 +18,8 @@ export interface EmployeeUpdate {
   jobTitleAr?: string;
   phone?: string;
   isActive?: boolean;
+  /** Required with code when role, departmentId, or supervisorId actually changes. */
+  currentPassword?: string;
+  /** Required with currentPassword when role, departmentId, or supervisorId actually changes; accepts TOTP or a backup code. */
+  code?: string;
 }

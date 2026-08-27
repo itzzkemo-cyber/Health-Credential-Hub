@@ -1,9 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Readable } from "node:stream";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  FILESYSTEM_UPLOAD_REQUIRED_HEADERS,
   getObjectStorageProvider,
   getStorageConnectSources,
   getUploadRequiredHeaders,
+  ObjectNotFoundError,
   ObjectStorageService,
   OCI_UPLOAD_REQUIRED_HEADERS,
   type StoredObjectFile,
@@ -17,6 +22,10 @@ const originalOciEndpoint = process.env.OCI_OBJECT_STORAGE_ENDPOINT;
 const originalOciRegion = process.env.OCI_OBJECT_STORAGE_REGION;
 const originalOciAccessKey = process.env.OCI_OBJECT_STORAGE_ACCESS_KEY_ID;
 const originalOciSecret = process.env.OCI_OBJECT_STORAGE_SECRET_ACCESS_KEY;
+const originalLocalStorageDir = process.env.LOCAL_OBJECT_STORAGE_DIR;
+const originalPublicAppUrl = process.env.PUBLIC_APP_URL;
+const originalNodeEnv = process.env.NODE_ENV;
+let localTestDir: string | undefined;
 
 beforeEach(() => {
   process.env.PRIVATE_OBJECT_DIR = "/healthdocs-private/private";
@@ -25,9 +34,16 @@ beforeEach(() => {
   delete process.env.OCI_OBJECT_STORAGE_REGION;
   delete process.env.OCI_OBJECT_STORAGE_ACCESS_KEY_ID;
   delete process.env.OCI_OBJECT_STORAGE_SECRET_ACCESS_KEY;
+  delete process.env.LOCAL_OBJECT_STORAGE_DIR;
+  delete process.env.PUBLIC_APP_URL;
+  process.env.NODE_ENV = "test";
 });
 
-afterEach(() => {
+afterEach(async () => {
+  if (localTestDir) {
+    await rm(localTestDir, { recursive: true, force: true });
+    localTestDir = undefined;
+  }
   if (originalPrivateDir === undefined) delete process.env.PRIVATE_OBJECT_DIR;
   else process.env.PRIVATE_OBJECT_DIR = originalPrivateDir;
   if (originalProvider === undefined)
@@ -45,10 +61,40 @@ afterEach(() => {
   if (originalOciSecret === undefined)
     delete process.env.OCI_OBJECT_STORAGE_SECRET_ACCESS_KEY;
   else process.env.OCI_OBJECT_STORAGE_SECRET_ACCESS_KEY = originalOciSecret;
+  if (originalLocalStorageDir === undefined)
+    delete process.env.LOCAL_OBJECT_STORAGE_DIR;
+  else process.env.LOCAL_OBJECT_STORAGE_DIR = originalLocalStorageDir;
+  if (originalPublicAppUrl === undefined) delete process.env.PUBLIC_APP_URL;
+  else process.env.PUBLIC_APP_URL = originalPublicAppUrl;
+  if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = originalNodeEnv;
 });
 
 describe("Google Cloud Storage object paths", () => {
   const service = new ObjectStorageService();
+
+  beforeEach(() => {
+    process.env.OBJECT_STORAGE_PROVIDER = "gcs";
+  });
+
+  it("requires an exact non-traversing private object directory", () => {
+    expect(service.getPrivateObjectDir()).toBe("/healthdocs-private/private");
+
+    for (const invalid of [
+      "/../private",
+      "/healthdocs-private/../private",
+      "/healthdocs-private/%2e%2e/private",
+      "/healthdocs-private\\..\\private",
+      "/healthdocs-private//private",
+      "/healthdocs-private/private/",
+      " /healthdocs-private/private",
+    ]) {
+      process.env.PRIVATE_OBJECT_DIR = invalid;
+      expect(() => service.getPrivateObjectDir(), invalid).toThrow(
+        /\/bucket-name\/private/,
+      );
+    }
+  });
 
   it("normalizes a global signed upload URL", () => {
     expect(
@@ -95,6 +141,7 @@ describe("Google Cloud Storage object paths", () => {
       exists: async () => [true],
       setMetadata: async () => undefined,
       download: async () => [Buffer.from("document")],
+      delete: async () => undefined,
       name: "private/uploads/1",
     } as unknown as StoredObjectFile;
 
@@ -104,7 +151,6 @@ describe("Google Cloud Storage object paths", () => {
       "private, no-store, max-age=0",
     );
   });
-
 });
 
 describe("OCI Riyadh object storage configuration", () => {
@@ -117,7 +163,11 @@ describe("OCI Riyadh object storage configuration", () => {
     process.env.OCI_OBJECT_STORAGE_SECRET_ACCESS_KEY = "test-secret-key";
   };
 
-  it("is opt-in and preserves GCS as the default", () => {
+  it("requires an explicit provider and keeps OCI opt-in", () => {
+    expect(() => getObjectStorageProvider()).toThrow(
+      "OBJECT_STORAGE_PROVIDER must be set",
+    );
+    process.env.OBJECT_STORAGE_PROVIDER = "gcs";
     expect(getObjectStorageProvider()).toBe("gcs");
     configureOci();
     expect(getObjectStorageProvider()).toBe("oci");
@@ -168,5 +218,80 @@ describe("OCI Riyadh object storage configuration", () => {
     process.env.OCI_OBJECT_STORAGE_ENDPOINT =
       "https://tenantns.compat.objectstorage.me-riyadh-1.oraclecloud.com.attacker.example";
     expect(() => validateObjectStorageConfiguration()).toThrow(/me-riyadh-1/);
+  });
+});
+
+describe("single-host filesystem object storage configuration", () => {
+  const configureFilesystem = async () => {
+    localTestDir = await mkdtemp(path.join(tmpdir(), "healthdocs-storage-"));
+    process.env.OBJECT_STORAGE_PROVIDER = "filesystem";
+    process.env.LOCAL_OBJECT_STORAGE_DIR = localTestDir;
+    process.env.PUBLIC_APP_URL = "https://app.wathaiqihealth.com";
+  };
+
+  it("uses the explicit filesystem provider", async () => {
+    await configureFilesystem();
+    expect(getObjectStorageProvider()).toBe("filesystem");
+    expect(() => validateObjectStorageConfiguration()).not.toThrow();
+  });
+
+  it("returns a relative same-origin authenticated upload URL", async () => {
+    await configureFilesystem();
+    delete process.env.PUBLIC_APP_URL;
+    const service = new ObjectStorageService();
+    const granted = await service.getObjectEntityUploadURL("application/pdf");
+    expect(granted.uploadURL).toMatch(
+      /^\/api\/storage\/uploads\/local\/[0-9a-f-]{36}$/,
+    );
+    expect(service.normalizeObjectEntityPath(granted.uploadURL)).toMatch(
+      /^\/objects\/uploads\/[0-9a-f-]{36}$/,
+    );
+    expect(granted.requiredHeaders).toEqual(FILESYSTEM_UPLOAD_REQUIRED_HEADERS);
+    expect(getStorageConnectSources()).toEqual([]);
+  });
+
+  it("normalizes only an exact relative local upload URL", async () => {
+    await configureFilesystem();
+    const service = new ObjectStorageService();
+    const uploadId = "f3fddc5a-9315-4b7b-8e7c-8ac98bc9f6c5";
+
+    expect(
+      service.normalizeObjectEntityPath(
+        `/api/storage/uploads/local/${uploadId}`,
+      ),
+    ).toBe(`/objects/uploads/${uploadId}`);
+    expect(
+      service.normalizeObjectEntityPath(
+        `/api/storage/uploads/local/${uploadId}?redirect=https://attacker.example`,
+      ),
+    ).toContain("?redirect=");
+  });
+
+  it("writes private bytes and metadata outside the workspace", async () => {
+    await configureFilesystem();
+    const service = new ObjectStorageService();
+    const granted = await service.getObjectEntityUploadURL("application/pdf");
+    const objectPath = service.normalizeObjectEntityPath(granted.uploadURL);
+    await service.writeFilesystemObject(
+      objectPath,
+      Buffer.from("document"),
+      "application/pdf",
+    );
+    const file = await service.getObjectEntityFile(objectPath);
+    await expect(file.download()).resolves.toEqual([Buffer.from("document")]);
+    await expect(file.getMetadata()).resolves.toEqual([
+      expect.objectContaining({ contentType: "application/pdf", size: 8 }),
+    ]);
+
+    await service.deleteObject(file);
+    await expect(
+      service.getObjectEntityFile(objectPath),
+    ).rejects.toBeInstanceOf(ObjectNotFoundError);
+  });
+
+  it("rejects relative storage paths", async () => {
+    await configureFilesystem();
+    process.env.LOCAL_OBJECT_STORAGE_DIR = "relative-storage";
+    expect(() => validateObjectStorageConfiguration()).toThrow(/absolute path/);
   });
 });

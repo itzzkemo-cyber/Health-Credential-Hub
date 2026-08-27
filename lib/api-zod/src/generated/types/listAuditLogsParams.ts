@@ -8,12 +8,20 @@
 
 export type ListAuditLogsParams = {
 /**
+ * @minimum 1
  * @nullable
  */
 userId?: number | null;
 action?: string;
 dateFrom?: string;
 dateTo?: string;
+/**
+ * @minimum 1
+ */
 page?: number;
+/**
+ * @minimum 1
+ * @maximum 200
+ */
 pageSize?: number;
 };

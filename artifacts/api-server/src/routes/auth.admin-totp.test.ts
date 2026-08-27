@@ -5,7 +5,7 @@ const testState = vi.hoisted(() => ({
   admin: null as Record<string, unknown> | null,
   target: null as Record<string, unknown> | null,
   set: vi.fn(),
-  updateWhere: vi.fn(async () => undefined),
+  insertValues: vi.fn(async () => undefined),
   logAudit: vi.fn(async () => undefined),
 }));
 
@@ -13,26 +13,59 @@ vi.mock("drizzle-orm", () => ({
   and: vi.fn((...conditions: unknown[]) => conditions),
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   gt: vi.fn(),
+  inArray: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   isNull: vi.fn(),
-  sql: vi.fn(),
+  sql: vi.fn(() => "sql-expression"),
 }));
 
 vi.mock("@workspace/db", () => {
   const usersTable = {
     id: "users.id",
     email: "users.email",
+    backupCodes: "users.backupCodes",
+    totpLastUsedStep: "users.totpLastUsedStep",
     sessionVersion: "users.sessionVersion",
   };
+  const auditLogsTable = { id: "auditLogs.id" };
+  const select = vi.fn(() => ({
+    from: vi.fn(() => ({
+      where: vi.fn(() => {
+        const rows = [testState.admin, testState.target].filter(Boolean);
+        return {
+          for: vi.fn(async () => rows),
+          orderBy: vi.fn(() => ({
+            for: vi.fn(async () => rows),
+          })),
+        };
+      }),
+    })),
+  }));
+  const update = vi.fn(() => ({
+    set: vi.fn((values: Record<string, unknown>) => {
+      testState.set(values);
+      return {
+        where: vi.fn(() => ({
+          returning: vi.fn(async () => {
+            const base = values.totpEnabled === false
+              ? testState.target
+              : testState.admin;
+            return base ? [{ ...base, ...values }] : [];
+          }),
+        })),
+      };
+    }),
+  }));
+  const insert = vi.fn(() => ({ values: testState.insertValues }));
+  const tx = { select, update, insert };
   return {
     usersTable,
     passwordResetTokensTable: {},
+    auditLogsTable,
     db: {
-      select: vi.fn(() => ({
-        from: vi.fn(() => ({
-          where: vi.fn(async () => (testState.target ? [testState.target] : [])),
-        })),
-      })),
-      update: vi.fn(() => ({ set: testState.set })),
+      ...tx,
+      transaction: vi.fn(async (callback: (executor: typeof tx) => unknown) =>
+        callback(tx),
+      ),
     },
   };
 });
@@ -43,7 +76,7 @@ vi.mock("../lib/auth", () => ({
   signPurposeToken: vi.fn(),
   createTwoFactorChallengeToken: vi.fn(),
   verifyPurposeToken: vi.fn(),
-  comparePassword: vi.fn(),
+  comparePassword: vi.fn(async (password: string) => password === "admin-password"),
   hashPassword: vi.fn(),
   setSessionCookie: vi.fn(),
   clearSessionCookie: vi.fn(),
@@ -54,6 +87,20 @@ vi.mock("../lib/auth", () => ({
   },
   requireRole:
     () => (_req: Request, _res: Response, next: NextFunction) => next(),
+}));
+
+vi.mock("../lib/totp", () => ({
+  generateTotpSecret: vi.fn(),
+  buildOtpauthUrl: vi.fn(),
+  verifyOtp: vi.fn(),
+  generateBackupCodes: vi.fn(),
+  hashBackupCode: vi.fn(() => "hashed-backup-code"),
+  looksLikeBackupCode: vi.fn(() => true),
+}));
+
+vi.mock("../lib/totpSecret", () => ({
+  decryptTotpSecret: vi.fn(),
+  encryptTotpSecret: vi.fn(),
 }));
 
 vi.mock("../lib/helpers", () => ({
@@ -80,6 +127,9 @@ function account(
     facilityId,
     isActive: true,
     totpEnabled: true,
+    totpSecret: "encrypted-secret",
+    passwordHash: "admin-password-hash",
+    backupCodes: ["hashed-backup-code"],
     name: `User ${id}`,
     nameAr: `مستخدم ${id}`,
   };
@@ -92,9 +142,8 @@ describe("administrative TOTP recovery hierarchy", () => {
     testState.admin = account(1, "hospital_admin");
     testState.target = account(2, "employee");
     testState.set.mockReset();
-    testState.updateWhere.mockClear();
+    testState.insertValues.mockClear();
     testState.logAudit.mockClear();
-    testState.set.mockReturnValue({ where: testState.updateWhere });
   });
 
   afterEach(async () => {
@@ -107,7 +156,11 @@ describe("administrative TOTP recovery hierarchy", () => {
   });
 
   async function disable(userId: number): Promise<globalThis.Response> {
-    return post("/auth/totp/admin-disable", { userId });
+    return post("/auth/totp/admin-disable", {
+      userId,
+      currentPassword: "admin-password",
+      code: "ABCD-EFGH-IJKL-MNOP",
+    });
   }
 
   async function post(
@@ -197,15 +250,60 @@ describe("administrative TOTP recovery hierarchy", () => {
     expect(testState.set).toHaveBeenCalledWith(
       expect.objectContaining({ totpEnabled: false, totpSecret: null }),
     );
-    expect(testState.logAudit).toHaveBeenCalledWith(
-      testState.admin,
-      expect.any(String),
-      expect.any(String),
-      "Account",
-      "الحساب",
-      undefined,
-      expect.any(String),
-      10,
+    expect(testState.insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 1,
+        facilityId: 10,
+        target: "Account",
+      }),
+    );
+  });
+
+  it("requires the administrator account to have MFA before recovery", async () => {
+    testState.admin = { ...testState.admin, totpEnabled: false, totpSecret: null };
+
+    const response = await disable(2);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "admin_mfa_required" }),
+    );
+    expect(testState.set).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the actor role from the locked database row", async () => {
+    testState.admin = { ...testState.admin, role: "employee" };
+
+    const response = await disable(2);
+
+    expect(response.status).toBe(404);
+    expect(testState.set).not.toHaveBeenCalled();
+  });
+
+  it("rejects recovery without administrator step-up credentials", async () => {
+    const response = await post("/auth/totp/admin-disable", { userId: 2 });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "step_up_failed" }),
+    );
+    expect(testState.set).not.toHaveBeenCalled();
+  });
+
+  it("requires the current password before issuing a TOTP enrollment secret", async () => {
+    testState.admin = {
+      ...testState.admin,
+      totpEnabled: false,
+      totpSecret: null,
+    };
+
+    const response = await post("/auth/totp/setup", {
+      currentPassword: "wrong-password",
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "step_up_failed" }),
     );
   });
 });

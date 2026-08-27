@@ -101,6 +101,10 @@ export interface TwoFactorPending {
   challengeToken: string;
 }
 
+export interface TotpSetupInput {
+  currentPassword: string;
+}
+
 export interface TotpSetupData {
   secret: string;
   otpauthUrl: string;
@@ -129,6 +133,8 @@ export interface TotpConfirmInput {
 
 export interface TotpAdminDisableInput {
   userId: number;
+  currentPassword: string;
+  code: string;
 }
 
 export interface ChangePasswordInput {
@@ -465,6 +471,10 @@ export interface EmployeeInput {
   phone?: string;
   /** Target facility; honored only for system administrators. */
   facilityId?: number;
+  /** Required with code when provisioning a manager role. */
+  currentPassword?: string;
+  /** Required with currentPassword when provisioning a manager role; accepts TOTP or a backup code. */
+  code?: string;
 }
 
 export interface EmployeeUpdate {
@@ -479,6 +489,10 @@ export interface EmployeeUpdate {
   jobTitleAr?: string;
   phone?: string;
   isActive?: boolean;
+  /** Required with code when role, departmentId, or supervisorId actually changes. */
+  currentPassword?: string;
+  /** Required with currentPassword when role, departmentId, or supervisorId actually changes; accepts TOTP or a backup code. */
+  code?: string;
 }
 
 export interface Department {
@@ -810,13 +824,21 @@ unreadOnly?: boolean;
 
 export type ListAuditLogsParams = {
 /**
+ * @minimum 1
  * @nullable
  */
 userId?: number | null;
 action?: string;
 dateFrom?: string;
 dateTo?: string;
+/**
+ * @minimum 1
+ */
 page?: number;
+/**
+ * @minimum 1
+ * @maximum 200
+ */
 pageSize?: number;
 };
 

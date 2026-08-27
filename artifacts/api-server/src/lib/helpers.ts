@@ -296,21 +296,39 @@ export function evaluateCredentialVerificationChange(
 export async function getPolicies(
   facilityId: number | null,
 ): Promise<CredentialPolicyRow[]> {
-  if (facilityId == null) return db.select().from(credentialPoliciesTable);
+  if (facilityId == null)
+    return db
+      .select()
+      .from(credentialPoliciesTable)
+      .where(isNull(credentialPoliciesTable.deletedAt));
   return db
     .select()
     .from(credentialPoliciesTable)
-    .where(eq(credentialPoliciesTable.facilityId, facilityId));
+    .where(
+      and(
+        eq(credentialPoliciesTable.facilityId, facilityId),
+        isNull(credentialPoliciesTable.deletedAt),
+      ),
+    );
 }
 
 export async function getDepartments(
   facilityId: number | null,
 ): Promise<Department[]> {
-  if (facilityId == null) return db.select().from(departmentsTable);
+  if (facilityId == null)
+    return db
+      .select()
+      .from(departmentsTable)
+      .where(isNull(departmentsTable.deletedAt));
   return db
     .select()
     .from(departmentsTable)
-    .where(eq(departmentsTable.facilityId, facilityId));
+    .where(
+      and(
+        eq(departmentsTable.facilityId, facilityId),
+        isNull(departmentsTable.deletedAt),
+      ),
+    );
 }
 
 // ---------------------------------------------------------------------------

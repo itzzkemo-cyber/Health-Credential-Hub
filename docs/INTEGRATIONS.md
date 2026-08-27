@@ -14,8 +14,8 @@ Every enabled integration below must use the reviewed production controls.
 
 | Integration                        | Implemented in the repository                                                                                                          | Provisioned by supplied infrastructure                                                                                                                                                                                  | Production status                                                                                                                                                                                                                                                                                                     |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                   | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | Supported deployment path, but document lifecycle deletion, orphan cleanup, malware scanning, and restore drills remain operator work.                                                                                                                                                                                |
-| Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.         | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | Supported application driver. Keep disabled until the OCI tenancy is verified, bucket is private, CORS/IAM/lifecycle are reviewed, and a synthetic end-to-end upload/restore drill passes.                                                                                                                            |
+| Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                   | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | **No-go for real documents in this release.** Signed direct PUT has no provider-ingress byte cap and no malware quarantine. Keep synthetic-only until bounded ingress, AV/quarantine, orphan cleanup, and restore drills are accepted.                                                                                |
+| Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.         | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | **No-go for real documents in this release.** Keep disabled until the same bounded-ingress, AV/quarantine, lifecycle, tenancy, IAM/CORS, and synthetic restore gates pass.                                                                                                                                            |
 | Gemini OCR                         | Authenticated users can send an authorized stored file to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields. | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                        |
 | Resend email                       | Password resets, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API.                                 | No. The bootstrap explicitly deploys with email disabled and does not create the Resend secret.                                                                                                                         | Optional and fail-closed until an operator enables it. Subprocessor approval, data-region/retention confirmation, bounce handling, and delivery reconciliation remain required.                                                                                                                                       |
 | Signed automation webhook          | A PostgreSQL transactional outbox and optional HMAC-signed worker emit three minimized credential lifecycle events.                    | Partly. The bootstrap provisions or updates an inert one-shot Cloud Run Job, dedicated worker/scheduler identities, a regional HMAC secret, and a paused five-minute Scheduler job. It does not provision the receiver. | Disabled by default. Supports explicit facility routing, exact-host/public-IP enforcement, idempotency, bounded timeout, retry/backoff, stale-claim recovery, dead-letter retention, and no document/token fields. The recipient remains an operator-approved subprocessor and must verify signatures/replay windows. |
@@ -46,7 +46,13 @@ standard integration is implemented or claimed here.
    object ACL; manager reads additionally require the linked employee to be in
    the manager's server-side scope. The API streams the object with private
    caching and browser hardening headers.
-6. OCR is a separate authorized read: the API downloads the object into server
+6. If credential submission fails after upload, the authenticated requester
+   can call `DELETE /api/storage/uploads/{uploadId}`. The API locks the caller
+   and server-issued grant, verifies that no active or soft-deleted credential
+   references the object, deletes it through the configured storage driver,
+   removes the grant, and records an audit event without the object identifier.
+   All missing, linked, and non-owner cases return the same 404 response.
+7. OCR is a separate authorized read: the API downloads the object into server
    memory and then sends it to Gemini as described in the next section.
 
 The selected storage provider receives the file bytes, content type, generated
@@ -55,8 +61,9 @@ numeric local owner ID. The original filename remains in the PostgreSQL upload
 grant rather than being used as the object name.
 
 Set `OBJECT_STORAGE_PROVIDER=gcs` for Google Cloud or
-`OBJECT_STORAGE_PROVIDER=oci` for Oracle Object Storage. The default remains
-`gcs` so existing deployments do not change behavior implicitly.
+`OBJECT_STORAGE_PROVIDER=oci` for Oracle Object Storage only in a reviewed
+synthetic acceptance environment. The example leaves the provider blank so a
+copied environment fails closed instead of enabling cloud uploads implicitly.
 
 ### Destination, region, credentials, and retention
 
@@ -76,10 +83,12 @@ Set `OBJECT_STORAGE_PROVIDER=gcs` for Google Cloud or
   deletion schedule and implement lifecycle rules that match it.
 - The credential DELETE route atomically marks the database record deleted,
   removes its notifications, and writes an audit event, but deliberately does
-  not delete the associated GCS object. Replaced files, abandoned uploads,
-  expired upload grants, object versions, and retained soft-deleted objects
-  have no application cleanup job. Production must add an auditable
-  orphan/deletion workflow and test restoration in a non-production project.
+  not delete the associated storage object. A requester can explicitly remove
+  their own unlinked upload even after its grant expires, but replaced files,
+  abandoned uploads whose user never retries, object versions, and retained
+  soft-deleted credential objects still have no scheduled cleanup job.
+  Production must add an auditable lifecycle workflow and test restoration in
+  a non-production project.
 
 ### Resilience, quotas, and failure behavior
 
@@ -96,8 +105,10 @@ Set `OBJECT_STORAGE_PROVIDER=gcs` for Google Cloud or
   scope, consume the database grant, and commit the credential, audit, and
   notification changes together. GCS ACL metadata is still an external side
   effect and cannot be rolled back by PostgreSQL; a provider/commit failure can
-  therefore leave a private, unlinked object for the required orphan-cleanup
-  process, but it does not create an accessible credential link.
+  therefore leave a private, unlinked object. The requesting user can retry the
+  owner-only cleanup endpoint, but unattended reconciliation and lifecycle
+  enforcement remain operator work. The failure does not create an accessible
+  credential link.
 - The API validates the actual GCS metadata before linking a file, but a signed
   browser PUT cannot enforce the declared 8 MB limit while bytes enter GCS.
   An authenticated user could upload an oversized orphan and consume storage

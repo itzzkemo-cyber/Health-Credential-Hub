@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Readable } from "node:stream";
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -16,8 +22,9 @@ import {
   ObjectPermission,
   setObjectAclPolicy,
 } from "./objectAcl";
+import { getPublicAppUrl } from "./publicUrl";
 
-export type ObjectStorageProvider = "gcs" | "oci";
+export type ObjectStorageProvider = "gcs" | "oci" | "filesystem";
 
 export interface StoredObjectMetadata {
   contentType?: string;
@@ -33,6 +40,7 @@ export interface StoredObjectFile {
   setMetadata(input: { metadata?: Record<string, string> }): Promise<unknown>;
   createReadStream(): Promise<Readable>;
   download(): Promise<[Buffer]>;
+  delete(): Promise<void>;
 }
 
 // Uses Google Application Default Credentials. On Cloud Run this is the
@@ -54,6 +62,8 @@ export const OCI_UPLOAD_REQUIRED_HEADERS: Readonly<Record<string, string>> =
     "if-none-match": "*",
   });
 
+export const FILESYSTEM_UPLOAD_REQUIRED_HEADERS = OCI_UPLOAD_REQUIRED_HEADERS;
+
 // Kept for source compatibility with the default Google driver.
 export const UPLOAD_REQUIRED_HEADERS = GCS_UPLOAD_REQUIRED_HEADERS;
 
@@ -64,24 +74,25 @@ const OCI_RIYADH_ENDPOINT =
 let ociClient: S3Client | undefined;
 let ociClientKey = "";
 
-function requiredEnv(name: string): string {
-  const value = process.env[name]?.trim();
+function requiredEnv(
+  name: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const value = env[name]?.trim();
   if (!value) throw new Error(`${name} must be set`);
   return value;
 }
 
 export function getObjectStorageProvider(): ObjectStorageProvider {
-  const provider = (process.env.OBJECT_STORAGE_PROVIDER || "gcs")
-    .trim()
-    .toLowerCase();
-  if (provider !== "gcs" && provider !== "oci") {
-    throw new Error("OBJECT_STORAGE_PROVIDER must be gcs or oci");
+  const provider = requiredEnv("OBJECT_STORAGE_PROVIDER").toLowerCase();
+  if (provider !== "gcs" && provider !== "oci" && provider !== "filesystem") {
+    throw new Error("OBJECT_STORAGE_PROVIDER must be gcs, oci, or filesystem");
   }
   return provider;
 }
 
-function getValidatedOciEndpoint(): URL {
-  const raw = requiredEnv("OCI_OBJECT_STORAGE_ENDPOINT");
+function getValidatedOciEndpoint(env: NodeJS.ProcessEnv = process.env): URL {
+  const raw = requiredEnv("OCI_OBJECT_STORAGE_ENDPOINT", env);
   let endpoint: URL;
   try {
     endpoint = new URL(raw);
@@ -103,6 +114,68 @@ function getValidatedOciEndpoint(): URL {
     );
   }
   return endpoint;
+}
+
+export function validateOciObjectStorageEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  getValidatedOciEndpoint(env);
+  const region = requiredEnv("OCI_OBJECT_STORAGE_REGION", env);
+  if (region !== OCI_RIYADH_REGION) {
+    throw new Error("OCI_OBJECT_STORAGE_REGION must be me-riyadh-1");
+  }
+  requiredEnv("OCI_OBJECT_STORAGE_ACCESS_KEY_ID", env);
+  requiredEnv("OCI_OBJECT_STORAGE_SECRET_ACCESS_KEY", env);
+}
+
+export function getFilesystemObjectStorageRoot(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const configured = requiredEnv("LOCAL_OBJECT_STORAGE_DIR", env);
+  if (!path.isAbsolute(configured)) {
+    throw new Error("LOCAL_OBJECT_STORAGE_DIR must be an absolute path");
+  }
+  const resolved = path.resolve(configured);
+  if (env.NODE_ENV === "production") {
+    const normalized = resolved.toLowerCase();
+    const workspace = path.resolve(process.cwd()).toLowerCase();
+    const temporary = path.resolve(tmpdir()).toLowerCase();
+    if (
+      normalized === workspace ||
+      normalized.startsWith(`${workspace}${path.sep}`) ||
+      normalized === temporary ||
+      normalized.startsWith(`${temporary}${path.sep}`)
+    ) {
+      throw new Error(
+        "Production LOCAL_OBJECT_STORAGE_DIR must be outside the workspace and temporary directory",
+      );
+    }
+  }
+  return resolved;
+}
+
+export function validateFilesystemObjectStorageEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  getFilesystemObjectStorageRoot(env);
+}
+
+export async function probeFilesystemObjectStorage(): Promise<void> {
+  validateFilesystemObjectStorageEnvironment();
+  const root = getFilesystemObjectStorageRoot();
+  const probeDir = path.join(root, ".readiness");
+  const probePath = path.join(probeDir, `${randomUUID()}.probe`);
+  const expected = Buffer.from(randomUUID(), "utf8");
+  await mkdir(probeDir, { recursive: true, mode: 0o700 });
+  try {
+    await writeFile(probePath, expected, { flag: "wx", mode: 0o600 });
+    const observed = await readFile(probePath);
+    if (!observed.equals(expected)) {
+      throw new Error("Filesystem object storage readiness probe mismatched");
+    }
+  } finally {
+    await rm(probePath, { force: true });
+  }
 }
 
 function getOciClient(): S3Client {
@@ -129,9 +202,19 @@ function getOciClient(): S3Client {
   return ociClient;
 }
 
+/** Read-only reachability probe for the configured private OCI bucket. */
+export async function headOciBucket(bucketName: string): Promise<void> {
+  await getOciClient().send(new HeadBucketCommand({ Bucket: bucketName }));
+}
+
 export function validateObjectStorageConfiguration(): void {
-  if (getObjectStorageProvider() === "oci") {
+  const provider = getObjectStorageProvider();
+  if (provider === "oci") {
     getOciClient();
+    return;
+  }
+  if (provider === "filesystem") {
+    validateFilesystemObjectStorageEnvironment();
     return;
   }
 
@@ -160,8 +243,12 @@ export function validateObjectStorageConfiguration(): void {
 }
 
 export function getStorageConnectSources(): string[] {
-  if (getObjectStorageProvider() === "oci") {
+  const provider = getObjectStorageProvider();
+  if (provider === "oci") {
     return [getValidatedOciEndpoint().origin];
+  }
+  if (provider === "filesystem") {
+    return [];
   }
   const sources = new Set(["https://storage.googleapis.com"]);
   const configuredEndpoint = process.env.STORAGE_API_ENDPOINT?.trim();
@@ -170,10 +257,11 @@ export function getStorageConnectSources(): string[] {
 }
 
 export function getUploadRequiredHeaders(): Record<string, string> {
+  const provider = getObjectStorageProvider();
   return {
-    ...(getObjectStorageProvider() === "oci"
-      ? OCI_UPLOAD_REQUIRED_HEADERS
-      : GCS_UPLOAD_REQUIRED_HEADERS),
+    ...(provider === "gcs"
+      ? GCS_UPLOAD_REQUIRED_HEADERS
+      : OCI_UPLOAD_REQUIRED_HEADERS),
   };
 }
 
@@ -212,15 +300,176 @@ class GcsStoredObjectFile implements StoredObjectFile {
   download(): Promise<[Buffer]> {
     return this.file.download();
   }
+
+  async delete(): Promise<void> {
+    try {
+      await this.file.delete();
+    } catch (error) {
+      if (isNotFound(error)) throw new ObjectNotFoundError();
+      throw error;
+    }
+  }
+}
+
+interface FilesystemMetadataFile {
+  contentType: string;
+  metadata?: Record<string, string>;
+}
+
+function resolveFilesystemObjectPath(
+  bucketName: string,
+  objectName: string,
+): string {
+  const bucketRoot = path.resolve(getFilesystemObjectStorageRoot(), bucketName);
+  const objectPath = path.resolve(bucketRoot, ...objectName.split("/"));
+  if (!objectPath.startsWith(`${bucketRoot}${path.sep}`)) {
+    throw new Error("Object path escapes the configured filesystem bucket");
+  }
+  return objectPath;
+}
+
+class FilesystemStoredObjectFile implements StoredObjectFile {
+  private readonly filePath: string;
+  private readonly metadataPath: string;
+
+  constructor(
+    bucketName: string,
+    private readonly objectName: string,
+  ) {
+    this.filePath = resolveFilesystemObjectPath(bucketName, objectName);
+    this.metadataPath = `${this.filePath}.metadata.json`;
+  }
+
+  get name(): string {
+    return this.objectName;
+  }
+
+  async exists(): Promise<[boolean]> {
+    try {
+      await stat(this.filePath);
+      return [true];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [false];
+      throw error;
+    }
+  }
+
+  private async readMetadataFile(): Promise<FilesystemMetadataFile> {
+    try {
+      const parsed = JSON.parse(
+        await readFile(this.metadataPath, "utf8"),
+      ) as FilesystemMetadataFile;
+      if (!parsed.contentType || typeof parsed.contentType !== "string") {
+        throw new Error("Stored filesystem metadata is invalid");
+      }
+      return parsed;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new ObjectNotFoundError();
+      }
+      throw error;
+    }
+  }
+
+  async getMetadata(): Promise<[StoredObjectMetadata]> {
+    try {
+      const [fileStat, metadata] = await Promise.all([
+        stat(this.filePath),
+        this.readMetadataFile(),
+      ]);
+      return [
+        {
+          contentType: metadata.contentType,
+          size: fileStat.size,
+          metadata: metadata.metadata,
+        },
+      ];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new ObjectNotFoundError();
+      }
+      throw error;
+    }
+  }
+
+  async setMetadata(input: {
+    metadata?: Record<string, string>;
+  }): Promise<void> {
+    const current = await this.readMetadataFile();
+    await this.writeMetadata({
+      contentType: current.contentType,
+      metadata: Object.fromEntries(
+        Object.entries(input.metadata ?? {}).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      ),
+    });
+  }
+
+  async write(bytes: Buffer, contentType: string): Promise<void> {
+    await mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
+    await writeFile(this.filePath, bytes, { flag: "wx", mode: 0o600 });
+    try {
+      await this.writeMetadata({ contentType });
+    } catch (error) {
+      await rm(this.filePath, { force: true });
+      throw error;
+    }
+  }
+
+  private async writeMetadata(metadata: FilesystemMetadataFile): Promise<void> {
+    const temporaryPath = `${this.metadataPath}.${randomUUID()}.tmp`;
+    await writeFile(temporaryPath, JSON.stringify(metadata), {
+      flag: "wx",
+      mode: 0o600,
+    });
+    try {
+      await rm(this.metadataPath, { force: true });
+      await rename(temporaryPath, this.metadataPath);
+    } finally {
+      await rm(temporaryPath, { force: true });
+    }
+  }
+
+  async createReadStream(): Promise<Readable> {
+    const [exists] = await this.exists();
+    if (!exists) throw new ObjectNotFoundError();
+    return createReadStream(this.filePath);
+  }
+
+  async download(): Promise<[Buffer]> {
+    try {
+      return [await readFile(this.filePath)];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new ObjectNotFoundError();
+      }
+      throw error;
+    }
+  }
+
+  async delete(): Promise<void> {
+    try {
+      await rm(this.filePath);
+      await rm(this.metadataPath, { force: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new ObjectNotFoundError();
+      }
+      throw error;
+    }
+  }
 }
 
 function isNotFound(error: unknown): boolean {
   const candidate = error as {
     name?: string;
     Code?: string;
+    code?: number;
     $metadata?: { httpStatusCode?: number };
   };
   return (
+    candidate?.code === 404 ||
     candidate?.$metadata?.httpStatusCode === 404 ||
     candidate?.name === "NotFound" ||
     candidate?.name === "NoSuchKey" ||
@@ -228,7 +477,7 @@ function isNotFound(error: unknown): boolean {
   );
 }
 
-class OciStoredObjectFile implements StoredObjectFile {
+class S3StoredObjectFile implements StoredObjectFile {
   constructor(
     private readonly client: S3Client,
     private readonly bucketName: string,
@@ -278,8 +527,8 @@ class OciStoredObjectFile implements StoredObjectFile {
   async setMetadata(input: {
     metadata?: Record<string, string>;
   }): Promise<void> {
-    // OCI's compatibility API does not expose CopyObject. Credential files are
-    // capped at 8 MB, so preserve the current bytes before replacing metadata.
+    // The supported S3-compatible providers avoid CopyObject here. Credential
+    // files are capped at 8 MB, so preserve bytes before replacing metadata.
     const current = await this.client.send(
       new GetObjectCommand({ Bucket: this.bucketName, Key: this.objectName }),
     );
@@ -328,12 +577,30 @@ class OciStoredObjectFile implements StoredObjectFile {
       throw error;
     }
   }
+
+  async delete(): Promise<void> {
+    try {
+      await this.client.send(
+        new DeleteObjectCommand({
+          Bucket: this.bucketName,
+          Key: this.objectName,
+        }),
+      );
+    } catch (error) {
+      if (isNotFound(error)) throw new ObjectNotFoundError();
+      throw error;
+    }
+  }
 }
 
 function getStoredObject(fullPath: string): StoredObjectFile {
   const { bucketName, objectName } = parseObjectPath(fullPath);
-  if (getObjectStorageProvider() === "oci") {
-    return new OciStoredObjectFile(getOciClient(), bucketName, objectName);
+  const provider = getObjectStorageProvider();
+  if (provider === "oci") {
+    return new S3StoredObjectFile(getOciClient(), bucketName, objectName);
+  }
+  if (provider === "filesystem") {
+    return new FilesystemStoredObjectFile(bucketName, objectName);
   }
   return new GcsStoredObjectFile(
     objectStorageClient.bucket(bucketName).file(objectName),
@@ -342,11 +609,23 @@ function getStoredObject(fullPath: string): StoredObjectFile {
 
 export class ObjectStorageService {
   getPrivateObjectDir(): string {
-    const dir = process.env.PRIVATE_OBJECT_DIR || "";
-    if (!dir) {
+    const configured = process.env.PRIVATE_OBJECT_DIR ?? "";
+    const parts = configured.split("/");
+    if (
+      !configured ||
+      configured !== configured.trim() ||
+      parts.length !== 3 ||
+      parts[0] !== "" ||
+      !parts[1] ||
+      parts[1] === "." ||
+      parts[1] === ".." ||
+      parts[2] !== "private" ||
+      /[\u0000-\u001f\u007f\\%?#]/.test(configured) ||
+      path.posix.normalize(configured) !== configured
+    ) {
       throw new Error("PRIVATE_OBJECT_DIR must be set to /bucket-name/private");
     }
-    return dir;
+    return configured;
   }
 
   async downloadObject(
@@ -368,13 +647,19 @@ export class ObjectStorageService {
     return new Response(webStream, { headers });
   }
 
+  async deleteObject(file: StoredObjectFile): Promise<void> {
+    await file.delete();
+  }
+
   async getObjectEntityUploadURL(contentType: string): Promise<{
     uploadURL: string;
     requiredHeaders: Record<string, string>;
   }> {
-    const fullPath = `${this.getPrivateObjectDir()}/uploads/${randomUUID()}`;
+    const uploadId = randomUUID();
+    const fullPath = `${this.getPrivateObjectDir()}/uploads/${uploadId}`;
     const { bucketName, objectName } = parseObjectPath(fullPath);
-    if (getObjectStorageProvider() === "oci") {
+    const provider = getObjectStorageProvider();
+    if (provider === "oci") {
       const uploadURL = await getS3SignedUrl(
         getOciClient(),
         new PutObjectCommand({
@@ -387,6 +672,16 @@ export class ObjectStorageService {
       );
       return { uploadURL, requiredHeaders: getUploadRequiredHeaders() };
     }
+    if (provider === "filesystem") {
+      return {
+        // A relative URL deliberately follows the browser's current origin.
+        // PUBLIC_APP_URL remains the canonical HTTPS origin for headers and
+        // links, but must not redirect a loopback acceptance session to a DNS
+        // name that is not live yet.
+        uploadURL: `/api/storage/uploads/local/${uploadId}`,
+        requiredHeaders: getUploadRequiredHeaders(),
+      };
+    }
 
     const file = objectStorageClient.bucket(bucketName).file(objectName);
     const [uploadURL] = await file.getSignedUrl({
@@ -397,6 +692,28 @@ export class ObjectStorageService {
       extensionHeaders: GCS_UPLOAD_REQUIRED_HEADERS,
     });
     return { uploadURL, requiredHeaders: getUploadRequiredHeaders() };
+  }
+
+  async writeFilesystemObject(
+    objectPath: string,
+    bytes: Buffer,
+    contentType: string,
+  ): Promise<void> {
+    if (getObjectStorageProvider() !== "filesystem") {
+      throw new Error("Filesystem object uploads are not enabled");
+    }
+    if (!/^\/objects\/uploads\/[0-9a-f-]{36}$/.test(objectPath)) {
+      throw new Error("Invalid filesystem upload path");
+    }
+    const entityId = objectPath.slice("/objects/".length);
+    const entityDir = `${this.getPrivateObjectDir().replace(/\/+$/g, "")}/`;
+    const { bucketName, objectName } = parseObjectPath(
+      `${entityDir}${entityId}`,
+    );
+    await new FilesystemStoredObjectFile(bucketName, objectName).write(
+      bytes,
+      contentType,
+    );
   }
 
   async getObjectEntityFile(objectPath: string): Promise<StoredObjectFile> {
@@ -413,6 +730,13 @@ export class ObjectStorageService {
   }
 
   normalizeObjectEntityPath(rawPath: string): string {
+    if (getObjectStorageProvider() === "filesystem") {
+      const relativeMatch = rawPath.match(
+        /^\/api\/storage\/uploads\/local\/([0-9a-f-]{36})$/,
+      );
+      if (relativeMatch) return `/objects/uploads/${relativeMatch[1]}`;
+    }
+
     let url: URL;
     try {
       url = new URL(rawPath);
@@ -430,6 +754,18 @@ export class ObjectStorageService {
         isConfiguredOciHost = url.origin === getValidatedOciEndpoint().origin;
       } catch {
         isConfiguredOciHost = false;
+      }
+    }
+    if (getObjectStorageProvider() === "filesystem") {
+      const publicAppUrl = getPublicAppUrl();
+      const uploadPrefix = "/api/storage/uploads/local/";
+      if (publicAppUrl && url.origin === new URL(publicAppUrl).origin) {
+        if (url.pathname.startsWith(uploadPrefix)) {
+          const uploadId = url.pathname.slice(uploadPrefix.length);
+          if (/^[0-9a-f-]{36}$/.test(uploadId)) {
+            return `/objects/uploads/${uploadId}`;
+          }
+        }
       }
     }
     if (!isGoogleStorageHost && !isConfiguredOciHost) return rawPath;

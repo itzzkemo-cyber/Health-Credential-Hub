@@ -71,6 +71,7 @@ import type {
   TotpChallengeInput,
   TotpConfirmInput,
   TotpSetupData,
+  TotpSetupInput,
   TotpVerifySetupInput,
   TwoFactorPending,
   UnreadCount,
@@ -179,6 +180,82 @@ export const useRequestUploadUrl = <TError = ErrorType<ErrorEnvelope>,
         TContext
       > => {
       return useMutation(getRequestUploadUrlMutationOptions(options));
+    }
+
+export const getDeleteUnlinkedUploadUrl = (uploadId: string,) => {
+
+
+
+
+  return `/api/storage/uploads/${uploadId}`
+}
+
+/**
+ * Deletes a private upload only when the authenticated caller owns its
+ * upload grant and no credential record, including a soft-deleted record,
+ * references the object. Missing, linked, and unauthorized uploads share
+ * the same 404 response so object existence and tenant ownership are not
+ * disclosed.
+ * @summary Delete a caller-owned upload that is not linked to a credential
+ */
+export const deleteUnlinkedUpload = async (uploadId: string, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteUnlinkedUploadUrl(uploadId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteUnlinkedUploadMutationOptions = <TError = ErrorType<ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUnlinkedUpload>>, TError,{uploadId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteUnlinkedUpload>>, TError,{uploadId: string}, TContext> => {
+
+const mutationKey = ['deleteUnlinkedUpload'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteUnlinkedUpload>>, {uploadId: string}> = (props) => {
+          const {uploadId} = props ?? {};
+
+          return  deleteUnlinkedUpload(uploadId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteUnlinkedUploadMutationResult = NonNullable<Awaited<ReturnType<typeof deleteUnlinkedUpload>>>
+
+    export type DeleteUnlinkedUploadMutationError = ErrorType<ErrorEnvelope>
+
+    /**
+ * @summary Delete a caller-owned upload that is not linked to a credential
+ */
+export const useDeleteUnlinkedUpload = <TError = ErrorType<ErrorEnvelope>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUnlinkedUpload>>, TError,{uploadId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteUnlinkedUpload>>,
+        TError,
+        {uploadId: string},
+        TContext
+      > => {
+      return useMutation(getDeleteUnlinkedUploadMutationOptions(options));
     }
 
 export const getGetStorageObjectUrl = (objectPath: string,) => {
@@ -935,14 +1012,14 @@ export const getTotpSetupUrl = () => {
 /**
  * @summary Begin enabling 2FA — returns the secret, QR image and a signed setup token (nothing persisted yet)
  */
-export const totpSetup = async ( options?: Parameters<typeof customFetch>[1]): Promise<TotpSetupData> => {
+export const totpSetup = async (totpSetupInput: TotpSetupInput, options?: Parameters<typeof customFetch>[1]): Promise<TotpSetupData> => {
 
   return customFetch<TotpSetupData>(getTotpSetupUrl(),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(totpSetupInput)
   }
 );}
 
@@ -951,8 +1028,8 @@ export const totpSetup = async ( options?: Parameters<typeof customFetch>[1]): P
 
 
 export const getTotpSetupMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof totpSetup>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof totpSetup>>, TError,void, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof totpSetup>>, TError,{data: BodyType<TotpSetupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof totpSetup>>, TError,{data: BodyType<TotpSetupInput>}, TContext> => {
 
 const mutationKey = ['totpSetup'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -964,10 +1041,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof totpSetup>>, void> = () => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof totpSetup>>, {data: BodyType<TotpSetupInput>}> = (props) => {
+          const {data} = props ?? {};
 
-
-          return  totpSetup(requestOptions)
+          return  totpSetup(data,requestOptions)
         }
 
 
@@ -978,18 +1055,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type TotpSetupMutationResult = NonNullable<Awaited<ReturnType<typeof totpSetup>>>
-
+    export type TotpSetupMutationBody = BodyType<TotpSetupInput>
     export type TotpSetupMutationError = ErrorType<void>
 
     /**
  * @summary Begin enabling 2FA — returns the secret, QR image and a signed setup token (nothing persisted yet)
  */
 export const useTotpSetup = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof totpSetup>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof totpSetup>>, TError,{data: BodyType<TotpSetupInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof totpSetup>>,
         TError,
-        void,
+        {data: BodyType<TotpSetupInput>},
         TContext
       > => {
       return useMutation(getTotpSetupMutationOptions(options));
@@ -2602,7 +2679,7 @@ export const updateEmployee = async (id: number,
 
 
 
-export const getUpdateEmployeeMutationOptions = <TError = ErrorType<unknown>,
+export const getUpdateEmployeeMutationOptions = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateEmployee>>, TError,{id: number;data: BodyType<EmployeeUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateEmployee>>, TError,{id: number;data: BodyType<EmployeeUpdate>}, TContext> => {
 
@@ -2631,12 +2708,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateEmployeeMutationResult = NonNullable<Awaited<ReturnType<typeof updateEmployee>>>
     export type UpdateEmployeeMutationBody = BodyType<EmployeeUpdate>
-    export type UpdateEmployeeMutationError = ErrorType<unknown>
+    export type UpdateEmployeeMutationError = ErrorType<void>
 
     /**
  * @summary Update employee
  */
-export const useUpdateEmployee = <TError = ErrorType<unknown>,
+export const useUpdateEmployee = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateEmployee>>, TError,{id: number;data: BodyType<EmployeeUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateEmployee>>,
@@ -2673,7 +2750,7 @@ export const deleteEmployee = async (id: number, options?: Parameters<typeof cus
 
 
 
-export const getDeleteEmployeeMutationOptions = <TError = ErrorType<unknown>,
+export const getDeleteEmployeeMutationOptions = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteEmployee>>, TError,{id: number}, TContext> => {
 
@@ -2702,12 +2779,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteEmployeeMutationResult = NonNullable<Awaited<ReturnType<typeof deleteEmployee>>>
 
-    export type DeleteEmployeeMutationError = ErrorType<unknown>
+    export type DeleteEmployeeMutationError = ErrorType<void>
 
     /**
  * @summary Delete employee
  */
-export const useDeleteEmployee = <TError = ErrorType<unknown>,
+export const useDeleteEmployee = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof deleteEmployee>>,
@@ -2744,7 +2821,7 @@ export const activateEmployee = async (id: number, options?: Parameters<typeof c
 
 
 
-export const getActivateEmployeeMutationOptions = <TError = ErrorType<unknown>,
+export const getActivateEmployeeMutationOptions = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof activateEmployee>>, TError,{id: number}, TContext> => {
 
@@ -2773,12 +2850,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ActivateEmployeeMutationResult = NonNullable<Awaited<ReturnType<typeof activateEmployee>>>
 
-    export type ActivateEmployeeMutationError = ErrorType<unknown>
+    export type ActivateEmployeeMutationError = ErrorType<void>
 
     /**
  * @summary Activate employee
  */
-export const useActivateEmployee = <TError = ErrorType<unknown>,
+export const useActivateEmployee = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof activateEmployee>>,
@@ -2815,7 +2892,7 @@ export const deactivateEmployee = async (id: number, options?: Parameters<typeof
 
 
 
-export const getDeactivateEmployeeMutationOptions = <TError = ErrorType<unknown>,
+export const getDeactivateEmployeeMutationOptions = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deactivateEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deactivateEmployee>>, TError,{id: number}, TContext> => {
 
@@ -2844,12 +2921,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeactivateEmployeeMutationResult = NonNullable<Awaited<ReturnType<typeof deactivateEmployee>>>
 
-    export type DeactivateEmployeeMutationError = ErrorType<unknown>
+    export type DeactivateEmployeeMutationError = ErrorType<void>
 
     /**
  * @summary Deactivate employee
  */
-export const useDeactivateEmployee = <TError = ErrorType<unknown>,
+export const useDeactivateEmployee = <TError = ErrorType<void>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deactivateEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof deactivateEmployee>>,

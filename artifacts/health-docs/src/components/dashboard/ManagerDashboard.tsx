@@ -67,7 +67,13 @@ export function ManagerDashboard() {
 
   if (employeesQuery.isLoading || credentialsQuery.isLoading) {
     return (
-      <div className="space-y-5" aria-busy="true">
+      <div
+        className="space-y-5"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <span className="sr-only">{t("common.loading")}</span>
         <Skeleton className="h-28 w-full rounded-2xl" />
         <div className="grid grid-cols-2 gap-3">
           <Skeleton className="h-28 rounded-xl" />

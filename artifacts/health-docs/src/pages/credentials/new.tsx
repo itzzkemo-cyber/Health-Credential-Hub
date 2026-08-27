@@ -12,6 +12,7 @@ import {
   CredentialInputType,
   getGetEmployeeQueryKey,
   useCreateCredential,
+  useDeleteUnlinkedUpload,
   useGetEmployee,
   useRequestUploadUrl,
 } from "@workspace/api-client-react";
@@ -33,8 +34,20 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { getAuthUser } from "@/lib/auth";
 import { useLanguage } from "@/lib/language-context";
-import { prepareUploadFile, UploadTooLargeError } from "@/lib/upload";
+import {
+  buildUploadRequestHeaders,
+  prepareUploadFile,
+  UploadTooLargeError,
+} from "@/lib/upload";
 import { cn } from "@/lib/utils";
+import {
+  claimCredentialSubmission,
+  CredentialSubmissionError,
+  getUnlinkedUploadId,
+  releaseCredentialSubmission,
+  submitCredentialWithDeferredUpload,
+  type CredentialSubmissionStage,
+} from "./deferred-credential-submission";
 import { getCredentialOwnerState } from "./credential-owner-state";
 
 const FILE_ACCEPT =
@@ -72,13 +85,18 @@ export default function CredentialNew() {
     hasTargetEmployee: Boolean(targetEmployee),
   });
 
-  const [fileUrl, setFileUrl] = useState("");
-  const [fileKind, setFileKind] = useState<"pdf" | "image" | "">("");
-  const [fileName, setFileName] = useState("");
-  const [isUploading, setIsUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [submissionStage, setSubmissionStage] = useState<
+    CredentialSubmissionStage | "idle"
+  >("idle");
+  const [cleanupUnconfirmed, setCleanupUnconfirmed] = useState(false);
+  const submissionLock = useRef({ current: false });
 
-  const createCredential = useCreateCredential();
-  const requestUploadUrl = useRequestUploadUrl();
+  const createCredential = useCreateCredential({ mutation: { gcTime: 0 } });
+  const requestUploadUrl = useRequestUploadUrl({ mutation: { gcTime: 0 } });
+  const deleteUnlinkedUpload = useDeleteUnlinkedUpload({
+    mutation: { gcTime: 0 },
+  });
 
   const [formData, setFormData] = useState({
     type: "BLS" as CredentialInputType,
@@ -101,53 +119,32 @@ export default function CredentialNew() {
     }));
   }, [targetEmployee]);
 
-  const handleFileUpload = async (
+  const handleFileSelection = (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-
-    setIsUploading(true);
-    try {
-      const prepared = await prepareUploadFile(file);
-      const granted = await requestUploadUrl.mutateAsync({
-        data: {
-          name: file.name,
-          size: prepared.blob.size,
-          contentType: prepared.contentType,
-        },
-      });
-      const upload = await fetch(granted.uploadURL, {
-        method: "PUT",
-        body: prepared.blob,
-        headers: {
-          ...granted.requiredHeaders,
-          "Content-Type": prepared.contentType,
-        },
-      });
-      if (!upload.ok)
-        throw new Error(`Storage upload failed (${upload.status})`);
-      const objectPath = granted.objectPath;
-
-      setFileUrl(objectPath);
-      setFileKind(prepared.kind);
-      setFileName(file.name);
-      toast.success(t("credential.upload_success"));
-    } catch (error) {
-      toast.error(
-        t(
-          error instanceof UploadTooLargeError
-            ? "credential.file_too_large"
-            : "credential.upload_failed",
-        ),
-      );
-    } finally {
-      setIsUploading(false);
-    }
+    setSelectedFile(file);
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const clearSelectedFile = () => setSelectedFile(null);
+  const isSubmitting = submissionStage !== "idle";
+  const controlsDisabled = isSubmitting || cleanupUnconfirmed;
+  const resetSensitiveMutationState = () => {
+    createCredential.reset();
+    requestUploadUrl.reset();
+    deleteUnlinkedUpload.reset();
+  };
+
+  const leaveForm = () => {
+    if (submissionLock.current.current) return;
+    clearSelectedFile();
+    resetSensitiveMutationState();
+    setLocation("/credentials");
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (ownerState !== "ready") {
       toast.error(t("credential.employee_required"));
@@ -157,24 +154,86 @@ export default function CredentialNew() {
       toast.error(t("credential.date_order_error"));
       return;
     }
+    if (cleanupUnconfirmed) {
+      toast.error(t("credential.cleanup_failed"));
+      return;
+    }
+    if (!claimCredentialSubmission(submissionLock.current)) return;
 
-    createCredential.mutate(
-      {
-        data: {
-          ...formData,
-          employeeId,
-          fileUrl: fileUrl || undefined,
-          fileType: fileUrl ? fileKind || "image" : undefined,
+    let createdCredentialId: number | null = null;
+    try {
+      createdCredentialId = await submitCredentialWithDeferredUpload({
+        file: selectedFile,
+        prepareFile: prepareUploadFile,
+        requestUpload: (file, prepared) =>
+          requestUploadUrl.mutateAsync({
+            data: {
+              name: file.name,
+              size: prepared.blob.size,
+              contentType: prepared.contentType,
+            },
+          }),
+        putUpload: async (grant, prepared) => {
+          const response = await fetch(grant.uploadURL, {
+            method: "PUT",
+            body: prepared.blob,
+            headers: buildUploadRequestHeaders(
+              grant.requiredHeaders,
+              prepared.contentType,
+              grant.uploadURL,
+              window.location.origin,
+            ),
+          });
+          if (!response.ok) {
+            throw new Error(`Storage upload failed (${response.status})`);
+          }
         },
-      },
-      {
-        onSuccess: (result) => {
-          toast.success(t("credential.create_success"));
-          setLocation(`/credentials/${result.id}`);
+        createCredential: async (uploadedFile) => {
+          const credential = await createCredential.mutateAsync({
+            data: {
+              ...formData,
+              employeeId,
+              fileUrl: uploadedFile?.objectPath,
+              fileType: uploadedFile?.kind,
+            },
+          });
+          return credential.id;
         },
-        onError: () => toast.error(t("credential.create_failed")),
-      },
-    );
+        cleanupUpload: async (objectPath) => {
+          const uploadId = getUnlinkedUploadId(objectPath);
+          if (!uploadId) throw new Error("Invalid private upload reference");
+          await deleteUnlinkedUpload.mutateAsync({ uploadId });
+        },
+        onStage: setSubmissionStage,
+      });
+    } catch (error) {
+      const submissionError =
+        error instanceof CredentialSubmissionError ? error : null;
+      const underlyingError = submissionError?.originalError ?? error;
+      if (
+        submissionError?.stage === "upload" &&
+        underlyingError instanceof UploadTooLargeError
+      ) {
+        toast.error(t("credential.file_too_large"));
+      } else if (submissionError?.stage === "upload") {
+        toast.error(t("credential.upload_failed"));
+      } else if (submissionError?.stage === "cleanup") {
+        setCleanupUnconfirmed(true);
+        toast.error(t("credential.cleanup_failed"));
+      } else {
+        toast.error(t("credential.create_failed"));
+      }
+    } finally {
+      releaseCredentialSubmission(submissionLock.current);
+      resetSensitiveMutationState();
+      setSubmissionStage("idle");
+    }
+
+    if (createdCredentialId !== null) {
+      clearSelectedFile();
+      toast.success(t("credential.create_success"));
+      setLocation(`/credentials/${createdCredentialId}`);
+    }
   };
 
   const types = Object.keys(CredentialInputType);
@@ -185,7 +244,8 @@ export default function CredentialNew() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setLocation("/credentials")}
+          onClick={leaveForm}
+          disabled={isSubmitting}
           aria-label={t("common.back")}
           className="h-11 w-11 shrink-0"
         >
@@ -249,7 +309,26 @@ export default function CredentialNew() {
 
           <Card>
             <CardContent className="p-4 sm:p-6">
-              <form onSubmit={handleSubmit} className="space-y-6">
+              <form
+                onSubmit={handleSubmit}
+                className="space-y-6"
+                aria-busy={isSubmitting}
+              >
+                <p className="sr-only" role="status" aria-live="polite">
+                  {submissionStage === "upload"
+                    ? t("credential.uploading_title")
+                    : submissionStage === "create"
+                      ? t("credential.saving_title")
+                      : ""}
+                </p>
+                {cleanupUnconfirmed && (
+                  <div
+                    className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm leading-6 text-destructive"
+                    role="alert"
+                  >
+                    {t("credential.cleanup_failed")}
+                  </div>
+                )}
                 <section
                   className="space-y-3"
                   aria-labelledby="manual-attachment-title"
@@ -264,10 +343,12 @@ export default function CredentialNew() {
                   </div>
                   <DocumentPicker
                     id="manual-document-upload"
-                    busy={isUploading}
-                    fileName={fileName}
+                    busy={submissionStage === "upload"}
+                    disabled={controlsDisabled}
+                    fileName={selectedFile?.name ?? ""}
                     compact
-                    onChange={(event) => void handleFileUpload(event)}
+                    onChange={handleFileSelection}
+                    onClear={clearSelectedFile}
                     t={t}
                   />
                 </section>
@@ -279,6 +360,7 @@ export default function CredentialNew() {
                     </Label>
                     <Select
                       value={formData.type}
+                      disabled={controlsDisabled}
                       onValueChange={(value) =>
                         setFormData({
                           ...formData,
@@ -310,6 +392,7 @@ export default function CredentialNew() {
                     }
                     dir="ltr"
                     required
+                    disabled={controlsDisabled}
                   />
                   <FormField
                     id="holder-name-ar"
@@ -319,6 +402,7 @@ export default function CredentialNew() {
                       setFormData({ ...formData, holderNameAr: value })
                     }
                     dir="rtl"
+                    disabled={controlsDisabled}
                   />
                   <FormField
                     id="issuer-name"
@@ -329,6 +413,7 @@ export default function CredentialNew() {
                     }
                     dir="ltr"
                     required
+                    disabled={controlsDisabled}
                   />
                   <FormField
                     id="issuer-name-ar"
@@ -338,6 +423,7 @@ export default function CredentialNew() {
                       setFormData({ ...formData, issuerNameAr: value })
                     }
                     dir="rtl"
+                    disabled={controlsDisabled}
                   />
                   <FormField
                     id="certificate-number"
@@ -349,6 +435,7 @@ export default function CredentialNew() {
                     required
                     dir="ltr"
                     className="md:col-span-2"
+                    disabled={controlsDisabled}
                   />
                   <FormField
                     id="issue-date"
@@ -360,6 +447,7 @@ export default function CredentialNew() {
                     }
                     required
                     dir="ltr"
+                    disabled={controlsDisabled}
                   />
                   <FormField
                     id="expiry-date"
@@ -372,6 +460,7 @@ export default function CredentialNew() {
                     }
                     required
                     dir="ltr"
+                    disabled={controlsDisabled}
                   />
                   <div className="space-y-2 md:col-span-2">
                     <Label htmlFor="credential-notes">
@@ -384,6 +473,7 @@ export default function CredentialNew() {
                         setFormData({ ...formData, notes: event.target.value })
                       }
                       rows={3}
+                      disabled={controlsDisabled}
                     />
                   </div>
                 </div>
@@ -392,21 +482,18 @@ export default function CredentialNew() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setLocation("/credentials")}
+                    onClick={leaveForm}
+                    disabled={isSubmitting}
                     className="min-h-11 w-full sm:w-auto"
                   >
                     {t("common.cancel")}
                   </Button>
                   <Button
                     type="submit"
-                    disabled={
-                      createCredential.isPending ||
-                      isUploading ||
-                      ownerState !== "ready"
-                    }
+                    disabled={controlsDisabled || ownerState !== "ready"}
                     className="min-h-12 w-full gap-2 sm:w-auto"
                   >
-                    {createCredential.isPending ? (
+                    {isSubmitting ? (
                       <Loader2
                         className="h-4 w-4 animate-spin"
                         aria-hidden="true"
@@ -414,7 +501,11 @@ export default function CredentialNew() {
                     ) : (
                       <Check className="h-4 w-4" aria-hidden="true" />
                     )}
-                    {t("credential.save_document")}
+                    {submissionStage === "upload"
+                      ? t("credential.uploading_title")
+                      : submissionStage === "create"
+                        ? t("credential.saving_title")
+                        : t("credential.save_document")}
                   </Button>
                 </div>
               </form>
@@ -433,6 +524,7 @@ function DocumentPicker({
   fileName,
   compact = false,
   onChange,
+  onClear,
   t,
 }: {
   id: string;
@@ -441,6 +533,7 @@ function DocumentPicker({
   fileName: string;
   compact?: boolean;
   onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  onClear: () => void;
   t: (key: string) => string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -508,20 +601,35 @@ function DocumentPicker({
                 : t("credential.manual_upload_hint")}
           </p>
         </div>
-        <Button
-          type="button"
-          variant={fileName ? "outline" : "default"}
+        <div
           className={cn(
-            "min-h-11 shrink-0",
-            compact && "w-full sm:w-auto",
+            "grid shrink-0 grid-cols-1 gap-2",
+            compact && "w-full sm:flex sm:w-auto",
           )}
-          disabled={busy || disabled}
-          onClick={() => inputRef.current?.click()}
         >
-          {fileName
-            ? t("credential.replace_file")
-            : t("credential.choose_file")}
-        </Button>
+          {fileName && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="min-h-11"
+              disabled={busy || disabled}
+              onClick={onClear}
+            >
+              {t("credential.remove_file")}
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant={fileName ? "outline" : "default"}
+            className="min-h-11"
+            disabled={busy || disabled}
+            onClick={() => inputRef.current?.click()}
+          >
+            {fileName
+              ? t("credential.replace_file")
+              : t("credential.choose_file")}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -537,6 +645,7 @@ function FormField({
   dir,
   min,
   className,
+  disabled,
 }: {
   id: string;
   label: string;
@@ -547,6 +656,7 @@ function FormField({
   dir?: "rtl" | "ltr";
   min?: string;
   className?: string;
+  disabled?: boolean;
 }) {
   return (
     <div className={cn("space-y-2", className)}>
@@ -559,6 +669,7 @@ function FormField({
         required={required}
         dir={dir}
         min={min}
+        disabled={disabled}
         className="min-h-11"
       />
     </div>

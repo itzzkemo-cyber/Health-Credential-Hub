@@ -6,6 +6,8 @@ import type {
   EmployeeWithStats,
 } from "@workspace/api-client-react";
 
+import type { AdminMfaStepUpCredentials } from "./admin-mfa-step-up";
+
 const TEMPORARY_PASSWORD_LENGTH = 20;
 const PASSWORD_CHARACTER_GROUPS = [
   "ABCDEFGHJKLMNPQRSTUVWXYZ",
@@ -14,6 +16,12 @@ const PASSWORD_CHARACTER_GROUPS = [
   "!@#$%^&*()-_=+",
 ] as const;
 const PASSWORD_ALPHABET = PASSWORD_CHARACTER_GROUPS.join("");
+const STEP_UP_ROLES = new Set([
+  "supervisor",
+  "department_manager",
+  "hospital_admin",
+  "system_admin",
+]);
 
 export function getEmployeeDisplayName(
   employee: Pick<EmployeeWithStats, "name" | "nameAr">,
@@ -74,7 +82,10 @@ function secureRandomIndex(maxExclusive: number): number {
   return value[0] % maxExclusive;
 }
 
-export function buildEmployeeInput(form: EmployeeAccountForm): EmployeeInput {
+export function buildEmployeeInput(
+  form: EmployeeAccountForm,
+  stepUp?: AdminMfaStepUpCredentials,
+): EmployeeInput {
   return {
     name: form.name.trim(),
     nameAr: form.nameAr.trim(),
@@ -87,6 +98,7 @@ export function buildEmployeeInput(form: EmployeeAccountForm): EmployeeInput {
     jobTitleAr: form.jobTitleAr.trim(),
     employeeNumber: form.employeeNumber.trim(),
     ...(form.facilityId ? { facilityId: Number(form.facilityId) } : {}),
+    ...(stepUp ?? {}),
   };
 }
 
@@ -109,6 +121,7 @@ export function createEmployeeEditForm(employee: Employee): EmployeeEditForm {
 export function buildEmployeeUpdate(
   form: EmployeeEditForm,
   includeOrganizationalFields: boolean,
+  stepUp?: AdminMfaStepUpCredentials,
 ): EmployeeUpdate {
   return {
     name: form.name.trim(),
@@ -123,7 +136,31 @@ export function buildEmployeeUpdate(
           supervisorId: form.supervisorId ? Number(form.supervisorId) : null,
         }
       : {}),
+    ...(stepUp ?? {}),
   };
+}
+
+export function requiresEmployeeCreateStepUp(role: string): boolean {
+  return STEP_UP_ROLES.has(role);
+}
+
+export function hasEmployeeOrganizationalChanges(
+  employee: Pick<
+    Employee,
+    "role" | "departmentId" | "supervisorId"
+  >,
+  form: Pick<EmployeeEditForm, "role" | "departmentId" | "supervisorId">,
+): boolean {
+  const departmentId =
+    employee.departmentId == null ? "" : String(employee.departmentId);
+  const supervisorId =
+    employee.supervisorId == null ? "" : String(employee.supervisorId);
+
+  return (
+    form.role !== employee.role ||
+    form.departmentId !== departmentId ||
+    form.supervisorId !== supervisorId
+  );
 }
 
 export function canEditOrganizationalFields(

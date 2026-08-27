@@ -2,32 +2,78 @@
 param()
 
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
 $requiredRegion = "me-riyadh-1"
 
-if (-not (Get-Command oci -ErrorAction SilentlyContinue)) {
-  throw "OCI CLI is not installed. Install it from Oracle's official documentation before provisioning."
+function Invoke-OciJson {
+  param([Parameter(Mandatory)][string[]]$Arguments)
+
+  $raw = & oci @Arguments --output json
+  if ($LASTEXITCODE -ne 0) {
+    throw "OCI CLI command failed: oci $($Arguments -join ' ')"
+  }
+  return $raw | ConvertFrom-Json
 }
 
+if (-not (Get-Command oci -ErrorAction SilentlyContinue)) {
+  throw "OCI CLI is not installed. Use Oracle's official installer before provisioning."
+}
 if ($env:OCI_CLI_REGION -ne $requiredRegion) {
   throw "Set OCI_CLI_REGION=me-riyadh-1 before continuing."
 }
-
 if ([string]::IsNullOrWhiteSpace($env:OCI_COMPARTMENT_ID)) {
-  throw "Set OCI_COMPARTMENT_ID to the reviewed deployment compartment."
+  throw "Set OCI_COMPARTMENT_ID to the reviewed deployment compartment OCID."
+}
+if ($env:OCI_COMPARTMENT_ID -notmatch '^ocid1\.compartment\.oc1\.\.[A-Za-z0-9]+$') {
+  throw "OCI_COMPARTMENT_ID is not a compartment OCID."
 }
 
-$null = oci iam region-subscription list --output json | ConvertFrom-Json
-$namespace = oci os ns get --output json | ConvertFrom-Json
-if ([string]::IsNullOrWhiteSpace($namespace.data)) {
+$subscriptions = Invoke-OciJson @("iam", "region-subscription", "list")
+$riyadh = @($subscriptions.data | Where-Object {
+    $_."region-name" -eq $requiredRegion -and $_.status -eq "READY"
+  })
+if ($riyadh.Count -ne 1) {
+  throw "The tenancy is not subscribed to an active me-riyadh-1 region. Riyadh need not be the home region."
+}
+
+$compartment = Invoke-OciJson @(
+  "iam", "compartment", "get", "--compartment-id", $env:OCI_COMPARTMENT_ID
+)
+if ($compartment.data."lifecycle-state" -ne "ACTIVE") {
+  throw "The selected deployment compartment is not ACTIVE."
+}
+
+$namespace = Invoke-OciJson @("os", "ns", "get")
+if ([string]::IsNullOrWhiteSpace([string]$namespace.data)) {
   throw "Object Storage namespace lookup failed."
 }
 
-$subscriptions = oci iam region-subscription list --output json | ConvertFrom-Json
-$riyadh = @($subscriptions.data | Where-Object { $_."region-name" -eq $requiredRegion })
-if ($riyadh.Count -ne 1 -or -not $riyadh[0]."is-home-region") {
-  throw "The authenticated tenancy must have an active Riyadh subscription; confirm the intended home-region decision."
+$availabilityDomains = Invoke-OciJson @(
+  "iam", "availability-domain", "list", "--compartment-id", $env:OCI_COMPARTMENT_ID
+)
+if (@($availabilityDomains.data).Count -lt 1) {
+  throw "No availability domain is visible in me-riyadh-1."
 }
 
-Write-Output "OCI preflight passed: authenticated, Riyadh home region active, and Object Storage namespace available."
-Write-Output "No resources were created or changed. Review charges and least-privilege IAM before provisioning."
+$containerShapes = Invoke-OciJson @(
+  "container-instances", "container-instance", "list-shapes",
+  "--compartment-id", $env:OCI_COMPARTMENT_ID
+)
+$supportedContainerShape = @($containerShapes.data | Where-Object {
+    $_.shape -eq "CI.Standard.E4.Flex"
+  })
+if ($supportedContainerShape.Count -lt 1) {
+  throw "CI.Standard.E4.Flex is not available to this compartment in me-riyadh-1."
+}
 
+$postgresShapes = Invoke-OciJson @(
+  "psql", "shape-summary", "list-shapes",
+  "--compartment-id", $env:OCI_COMPARTMENT_ID,
+  "--id", "PostgreSQL.VM.Standard.E5.Flex"
+)
+if (@($postgresShapes.data).Count -lt 1) {
+  throw "PostgreSQL.VM.Standard.E5.Flex is not available to this compartment in me-riyadh-1."
+}
+
+Write-Output "OCI preflight passed: authenticated, compartment ACTIVE, Riyadh READY, and required managed-service shapes visible."
+Write-Output "No resources were created or changed. Confirm payment, quotas, budgets, and Terraform IAM before apply."
