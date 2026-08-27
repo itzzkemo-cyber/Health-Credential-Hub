@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -20,6 +22,12 @@ const secureMetadata = {
     uniformBucketLevelAccess: { enabled: true },
   },
 };
+
+const absoluteFilesystemRoot = path.resolve(
+  path.parse(process.cwd()).root,
+  "wathaiqi-health-tests",
+  "objects",
+);
 
 describe("GCS production readiness", () => {
   it("does not contact GCS outside production", async () => {
@@ -198,8 +206,7 @@ describe("GCS production readiness", () => {
         env: {
           ...productionEnv,
           OBJECT_STORAGE_PROVIDER: "filesystem",
-          LOCAL_OBJECT_STORAGE_DIR:
-            "C:\\ProgramData\\WathaiqiHealth\\objects",
+          LOCAL_OBJECT_STORAGE_DIR: absoluteFilesystemRoot,
           PUBLIC_APP_URL: "https://app.wathaiqihealth.com",
         },
         probeFilesystemStorage,
