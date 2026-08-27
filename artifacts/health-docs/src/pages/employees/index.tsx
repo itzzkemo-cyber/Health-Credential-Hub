@@ -258,9 +258,7 @@ export default function EmployeesList() {
           clearCreateStepUpSecrets();
           createEmployee.reset();
           setCreateFeedbackKey(errorKey);
-          requestAnimationFrame(() =>
-            createStepUpPasswordRef.current?.focus(),
-          );
+          requestAnimationFrame(() => createStepUpPasswordRef.current?.focus());
         },
       },
     );
@@ -503,7 +501,7 @@ export default function EmployeesList() {
                   onValueChange={(role) => {
                     clearCreateStepUpSecrets();
                     setCreateFeedbackKey(null);
-                    setEmployeeForm((previous) => ({ ...previous, role }))
+                    setEmployeeForm((previous) => ({ ...previous, role }));
                   }}
                 >
                   <SelectTrigger id="employee-role" className="min-h-11">
@@ -677,7 +675,7 @@ export default function EmployeesList() {
                     {t("employees_page.generate_password")}
                   </Button>
                 </div>
-                <div className="relative">
+                <div className="relative" dir="ltr">
                   <Input
                     id="employee-temporary-password"
                     type={showTemporaryPassword ? "text" : "password"}
@@ -692,14 +690,15 @@ export default function EmployeesList() {
                       }));
                       setPasswordDeliveryAcknowledged(false);
                     }}
+                    aria-describedby="employee-temporary-password-hint"
                     dir="ltr"
-                    className="min-h-11 pe-12"
+                    className="min-h-11 pr-12"
                   />
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="absolute end-0 top-0 h-11 w-11"
+                    className="absolute right-0 top-0 h-11 w-11"
                     onClick={() =>
                       setShowTemporaryPassword((previous) => !previous)
                     }
@@ -716,7 +715,10 @@ export default function EmployeesList() {
                     )}
                   </Button>
                 </div>
-                <p className="text-xs leading-5 text-muted-foreground">
+                <p
+                  id="employee-temporary-password-hint"
+                  className="text-xs leading-5 text-muted-foreground"
+                >
                   {t("employees_page.temporary_password_hint")}
                 </p>
                 <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">

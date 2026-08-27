@@ -258,13 +258,15 @@ function ChangePasswordCard({ forced = false }: { forced?: boolean }) {
   const mutationError =
     mutationCode === "PASSWORD_REUSE_NOT_ALLOWED"
       ? "settings_page.password_reuse_not_allowed"
-      : changePassword.error instanceof ApiError && changePassword.error.status === 400
-        ? "settings_page.current_password_incorrect"
       : changePassword.error instanceof ApiError &&
-          changePassword.error.status === 429
-        ? "settings_page.password_rate_limited"
-        : "settings_page.password_change_failed";
-  const errorKey = validationError ?? (changePassword.isError ? mutationError : null);
+          changePassword.error.status === 400
+        ? "settings_page.current_password_incorrect"
+        : changePassword.error instanceof ApiError &&
+            changePassword.error.status === 429
+          ? "settings_page.password_rate_limited"
+          : "settings_page.password_change_failed";
+  const errorKey =
+    validationError ?? (changePassword.isError ? mutationError : null);
 
   return (
     <Card>
@@ -322,6 +324,7 @@ function ChangePasswordCard({ forced = false }: { forced?: boolean }) {
               hideLabel={t("settings_page.hide_password")}
               autoComplete="new-password"
               minLength={12}
+              describedBy="password-policy-hint"
             />
             <PasswordField
               id="confirm-new-password"
@@ -342,9 +345,13 @@ function ChangePasswordCard({ forced = false }: { forced?: boolean }) {
               hideLabel={t("settings_page.hide_password")}
               autoComplete="new-password"
               minLength={12}
+              describedBy="password-policy-hint"
             />
           </div>
-          <p className="text-xs leading-5 text-muted-foreground">
+          <p
+            id="password-policy-hint"
+            className="text-xs leading-5 text-muted-foreground"
+          >
             {t("settings_page.password_minimum")}
           </p>
           {errorKey && (
@@ -382,6 +389,7 @@ function PasswordField({
   hideLabel,
   autoComplete,
   minLength,
+  describedBy,
 }: {
   id: string;
   label: string;
@@ -393,11 +401,12 @@ function PasswordField({
   hideLabel: string;
   autoComplete: "current-password" | "new-password";
   minLength?: number;
+  describedBy?: string;
 }) {
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
-      <div className="relative">
+      <div className="relative" dir="ltr">
         <Input
           id={id}
           type={visible ? "text" : "password"}
@@ -406,14 +415,15 @@ function PasswordField({
           required
           minLength={minLength}
           autoComplete={autoComplete}
+          aria-describedby={describedBy}
           dir="ltr"
-          className="min-h-11 pe-12"
+          className="min-h-11 pr-12"
         />
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          className="absolute end-0 top-0 h-11 w-11"
+          className="absolute right-0 top-0 h-11 w-11"
           onClick={onToggle}
           aria-label={visible ? hideLabel : showLabel}
         >
