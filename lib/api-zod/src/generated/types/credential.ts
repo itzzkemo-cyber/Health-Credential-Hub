@@ -12,6 +12,7 @@ import type { EmployeeSummary } from './employeeSummary';
 
 export interface Credential {
   id: number;
+  /** @minimum 1 */
   employeeId: number;
   employee?: EmployeeSummary;
   type: CredentialType;

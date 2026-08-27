@@ -97,10 +97,48 @@ describe("deferred credential submission", () => {
       kind: "image",
     });
     expect(dependencies.cleanupUpload).not.toHaveBeenCalled();
-    expect(dependencies.onStage.mock.calls).toEqual([
-      ["upload"],
-      ["create"],
-    ]);
+    expect(dependencies.onStage.mock.calls).toEqual([["upload"], ["create"]]);
+  });
+
+  it("reuses a reviewed OCR upload without sending the file twice", async () => {
+    const dependencies = createDependencies();
+    const existingUpload = {
+      objectPath: grant.objectPath,
+      kind: "image" as const,
+    };
+
+    await submitCredentialWithDeferredUpload({
+      ...dependencies,
+      file,
+      existingUpload,
+    });
+
+    expect(dependencies.prepareFile).not.toHaveBeenCalled();
+    expect(dependencies.requestUpload).not.toHaveBeenCalled();
+    expect(dependencies.putUpload).not.toHaveBeenCalled();
+    expect(dependencies.createCredential).toHaveBeenCalledWith(existingUpload);
+    expect(dependencies.onStage.mock.calls).toEqual([["create"]]);
+  });
+
+  it("cleans a reviewed OCR upload when credential creation fails", async () => {
+    const dependencies = createDependencies();
+    dependencies.createCredential.mockRejectedValueOnce(new Error("rejected"));
+
+    await expect(
+      submitCredentialWithDeferredUpload({
+        ...dependencies,
+        file,
+        existingUpload: {
+          objectPath: grant.objectPath,
+          kind: "image",
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: "CredentialSubmissionError",
+      stage: "create",
+    });
+
+    expect(dependencies.cleanupUpload).toHaveBeenCalledWith(grant.objectPath);
   });
 
   it("cleans the granted object when credential creation fails", async () => {

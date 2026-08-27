@@ -16,6 +16,7 @@ import {
 } from "../helpers";
 import {
   EmailNotConfiguredError,
+  createEmailIdempotencyKey,
   isEmailConfigured,
   isFixtureRecipient,
   sendEmail,
@@ -266,6 +267,7 @@ async function attemptSend(input: {
       to: input.recipient,
       subject: input.subject,
       html: input.html,
+      idempotencyKey: createEmailIdempotencyKey(input.kind, String(claim.id)),
     });
     await db
       .update(emailLogTable)

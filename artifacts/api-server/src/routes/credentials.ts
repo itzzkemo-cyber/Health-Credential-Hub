@@ -53,6 +53,12 @@ import {
 } from "../lib/uploadSecurity";
 import { getAi } from "@workspace/integrations-gemini-ai";
 import { safeErrorLogFields } from "../lib/safeError";
+import {
+  getOcrOperationalReadiness,
+  isOcrEnabledForFacility,
+  OCR_UNAVAILABLE_CODE,
+  readOcrConfig,
+} from "../lib/ocrConfig";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -77,25 +83,21 @@ function normalizeCalendarDate(value: string): string | null {
     : date;
 }
 
-async function findLinkedObjectFacility(
-  user: User,
+async function isObjectLinkedToCredentialOwner(
   fileUrl: string,
-): Promise<number | null> {
+  employeeId: number,
+): Promise<boolean> {
   const linked = await db
     .select({ employeeId: credentialsTable.employeeId })
     .from(credentialsTable)
     .where(
       and(
         eq(credentialsTable.fileUrl, fileUrl),
+        eq(credentialsTable.employeeId, employeeId),
         isNull(credentialsTable.deletedAt),
       ),
     );
-  if (linked.length === 0) return null;
-  const linkedIds = new Set(linked.map((entry) => entry.employeeId));
-  const owner = (await getCredentialScopedUsers(user)).find((entry) =>
-    linkedIds.has(entry.id),
-  );
-  return owner?.facilityId ?? null;
+  return linked.some((entry) => entry.employeeId === employeeId);
 }
 
 // ---------------------------------------------------------------------------
@@ -217,11 +219,85 @@ function ocrDate(v: unknown): string | null {
   return s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 }
 
+async function resolveOcrTarget(
+  user: User,
+  rawEmployeeId: unknown,
+): Promise<User | null> {
+  const employeeId =
+    rawEmployeeId == null
+      ? user.id
+      : typeof rawEmployeeId === "number"
+        ? rawEmployeeId
+        : typeof rawEmployeeId === "string" && /^[1-9]\d*$/.test(rawEmployeeId)
+          ? Number(rawEmployeeId)
+          : Number.NaN;
+  if (!Number.isSafeInteger(employeeId) || employeeId <= 0) return null;
+  const scopedUsers = await getCredentialScopedUsers(user);
+  return scopedUsers.find((candidate) => candidate.id === employeeId) ?? null;
+}
+
+router.get("/credentials/ocr/readiness", async (req, res) => {
+  const user = getUser(req);
+  const operational = getOcrOperationalReadiness();
+  if (operational !== "configured") {
+    res.json({ status: operational });
+    return;
+  }
+
+  const target = await resolveOcrTarget(user, req.query.employeeId);
+  if (!target) {
+    res.status(403).json({ message: "Not authorized for this employee" });
+    return;
+  }
+
+  const config = readOcrConfig();
+  res.json({
+    status: isOcrEnabledForFacility(target.facilityId, config)
+      ? "enabled"
+      : "disabled",
+  });
+});
+
 router.post("/credentials/ocr", async (req, res) => {
   const user = getUser(req);
-  const { fileUrl } = req.body as { fileUrl?: string };
+  let config;
+  try {
+    config = readOcrConfig();
+  } catch (error) {
+    req.log.error(safeErrorLogFields(error), "OCR configuration is invalid");
+    res.status(503).json({
+      message: "AI document reading is unavailable",
+      code: OCR_UNAVAILABLE_CODE,
+    });
+    return;
+  }
+  if (!config.enabled) {
+    res.status(503).json({
+      message: "AI document reading is unavailable",
+      code: OCR_UNAVAILABLE_CODE,
+    });
+    return;
+  }
+
+  const { fileUrl, employeeId } = req.body as {
+    fileUrl?: string;
+    employeeId?: number;
+  };
   if (!fileUrl || !fileUrl.startsWith("/objects/")) {
     res.status(400).json({ message: "A stored document path is required" });
+    return;
+  }
+
+  const target = await resolveOcrTarget(user, employeeId);
+  if (!target) {
+    res.status(403).json({ message: "Not authorized for this employee" });
+    return;
+  }
+  if (!isOcrEnabledForFacility(target.facilityId, config)) {
+    res.status(503).json({
+      message: "AI document reading is unavailable",
+      code: OCR_UNAVAILABLE_CODE,
+    });
     return;
   }
   if (ocrRateLimited(user.id)) {
@@ -234,7 +310,7 @@ router.post("/credentials/ocr", async (req, res) => {
   // Load the uploaded document from object storage.
   let buffer: Buffer;
   let mimeType: string;
-  let auditFacilityId = user.facilityId;
+  let auditFacilityId = target.facilityId;
   try {
     const objectFile = await objectStorageService.getObjectEntityFile(fileUrl);
     const pendingGrant = await findActiveUploadGrant(fileUrl, user.id);
@@ -250,16 +326,17 @@ router.post("/credentials/ocr", async (req, res) => {
         objectFile,
         requestedPermission: ObjectPermission.READ,
       });
-      const linkedFacilityId = await findLinkedObjectFacility(user, fileUrl);
-      const canAccessLinked = linkedFacilityId != null;
+      const linkedToTarget = await isObjectLinkedToCredentialOwner(
+        fileUrl,
+        target.id,
+      );
       // ACL ownership alone is insufficient after the upload grant has been
       // consumed: the object must still belong to an active credential. This
       // keeps retained soft-deleted evidence inaccessible to OCR callers.
-      if (!(isOwner && pendingGrant) && !canAccessLinked) {
+      if (!(isOwner && pendingGrant) && !linkedToTarget) {
         res.status(403).json({ message: "Forbidden" });
         return;
       }
-      if (linkedFacilityId != null) auditFacilityId = linkedFacilityId;
     } else if (!pendingGrant) {
       res.status(403).json({
         message: "Upload grant expired or does not belong to this user",

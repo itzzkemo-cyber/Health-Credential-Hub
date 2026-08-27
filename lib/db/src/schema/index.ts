@@ -7,5 +7,6 @@ export * from "./audit-logs";
 export * from "./credential-policies";
 export * from "./email-log";
 export * from "./password-reset-tokens";
+export * from "./employee-invitations";
 export * from "./upload-grants";
 export * from "./automation-outbox";

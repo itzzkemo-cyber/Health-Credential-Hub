@@ -9,6 +9,7 @@ import type { CredentialInputFileType } from './credentialInputFileType';
 import type { CredentialInputType } from './credentialInputType';
 
 export interface CredentialInput {
+  /** @minimum 1 */
   employeeId: number;
   type: CredentialInputType;
   customTypeName?: string;

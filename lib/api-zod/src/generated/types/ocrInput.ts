@@ -8,6 +8,8 @@
 
 export interface OcrInput {
   fileUrl: string;
+  /** @minimum 1 */
+  employeeId: number;
   /** @nullable */
   fileName?: string | null;
 }

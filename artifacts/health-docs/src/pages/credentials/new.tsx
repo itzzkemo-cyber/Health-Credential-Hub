@@ -5,17 +5,22 @@ import {
   Check,
   FileCheck2,
   Loader2,
+  ScanText,
   ShieldAlert,
   ShieldCheck,
   UploadCloud,
 } from "lucide-react";
 import {
   CredentialInputType,
+  type OcrResult,
+  getGetCredentialOcrReadinessQueryKey,
   getGetEmployeeQueryKey,
   getReadinessCheckQueryKey,
   useCreateCredential,
   useDeleteUnlinkedUpload,
+  useExtractCredentialOcr,
   useGetEmployee,
+  useGetCredentialOcrReadiness,
   useReadinessCheck,
   useRequestUploadUrl,
 } from "@workspace/api-client-react";
@@ -56,6 +61,7 @@ import {
   type CredentialSubmissionStage,
 } from "./deferred-credential-submission";
 import { getCredentialOwnerState } from "./credential-owner-state";
+import { applyReviewedOcrSuggestions, getOcrAvailability } from "./ocr-review";
 
 export default function CredentialNew() {
   const { t, isRTL } = useLanguage();
@@ -94,6 +100,24 @@ export default function CredentialNew() {
     isError: readinessQuery.isError,
   });
   const documentUploadsEnabled = documentUploadAvailability === "enabled";
+  const ocrReadinessQuery = useGetCredentialOcrReadiness(
+    { employeeId: employeeId ?? undefined },
+    {
+      query: {
+        queryKey: getGetCredentialOcrReadinessQueryKey({
+          employeeId: employeeId ?? undefined,
+        }),
+        enabled: Boolean(employeeId) && documentUploadsEnabled,
+        retry: false,
+        staleTime: 60_000,
+      },
+    },
+  );
+  const ocrAvailability = getOcrAvailability({
+    readiness: ocrReadinessQuery.data,
+    isLoading: ocrReadinessQuery.isLoading,
+    isError: ocrReadinessQuery.isError,
+  });
   const ownerState = getCredentialOwnerState({
     employeeId,
     currentUserId: user?.id,
@@ -107,11 +131,23 @@ export default function CredentialNew() {
     CredentialSubmissionStage | "idle"
   >("idle");
   const [cleanupUnconfirmed, setCleanupUnconfirmed] = useState(false);
+  const [ocrStage, setOcrStage] = useState<
+    "idle" | "upload" | "read" | "cleanup"
+  >("idle");
+  const [ocrUploadedFile, setOcrUploadedFile] = useState<{
+    objectPath: string;
+    kind: "image";
+  } | null>(null);
+  const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
   const submissionLock = useRef({ current: false });
+  const ocrLock = useRef(false);
 
   const createCredential = useCreateCredential({ mutation: { gcTime: 0 } });
   const requestUploadUrl = useRequestUploadUrl({ mutation: { gcTime: 0 } });
   const deleteUnlinkedUpload = useDeleteUnlinkedUpload({
+    mutation: { gcTime: 0 },
+  });
+  const extractCredentialOcr = useExtractCredentialOcr({
     mutation: { gcTime: 0 },
   });
 
@@ -136,10 +172,65 @@ export default function CredentialNew() {
     }));
   }, [targetEmployee]);
 
-  const handleFileSelection = (
+  const isSubmitting = submissionStage !== "idle";
+  const ocrBusy = ocrStage !== "idle";
+  const controlsDisabled = isSubmitting || ocrBusy || cleanupUnconfirmed;
+  const resetSensitiveMutationState = () => {
+    createCredential.reset();
+    requestUploadUrl.reset();
+    deleteUnlinkedUpload.reset();
+    extractCredentialOcr.reset();
+  };
+
+  const putPreparedUpload = async (
+    grant: {
+      uploadURL: string;
+      requiredHeaders: Record<string, string>;
+    },
+    prepared: { blob: Blob; contentType: "image/jpeg" | "image/png" },
+  ) => {
+    const response = await fetch(grant.uploadURL, {
+      method: "PUT",
+      body: prepared.blob,
+      headers: buildUploadRequestHeaders(
+        grant.requiredHeaders,
+        prepared.contentType,
+        grant.uploadURL,
+        window.location.origin,
+      ),
+    });
+    if (!response.ok) {
+      throw new Error(`Storage upload failed (${response.status})`);
+    }
+  };
+
+  const deleteUploadedOcrFile = async (): Promise<boolean> => {
+    if (!ocrUploadedFile) return true;
+    const uploadId = getUnlinkedUploadId(ocrUploadedFile.objectPath);
+    if (!uploadId) {
+      setCleanupUnconfirmed(true);
+      toast.error(t("credential.cleanup_failed"));
+      return false;
+    }
+    setOcrStage("cleanup");
+    try {
+      await deleteUnlinkedUpload.mutateAsync({ uploadId });
+      setOcrUploadedFile(null);
+      setOcrResult(null);
+      return true;
+    } catch {
+      setCleanupUnconfirmed(true);
+      toast.error(t("credential.cleanup_failed"));
+      return false;
+    } finally {
+      setOcrStage("idle");
+    }
+  };
+
+  const handleFileSelection = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
-    if (!documentUploadsEnabled) return;
+    if (!documentUploadsEnabled || controlsDisabled) return;
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
@@ -147,23 +238,87 @@ export default function CredentialNew() {
       toast.error(t("credential.file_type_unsupported"));
       return;
     }
+    if (!(await deleteUploadedOcrFile())) return;
     setSelectedFile(file);
+    setOcrResult(null);
   };
 
-  const clearSelectedFile = () => setSelectedFile(null);
-  const isSubmitting = submissionStage !== "idle";
-  const controlsDisabled = isSubmitting || cleanupUnconfirmed;
-  const resetSensitiveMutationState = () => {
-    createCredential.reset();
-    requestUploadUrl.reset();
-    deleteUnlinkedUpload.reset();
+  const clearSelectedFile = async () => {
+    if (!(await deleteUploadedOcrFile())) return;
+    setSelectedFile(null);
+    setOcrResult(null);
   };
 
-  const leaveForm = () => {
-    if (submissionLock.current.current) return;
-    clearSelectedFile();
+  const leaveForm = async () => {
+    if (submissionLock.current.current || ocrLock.current) return;
+    if (!(await deleteUploadedOcrFile())) return;
+    setSelectedFile(null);
     resetSensitiveMutationState();
     setLocation("/credentials");
+  };
+
+  const readSelectedDocument = async () => {
+    if (
+      !selectedFile ||
+      !employeeId ||
+      ocrAvailability !== "enabled" ||
+      cleanupUnconfirmed ||
+      ocrLock.current
+    ) {
+      return;
+    }
+
+    ocrLock.current = true;
+    let grantedObjectPath: string | null = null;
+    try {
+      let uploadedFile = ocrUploadedFile;
+      if (!uploadedFile) {
+        setOcrStage("upload");
+        const prepared = await prepareUploadFile(selectedFile);
+        const grant = await requestUploadUrl.mutateAsync({
+          data: {
+            name: selectedFile.name,
+            size: prepared.blob.size,
+            contentType: prepared.contentType,
+          },
+        });
+        grantedObjectPath = grant.objectPath;
+        await putPreparedUpload(grant, prepared);
+        uploadedFile = { objectPath: grant.objectPath, kind: "image" };
+        setOcrUploadedFile(uploadedFile);
+      }
+
+      setOcrStage("read");
+      const result = await extractCredentialOcr.mutateAsync({
+        data: { fileUrl: uploadedFile.objectPath, employeeId },
+      });
+      setOcrResult(result);
+      toast.success(t("credential.ocr_read_success"));
+    } catch (error) {
+      if (grantedObjectPath) {
+        const uploadId = getUnlinkedUploadId(grantedObjectPath);
+        try {
+          if (!uploadId) throw new Error("Invalid private upload reference");
+          await deleteUnlinkedUpload.mutateAsync({ uploadId });
+          setOcrUploadedFile(null);
+        } catch {
+          setCleanupUnconfirmed(true);
+          toast.error(t("credential.cleanup_failed"));
+          return;
+        }
+      }
+
+      if (error instanceof UploadTooLargeError) {
+        toast.error(t("credential.file_too_large"));
+      } else if (error instanceof UnsupportedUploadTypeError) {
+        toast.error(t("credential.file_type_unsupported"));
+      } else {
+        toast.error(t("credential.ocr_read_failed"));
+      }
+    } finally {
+      ocrLock.current = false;
+      setOcrStage("idle");
+    }
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -181,16 +336,18 @@ export default function CredentialNew() {
       return;
     }
     if (selectedFile && !documentUploadsEnabled) {
-      clearSelectedFile();
+      await clearSelectedFile();
       toast.error(t("credential.upload_unavailable_desc"));
       return;
     }
     if (!claimCredentialSubmission(submissionLock.current)) return;
 
     let createdCredentialId: number | null = null;
+    const reusedOcrUpload = ocrUploadedFile != null;
     try {
       createdCredentialId = await submitCredentialWithDeferredUpload({
-        file: selectedFile,
+        file: ocrUploadedFile ? null : selectedFile,
+        existingUpload: ocrUploadedFile ?? undefined,
         prepareFile: prepareUploadFile,
         requestUpload: (file, prepared) =>
           requestUploadUrl.mutateAsync({
@@ -200,21 +357,7 @@ export default function CredentialNew() {
               contentType: prepared.contentType,
             },
           }),
-        putUpload: async (grant, prepared) => {
-          const response = await fetch(grant.uploadURL, {
-            method: "PUT",
-            body: prepared.blob,
-            headers: buildUploadRequestHeaders(
-              grant.requiredHeaders,
-              prepared.contentType,
-              grant.uploadURL,
-              window.location.origin,
-            ),
-          });
-          if (!response.ok) {
-            throw new Error(`Storage upload failed (${response.status})`);
-          }
-        },
+        putUpload: putPreparedUpload,
         createCredential: async (uploadedFile) => {
           const credential = await createCredential.mutateAsync({
             data: {
@@ -234,6 +377,10 @@ export default function CredentialNew() {
         onStage: setSubmissionStage,
       });
     } catch (error) {
+      if (reusedOcrUpload) {
+        setOcrUploadedFile(null);
+        setOcrResult(null);
+      }
       const submissionError =
         error instanceof CredentialSubmissionError ? error : null;
       const underlyingError = submissionError?.originalError ?? error;
@@ -262,7 +409,9 @@ export default function CredentialNew() {
     }
 
     if (createdCredentialId !== null) {
-      clearSelectedFile();
+      setOcrUploadedFile(null);
+      setOcrResult(null);
+      setSelectedFile(null);
       toast.success(t("credential.create_success"));
       setLocation(`/credentials/${createdCredentialId}`);
     }
@@ -276,8 +425,8 @@ export default function CredentialNew() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={leaveForm}
-          disabled={isSubmitting}
+          onClick={() => void leaveForm()}
+          disabled={controlsDisabled}
           aria-label={t("common.back")}
           className="h-11 w-11 shrink-0"
         >
@@ -380,7 +529,7 @@ export default function CredentialNew() {
               <form
                 onSubmit={handleSubmit}
                 className="space-y-6"
-                aria-busy={isSubmitting}
+                aria-busy={controlsDisabled}
               >
                 <p className="sr-only" role="status" aria-live="polite">
                   {submissionStage === "upload"
@@ -415,14 +564,79 @@ export default function CredentialNew() {
                   </div>
                   <DocumentPicker
                     id="manual-document-upload"
-                    busy={submissionStage === "upload"}
+                    busy={
+                      submissionStage === "upload" ||
+                      ocrStage === "upload" ||
+                      ocrStage === "cleanup"
+                    }
                     disabled={controlsDisabled || !documentUploadsEnabled}
                     fileName={selectedFile?.name ?? ""}
                     compact
                     onChange={handleFileSelection}
-                    onClear={clearSelectedFile}
+                    onClear={() => void clearSelectedFile()}
                     t={t}
                   />
+                  {selectedFile && ocrAvailability === "enabled" && (
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="font-semibold">
+                            {t("credential.ocr_title")}
+                          </p>
+                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                            {t("credential.ocr_disclosure")}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="min-h-11 w-full shrink-0 gap-2 sm:w-auto"
+                          disabled={controlsDisabled}
+                          onClick={() => void readSelectedDocument()}
+                        >
+                          {ocrStage === "upload" || ocrStage === "read" ? (
+                            <Loader2
+                              className="h-4 w-4 animate-spin"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <ScanText className="h-4 w-4" aria-hidden="true" />
+                          )}
+                          {ocrStage === "upload"
+                            ? t("credential.ocr_uploading")
+                            : ocrStage === "read"
+                              ? t("credential.ocr_reading")
+                              : t("credential.ocr_read_action")}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {selectedFile && ocrAvailability !== "enabled" && (
+                    <p
+                      className="text-sm leading-6 text-muted-foreground"
+                      role="status"
+                    >
+                      {t(
+                        ocrAvailability === "checking"
+                          ? "credential.ocr_checking"
+                          : "credential.ocr_unavailable",
+                      )}
+                    </p>
+                  )}
+                  {ocrResult && (
+                    <OcrReviewCard
+                      result={ocrResult}
+                      busy={controlsDisabled}
+                      isRTL={isRTL}
+                      onApply={() => {
+                        setFormData((current) =>
+                          applyReviewedOcrSuggestions(current, ocrResult),
+                        );
+                        toast.success(t("credential.ocr_review_applied"));
+                      }}
+                      t={t}
+                    />
+                  )}
                 </section>
 
                 <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">
@@ -554,8 +768,8 @@ export default function CredentialNew() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={leaveForm}
-                    disabled={isSubmitting}
+                    onClick={() => void leaveForm()}
+                    disabled={controlsDisabled}
                     className="min-h-11 w-full sm:w-auto"
                   >
                     {t("common.cancel")}
@@ -586,6 +800,88 @@ export default function CredentialNew() {
         </>
       )}
     </div>
+  );
+}
+
+function OcrReviewCard({
+  result,
+  busy,
+  isRTL,
+  onApply,
+  t,
+}: {
+  result: OcrResult;
+  busy: boolean;
+  isRTL: boolean;
+  onApply: () => void;
+  t: (key: string) => string;
+}) {
+  const suggestions = [
+    [t("credential.type"), result.detectedType],
+    [
+      `${t("credential.holder_name")} — ${t("credential.english")}`,
+      result.holderName,
+    ],
+    [
+      `${t("credential.holder_name")} — ${t("credential.arabic")}`,
+      result.holderNameAr,
+    ],
+    [
+      `${t("credential.issuer")} — ${t("credential.english")}`,
+      result.issuerName,
+    ],
+    [
+      `${t("credential.issuer")} — ${t("credential.arabic")}`,
+      result.issuerNameAr,
+    ],
+    [t("credential.certificate_number"), result.certificateNumber],
+    [t("credential.issue_date"), result.issueDate],
+    [t("credential.expiry_date"), result.expiryDate],
+  ] as const;
+  const confidence = Math.round(result.confidence.overall * 100);
+
+  return (
+    <section
+      className="space-y-4 rounded-xl border border-primary/30 bg-card p-4"
+      aria-labelledby="ocr-review-title"
+    >
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 id="ocr-review-title" className="font-semibold">
+            {t("credential.ocr_review_title")}
+          </h3>
+          <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+            {t("credential.ocr_confidence")}: {confidence}%
+          </span>
+        </div>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          {t("credential.ocr_review_notice")}
+        </p>
+      </div>
+      <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {suggestions.map(([label, value]) => (
+          <div key={label} className="rounded-lg bg-muted/60 px-3 py-2">
+            <dt className="text-xs font-medium text-muted-foreground">
+              {label}
+            </dt>
+            <dd
+              className="mt-1 break-words text-sm font-medium"
+              dir={isRTL ? "auto" : undefined}
+            >
+              {value || t("credential.ocr_not_detected")}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <Button
+        type="button"
+        className="min-h-11 w-full sm:w-auto"
+        disabled={busy}
+        onClick={onApply}
+      >
+        {t("credential.ocr_apply_reviewed")}
+      </Button>
+    </section>
   );
 }
 
@@ -654,10 +950,7 @@ function DocumentPicker({
         </span>
         <div className={cn("min-w-0", compact && "flex-1")}>
           <p
-            className={cn(
-              "font-semibold",
-              compact ? "truncate" : "text-lg",
-            )}
+            className={cn("font-semibold", compact ? "truncate" : "text-lg")}
             role="status"
             aria-live="polite"
           >

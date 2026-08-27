@@ -50,6 +50,7 @@ const testState = vi.hoisted(() => ({
 vi.mock("drizzle-orm", () => ({
   and: vi.fn((...conditions: unknown[]) => conditions),
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
+  gt: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   inArray: vi.fn((column: unknown, values: unknown[]) => ({ column, values })),
   isNull: vi.fn(),
   sql: vi.fn(),

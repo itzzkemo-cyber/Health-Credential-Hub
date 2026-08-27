@@ -11,9 +11,9 @@ export type ListCredentialsParams = {
 status?: ListCredentialsStatus;
 type?: string;
 /**
- * @nullable
+ * @minimum 1
  */
-employeeId?: number | null;
+employeeId?: number;
 /**
  * @nullable
  */

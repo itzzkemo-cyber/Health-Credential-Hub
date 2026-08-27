@@ -1,6 +1,8 @@
 import type {
+  CreateEmployeeInvitationInput,
   DepartmentWithStats,
   Employee,
+  EmployeeInvitation,
   EmployeeInput,
   EmployeeUpdate,
   EmployeeWithStats,
@@ -34,6 +36,27 @@ export function getEmployeeDisplayName(
 
 export function getEmployeeInitial(name: string): string {
   return Array.from(name.trim())[0]?.toLocaleUpperCase() ?? "•";
+}
+
+export function getInvitationDisplayName(
+  invitation: Pick<EmployeeInvitation, "name" | "nameAr">,
+  isRTL: boolean,
+): string {
+  const preferred = isRTL ? invitation.nameAr : invitation.name;
+  const fallback = isRTL ? invitation.name : invitation.nameAr;
+  return preferred.trim() || fallback.trim();
+}
+
+export function getInvitationListParams(
+  actorRole: string | undefined,
+  facilityFilter: string,
+): { facilityId: number } | undefined {
+  if (actorRole !== "system_admin" || !facilityFilter) return undefined;
+
+  const facilityId = Number(facilityFilter);
+  return Number.isInteger(facilityId) && facilityId > 0
+    ? { facilityId }
+    : undefined;
 }
 
 export function getComplianceRate(rate?: number): number {
@@ -97,8 +120,28 @@ export function buildEmployeeInput(
     jobTitle: form.jobTitle.trim(),
     jobTitleAr: form.jobTitleAr.trim(),
     employeeNumber: form.employeeNumber.trim(),
+    ...(form.phone?.trim() ? { phone: form.phone.trim() } : {}),
     ...(form.facilityId ? { facilityId: Number(form.facilityId) } : {}),
     ...(stepUp ?? {}),
+  };
+}
+
+export function buildEmployeeInvitationInput(
+  form: EmployeeAccountForm,
+  stepUp: AdminMfaStepUpCredentials,
+): CreateEmployeeInvitationInput {
+  return {
+    name: form.name.trim(),
+    nameAr: form.nameAr.trim(),
+    email: form.email.trim().toLowerCase(),
+    jobTitle: form.jobTitle.trim(),
+    jobTitleAr: form.jobTitleAr.trim(),
+    employeeNumber: form.employeeNumber.trim(),
+    phone: form.phone?.trim() || null,
+    facilityId: form.facilityId ? Number(form.facilityId) : null,
+    departmentId: form.departmentId ? Number(form.departmentId) : null,
+    supervisorId: form.supervisorId ? Number(form.supervisorId) : null,
+    ...stepUp,
   };
 }
 
@@ -145,10 +188,7 @@ export function requiresEmployeeCreateStepUp(role: string): boolean {
 }
 
 export function hasEmployeeOrganizationalChanges(
-  employee: Pick<
-    Employee,
-    "role" | "departmentId" | "supervisorId"
-  >,
+  employee: Pick<Employee, "role" | "departmentId" | "supervisorId">,
   form: Pick<EmployeeEditForm, "role" | "departmentId" | "supervisorId">,
 ): boolean {
   const departmentId =
@@ -247,6 +287,7 @@ export type EmployeeAccountForm = Pick<
   | "jobTitleAr"
   | "employeeNumber"
 > & {
+  phone?: string;
   departmentId: string;
   supervisorId: string;
   facilityId: string;

@@ -21,6 +21,17 @@ describe("public application URL", () => {
     expect(getPublicAppUrl()).toBe("https://credentials.example.sa");
   });
 
+  it.each([
+    "https://user:password@credentials.example.sa",
+    "https://credentials.example.sa/app",
+    "https://credentials.example.sa/?campaign=reset",
+    "https://credentials.example.sa/#fragment",
+    "ftp://credentials.example.sa",
+  ])("rejects a value that is not a bare HTTP origin: %s", (value) => {
+    process.env.PUBLIC_APP_URL = value;
+    expect(() => getPublicAppUrl()).toThrow(/valid absolute URL/);
+  });
+
   it("refuses plaintext production links", () => {
     process.env.NODE_ENV = "production";
     process.env.PUBLIC_APP_URL = "http://credentials.example.sa";

@@ -7,6 +7,7 @@
  */
 
 export interface MissingCredential {
+  /** @minimum 1 */
   employeeId: number;
   employeeName: string;
   employeeNameAr?: string;

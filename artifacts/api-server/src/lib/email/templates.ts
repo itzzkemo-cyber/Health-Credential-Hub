@@ -33,6 +33,16 @@ export function getPasswordResetUrl(rawToken: string): string | null {
     : null;
 }
 
+/**
+ * Keep the invitation bearer token in the URL fragment. It is available to
+ * the registration page but never sent in the initial HTTP request, proxy
+ * access logs, or referrer query strings.
+ */
+export function getEmployeeInvitationUrl(rawToken: string): string | null {
+  const base = getAppBaseUrl();
+  return base ? `${base}register#token=${encodeURIComponent(rawToken)}` : null;
+}
+
 function esc(s: string): string {
   return s
     .replaceAll("&", "&amp;")
@@ -100,9 +110,7 @@ export function expiryAlertEmail(input: ExpiryEmailInput): string {
   const badgeAr = expired
     ? "منتهية الصلاحية"
     : `متبقٍ ${input.daysUntilExpiry} يوم`;
-  const badgeEn = expired
-    ? "EXPIRED"
-    : `${input.daysUntilExpiry} day(s) left`;
+  const badgeEn = expired ? "EXPIRED" : `${input.daysUntilExpiry} day(s) left`;
 
   const body = `
     <tr><td style="padding:28px 32px 8px;" dir="rtl" align="right">
@@ -160,6 +168,54 @@ export function passwordResetEmail(input: PasswordResetEmailInput): string {
               password. The button above opens a page to set a new one — the link is
               valid for <strong>1 hour</strong> and can be used once. If you didn't
               request this, simply ignore this email.
+            </div>
+          </td>
+        </tr>`;
+  return layout(body);
+}
+
+export interface EmployeeInvitationEmailInput {
+  nameAr: string;
+  name: string;
+  invitationUrl: string;
+}
+
+export function employeeInvitationEmail(
+  input: EmployeeInvitationEmailInput,
+): string {
+  const body = `
+        <tr>
+          <td style="padding:28px 32px 8px;" dir="rtl" align="right">
+            <div style="font-size:17px;font-weight:bold;margin-bottom:8px;">مرحباً ${esc(input.nameAr)}،</div>
+            <div style="font-size:14px;line-height:1.9;">
+              أنشأ مسؤول منشأتك دعوة لك للانضمام إلى منصة وثائقي الصحي.
+              استخدم الزر أدناه لإنشاء كلمة المرور وتفعيل حساب الموظف. الدعوة
+              صالحة لمدة <strong>24 ساعة</strong> ولاستخدام واحد فقط.
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:20px 32px;">
+            <a href="${esc(input.invitationUrl)}" style="display:inline-block;background:${BRAND.primary};color:#ffffff;text-decoration:none;font-weight:bold;padding:14px 32px;border-radius:8px;font-size:16px;">
+              تفعيل حساب الموظف &nbsp;·&nbsp; Activate employee account
+            </a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 8px;" dir="rtl" align="right">
+            <div style="font-size:13px;color:${BRAND.muted};line-height:1.9;">
+              إذا لم تكن تتوقع هذه الدعوة فتجاهل الرسالة وتواصل مع مسؤول منشأتك.
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:8px 32px 20px;border-top:1px dashed ${BRAND.border};" dir="ltr" align="left">
+            <div style="font-size:13px;color:${BRAND.muted};line-height:1.8;">
+              Hello ${esc(input.name)}, an administrator at your facility invited
+              you to HealthDocs. Use the button above to choose your password and
+              activate your employee account. The invitation is valid for
+              <strong>24 hours</strong> and can be used once. If you did not expect
+              it, ignore this message and contact your facility administrator.
             </div>
           </td>
         </tr>`;

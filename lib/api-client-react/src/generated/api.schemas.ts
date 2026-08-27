@@ -51,8 +51,33 @@ export interface ErrorEnvelope {
   code?: string;
 }
 
+export interface MessageEnvelope {
+  message: string;
+  code?: string;
+}
+
+export type HealthStatusEmailDelivery = typeof HealthStatusEmailDelivery[keyof typeof HealthStatusEmailDelivery];
+
+
+export const HealthStatusEmailDelivery = {
+  configured: 'configured',
+  disabled: 'disabled',
+  misconfigured: 'misconfigured',
+} as const;
+
+export type HealthStatusOcr = typeof HealthStatusOcr[keyof typeof HealthStatusOcr];
+
+
+export const HealthStatusOcr = {
+  configured: 'configured',
+  disabled: 'disabled',
+  misconfigured: 'misconfigured',
+} as const;
+
 export interface HealthStatus {
   status: string;
+  emailDelivery?: HealthStatusEmailDelivery;
+  ocr?: HealthStatusOcr;
 }
 
 export type ReadinessStatusDocumentUploads = typeof ReadinessStatusDocumentUploads[keyof typeof ReadinessStatusDocumentUploads];
@@ -63,11 +88,29 @@ export const ReadinessStatusDocumentUploads = {
   disabled: 'disabled',
 } as const;
 
+export type ReadinessStatusEmailDelivery = typeof ReadinessStatusEmailDelivery[keyof typeof ReadinessStatusEmailDelivery];
+
+
+export const ReadinessStatusEmailDelivery = {
+  configured: 'configured',
+  disabled: 'disabled',
+} as const;
+
+export type ReadinessStatusOcr = typeof ReadinessStatusOcr[keyof typeof ReadinessStatusOcr];
+
+
+export const ReadinessStatusOcr = {
+  configured: 'configured',
+  disabled: 'disabled',
+} as const;
+
 export interface ReadinessStatus {
   status: string;
   database: string;
   objectStorage: string;
   documentUploads: ReadinessStatusDocumentUploads;
+  emailDelivery: ReadinessStatusEmailDelivery;
+  ocr: ReadinessStatusOcr;
 }
 
 export interface LoginInput {
@@ -150,9 +193,17 @@ export interface TotpConfirmInput {
 }
 
 export interface AdminStepUpInput {
-  /** Current password of the authenticated administrator. */
+  /**
+     * Current password of the authenticated administrator.
+     * @minLength 1
+     * @maxLength 1024
+     */
   currentPassword: string;
-  /** Single-use TOTP or backup code for administrator step-up verification. */
+  /**
+     * Single-use TOTP or backup code for administrator step-up verification.
+     * @minLength 1
+     * @maxLength 128
+     */
   code: string;
 }
 
@@ -180,6 +231,47 @@ export interface ResetPasswordInput {
   token: string;
   /** @minLength 12 */
   newPassword: string;
+}
+
+export interface AcceptEmployeeInvitationInput {
+  /** @pattern ^[0-9a-f]{64}$ */
+  token: string;
+  /**
+     * @minLength 12
+     * @maxLength 1024
+     */
+  password: string;
+}
+
+export interface EmployeeInvitationAccepted {
+  success: true;
+  message: string;
+  messageAr: string;
+}
+
+export interface InvitationError {
+  code: string;
+  message: string;
+  messageAr: string;
+}
+
+export interface EmployeeInvitation {
+  id: number;
+  email: string;
+  name: string;
+  nameAr: string;
+  jobTitle: string;
+  jobTitleAr: string;
+  employeeNumber: string;
+  /** @nullable */
+  phone: string | null;
+  facilityId: number;
+  /** @nullable */
+  departmentId: number | null;
+  /** @nullable */
+  supervisorId: number | null;
+  expiresAt: string;
+  createdAt: string;
 }
 
 export interface FacilityOption {
@@ -247,6 +339,7 @@ export interface EmployeeSummary {
 
 export interface Credential {
   id: number;
+  /** @minimum 1 */
   employeeId: number;
   employee?: EmployeeSummary;
   type: CredentialType;
@@ -319,6 +412,7 @@ export const CredentialInputFileType = {
 } as const;
 
 export interface CredentialInput {
+  /** @minimum 1 */
   employeeId: number;
   type: CredentialInputType;
   customTypeName?: string;
@@ -381,6 +475,7 @@ export interface CredentialVerification {
 }
 
 export interface DuplicateCheckInput {
+  /** @minimum 1 */
   employeeId: number;
   type: string;
   certificateNumber: string;
@@ -393,8 +488,23 @@ export interface DuplicateCheckResult {
 
 export interface OcrInput {
   fileUrl: string;
+  /** @minimum 1 */
+  employeeId: number;
   /** @nullable */
   fileName?: string | null;
+}
+
+export type OcrReadinessStatus = typeof OcrReadinessStatus[keyof typeof OcrReadinessStatus];
+
+
+export const OcrReadinessStatus = {
+  enabled: 'enabled',
+  disabled: 'disabled',
+  misconfigured: 'misconfigured',
+} as const;
+
+export interface OcrReadiness {
+  status: OcrReadinessStatus;
 }
 
 export interface OcrConfidence {
@@ -427,6 +537,7 @@ export interface OcrResult {
 }
 
 export interface MissingCredential {
+  /** @minimum 1 */
   employeeId: number;
   employeeName: string;
   employeeNameAr?: string;
@@ -502,6 +613,81 @@ export interface EmployeeInput {
   code?: string;
 }
 
+export interface CreateEmployeeInvitationInput {
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  name: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  nameAr: string;
+  /** @maxLength 320 */
+  email: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  jobTitle: string;
+  /**
+     * @minLength 1
+     * @maxLength 200
+     */
+  jobTitleAr: string;
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
+  employeeNumber: string;
+  /**
+     * @maxLength 50
+     * @nullable
+     */
+  phone?: string | null;
+  /**
+     * Optional target facility; honored only for system administrators.
+     * @minimum 1
+     * @nullable
+     */
+  facilityId?: number | null;
+  /**
+     * @minimum 1
+     * @nullable
+     */
+  departmentId?: number | null;
+  /**
+     * @minimum 1
+     * @nullable
+     */
+  supervisorId?: number | null;
+  /**
+     * @minLength 1
+     * @maxLength 1024
+     */
+  currentPassword: string;
+  /**
+     * Single-use TOTP or backup code for administrator step-up.
+     * @minLength 1
+     * @maxLength 128
+     */
+  code: string;
+}
+
+export type EmployeeInvitationCreatedStatus = typeof EmployeeInvitationCreatedStatus[keyof typeof EmployeeInvitationCreatedStatus];
+
+
+export const EmployeeInvitationCreatedStatus = {
+  sent: 'sent',
+} as const;
+
+export interface EmployeeInvitationCreated {
+  status: EmployeeInvitationCreatedStatus;
+  message: string;
+  messageAr: string;
+}
+
 export interface EmployeeUpdate {
   name?: string;
   nameAr?: string;
@@ -571,7 +757,10 @@ export interface Notification {
   messageEn: string;
   /** @nullable */
   credentialId?: number | null;
-  /** @nullable */
+  /**
+     * @minimum 1
+     * @nullable
+     */
   employeeId?: number | null;
   isRead: boolean;
   /** @nullable */
@@ -775,9 +964,9 @@ export type ListCredentialsParams = {
 status?: ListCredentialsStatus;
 type?: string;
 /**
- * @nullable
+ * @minimum 1
  */
-employeeId?: number | null;
+employeeId?: number;
 /**
  * @nullable
  */
@@ -807,13 +996,20 @@ days?: number;
 
 export type GetMissingCredentialsParams = {
 /**
- * @nullable
+ * @minimum 1
  */
-employeeId?: number | null;
+employeeId?: number;
 /**
  * @nullable
  */
 departmentId?: number | null;
+};
+
+export type GetCredentialOcrReadinessParams = {
+/**
+ * @minimum 1
+ */
+employeeId?: number;
 };
 
 export type ListEmployeesParams = {
@@ -833,6 +1029,14 @@ role?: string;
 isActive?: boolean;
 search?: string;
 atRisk?: boolean;
+};
+
+export type ListEmployeeInvitationsParams = {
+/**
+ * Optional facility selector honored only for system administrators.
+ * @minimum 1
+ */
+facilityId?: number;
 };
 
 export type ListDepartmentsParams = {

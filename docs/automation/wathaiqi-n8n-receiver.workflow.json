@@ -1,0 +1,556 @@
+{
+  "name": "Wathaiqi Health - verified event receipt (inactive template)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "health-credential-events-v1",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [-1320, 80],
+      "id": "a139e65f-d268-472b-b868-a3707def0ce2",
+      "name": "Receive exact raw body",
+      "webhookId": "01e32dde-105a-4ab8-b563-77d7997c01a9"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first();\n\n// REQUIRED OPERATOR EDIT: keep empty until the exact tenant list is approved.\nconst ALLOWED_FACILITY_IDS = Object.freeze([]);\nconst MAX_SKEW_SECONDS = 300;\nconst MAX_BODY_BYTES = 4096;\nconst EVENT_TYPES = Object.freeze([\n  'credential.created',\n  'credential.verification_changed',\n  'credential.expiry_due',\n]);\nconst CREDENTIAL_TYPES = Object.freeze([\n  'BLS', 'ACLS', 'PALS', 'NRP', 'TNCC', 'TCRN', 'code_red', 'code_blue',\n  'fire_safety', 'infection_control', 'SCFHS_license', 'SCFHS_classification',\n  'malpractice_insurance', 'employment_id', 'passport', 'iqama', 'visa',\n  'driving_license', 'medical_license', 'custom',\n]);\nconst EXPIRY_THRESHOLDS = Object.freeze([90, 60, 30, 15, 7, 1, 0]);\n\nconst reject = (statusCode, safeReason) => [{\n  json: { precheckOk: false, statusCode, safeReason },\n}];\nconst exactKeys = (value, expected) => {\n  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;\n  const actual = Object.keys(value).sort();\n  const wanted = [...expected].sort();\n  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);\n};\nconst positiveInteger = (value) => Number.isSafeInteger(value) && value > 0;\nconst headerValue = (value) => Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '');\n\nconst headers = Object.create(null);\nfor (const [name, value] of Object.entries(input.json?.headers ?? {})) {\n  headers[name.toLowerCase()] = headerValue(value);\n}\nconst contentType = headers['content-type'];\nif (!/^application\\/json(?:\\s*;\\s*charset=utf-8)?$/i.test(contentType)) {\n  return reject(415, 'unsupported_content_type');\n}\nif (!input.binary?.data) return reject(400, 'missing_raw_body');\nlet rawBody;\ntry {\n  rawBody = await this.helpers.getBinaryDataBuffer(0, 'data');\n} catch {\n  return reject(400, 'missing_raw_body');\n}\nif (rawBody.length === 0 || rawBody.length > MAX_BODY_BYTES) {\n  return reject(400, 'invalid_body_size');\n}\nconst rawText = rawBody.toString('utf8');\nif (!Buffer.from(rawText, 'utf8').equals(rawBody)) {\n  return reject(400, 'invalid_utf8');\n}\n\nconst timestamp = headers['x-health-credential-timestamp'];\nconst signatureHeader = headers['x-health-credential-signature'];\nconst eventHeader = headers['x-health-credential-event-id'];\nconst typeHeader = headers['x-health-credential-event-type'];\nconst idempotencyHeader = headers['idempotency-key'];\nif (!/^\\d{10}$/.test(timestamp)) return reject(401, 'invalid_signature');\nconst timestampSeconds = Number(timestamp);\nconst nowSeconds = Math.floor(Date.now() / 1000);\nif (!Number.isSafeInteger(timestampSeconds) || Math.abs(nowSeconds - timestampSeconds) > MAX_SKEW_SECONDS) {\n  return reject(401, 'expired_signature');\n}\nif (!/^sha256=[a-f0-9]{64}$/.test(signatureHeader)) {\n  return reject(401, 'invalid_signature');\n}\n\nlet envelope;\ntry {\n  envelope = JSON.parse(rawText);\n} catch {\n  return reject(400, 'invalid_json');\n}\nif (!exactKeys(envelope, ['id', 'type', 'occurredAt', 'facilityId', 'data'])) {\n  return reject(400, 'invalid_payload');\n}\nif (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(envelope.id)) {\n  return reject(400, 'invalid_payload');\n}\nif (eventHeader !== envelope.id || idempotencyHeader !== envelope.id) {\n  return reject(400, 'invalid_payload');\n}\nif (!EVENT_TYPES.includes(envelope.type) || typeHeader !== envelope.type) {\n  return reject(400, 'invalid_payload');\n}\nif (typeof envelope.occurredAt !== 'string') return reject(400, 'invalid_payload');\nlet canonicalOccurredAt;\ntry {\n  canonicalOccurredAt = new Date(envelope.occurredAt).toISOString();\n} catch {\n  return reject(400, 'invalid_payload');\n}\nif (canonicalOccurredAt !== envelope.occurredAt || !positiveInteger(envelope.facilityId)) {\n  return reject(400, 'invalid_payload');\n}\n\nconst data = envelope.data;\nconst baseDataValid = positiveInteger(data?.credentialId)\n  && positiveInteger(data?.employeeId)\n  && typeof data?.credentialType === 'string'\n  && CREDENTIAL_TYPES.includes(data.credentialType);\nif (!baseDataValid) return reject(400, 'invalid_payload');\nif (envelope.type === 'credential.created') {\n  if (!exactKeys(data, ['credentialId', 'employeeId', 'credentialType'])) {\n    return reject(400, 'invalid_payload');\n  }\n} else if (envelope.type === 'credential.verification_changed') {\n  if (!exactKeys(data, ['credentialId', 'employeeId', 'credentialType', 'isVerified'])\n      || typeof data.isVerified !== 'boolean') {\n    return reject(400, 'invalid_payload');\n  }\n} else if (!exactKeys(data, [\n  'credentialId', 'employeeId', 'credentialType', 'expiryDate', 'dueInDays', 'thresholdDays',\n])\n  || typeof data.expiryDate !== 'string'\n  || !/^\\d{4}-\\d{2}-\\d{2}$/.test(data.expiryDate)\n  || !Number.isSafeInteger(data.dueInDays)\n  || !EXPIRY_THRESHOLDS.includes(data.thresholdDays)) {\n  return reject(400, 'invalid_payload');\n}\n\nreturn [{\n  json: {\n    precheckOk: true,\n    receiverConfigured: ALLOWED_FACILITY_IDS.length > 0,\n    facilityAllowed: ALLOWED_FACILITY_IDS.includes(envelope.facilityId),\n    id: envelope.id,\n    type: envelope.type,\n    occurredAt: envelope.occurredAt,\n    facilityId: envelope.facilityId,\n    signingInput: `${timestamp}.${rawText}`,\n    providedSignature: signatureHeader.slice('sha256='.length),\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1090, 80],
+      "id": "dcf0a858-0159-4787-94d8-ad9151d2d7e7",
+      "name": "Validate raw request"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "82487357-888c-48e3-91fb-04f8fac0a58c",
+              "leftValue": "={{ $json.precheckOk }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-850, 80],
+      "id": "c53bc723-1871-49f4-bdd7-16a6d6c0b73e",
+      "name": "Request shape valid?"
+    },
+    {
+      "parameters": {
+        "action": "hmac",
+        "binaryData": false,
+        "type": "SHA256",
+        "value": "={{ $json.signingInput }}",
+        "dataPropertyName": "computedSignature",
+        "encoding": "hex"
+      },
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [-610, -40],
+      "id": "83ac3a67-442e-4fea-88a5-961014d1af66",
+      "name": "Compute expected HMAC"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst actual = String(input.computedSignature ?? '').toLowerCase();\nconst expected = String(input.providedSignature ?? '').toLowerCase();\nconst left = actual.padEnd(64, '0').slice(0, 64);\nconst right = expected.padEnd(64, '0').slice(0, 64);\nlet difference = actual.length ^ expected.length;\nfor (let index = 0; index < 64; index += 1) {\n  difference |= left.charCodeAt(index) ^ right.charCodeAt(index);\n}\nreturn [{\n  json: {\n    signatureValid: difference === 0,\n    receiverConfigured: input.receiverConfigured === true,\n    facilityAllowed: input.facilityAllowed === true,\n    id: String(input.id),\n    type: String(input.type),\n    occurredAt: String(input.occurredAt),\n    facilityId: Number(input.facilityId),\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-390, -40],
+      "id": "c93ceaf3-fe29-4874-a2b1-df5d410697c7",
+      "name": "Compare signature in fixed time"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6d6e85b5-674a-471e-8820-fb55502f871d",
+              "leftValue": "={{ $json.signatureValid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-150, -40],
+      "id": "2587b4d0-bde7-4b85-a255-b6773897c565",
+      "name": "Signature valid?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "988506be-c969-4888-b80f-24160975826b",
+              "leftValue": "={{ $json.receiverConfigured }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [90, -120],
+      "id": "af8650ed-9873-4707-9180-e1095c0301f8",
+      "name": "Receiver configured?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e0266fd5-ec86-4d72-9c55-97ec538f0b31",
+              "leftValue": "={{ $json.facilityAllowed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [330, -180],
+      "id": "e94f4704-eedb-410e-8683-6d8255ae801f",
+      "name": "Facility approved?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO wathaiqi_automation.event_receipts (event_id, facility_id, event_type, occurred_at)\nVALUES ($1::uuid, $2::integer, $3::text, $4::timestamptz)\nON CONFLICT (event_id) DO NOTHING\nRETURNING true AS inserted;",
+        "options": {
+          "queryBatching": "independently",
+          "queryReplacement": "={{ $json.id }},={{ $json.facilityId }},={{ $json.type }},={{ $json.occurredAt }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [580, -240],
+      "id": "c3acbb3b-a0ab-4b03-ac2f-88d3f3f18132",
+      "name": "Claim event ID atomically",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "68570bb2-cebf-41bf-b6a0-22d719c168e2",
+              "leftValue": "={{ $json.inserted }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [820, -240],
+      "id": "7c5704b4-b151-49bb-bdd0-8b028942ee18",
+      "name": "New receipt?"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: false, code: $json.safeReason } }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [-610, 200],
+      "id": "13808f24-11a3-4d2b-8cd7-02a9cf83fa73",
+      "name": "Reject malformed request"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: false, code: 'invalid_signature' } }}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [90, 40],
+      "id": "3c32a2f2-9da4-4e88-b28d-4de9cd94bb5a",
+      "name": "Reject invalid signature"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: false, code: 'receiver_not_configured' } }}",
+        "options": {
+          "responseCode": 503,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [330, 0],
+      "id": "ad0aaab6-fe0c-4fee-9ce5-36f79c8a9ba4",
+      "name": "Reject unconfigured receiver"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: false, code: 'facility_not_allowed' } }}",
+        "options": {
+          "responseCode": 403,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [580, -80],
+      "id": "79bdd8a2-bf7a-464b-87cf-bbc11b91179c",
+      "name": "Reject unapproved facility"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: true, duplicate: false } }}",
+        "options": {
+          "responseCode": 202,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1060, -320],
+      "id": "2079a89e-2bd5-45f3-bf19-97d03a6ebc8d",
+      "name": "Accept new receipt"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: true, duplicate: true } }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [1060, -160],
+      "id": "091a0a55-c7c8-42d3-99c3-e21fbdbe13e8",
+      "name": "Acknowledge duplicate"
+    },
+    {
+      "parameters": {
+        "content": "## Inactive security template\n\n1. Apply `n8n-inbox.sql` to a dedicated n8n database.\n2. Attach a Crypto credential to **Compute expected HMAC**.\n3. Attach the least-privilege PostgreSQL credential to **Claim event ID atomically**.\n4. Edit the empty facility list in **Validate raw request**.\n5. Test only with synthetic events before publishing.\n\nNever add documents, URLs, employee contact data, OCR output, tokens, or provider credentials to this workflow.",
+        "height": 300,
+        "width": 500,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-1320, -400],
+      "id": "68914708-83f7-4e22-a923-e4dc78f6dbf5",
+      "name": "Operator gate"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Receive exact raw body": {
+      "main": [
+        [
+          {
+            "node": "Validate raw request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate raw request": {
+      "main": [
+        [
+          {
+            "node": "Request shape valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request shape valid?": {
+      "main": [
+        [
+          {
+            "node": "Compute expected HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject malformed request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute expected HMAC": {
+      "main": [
+        [
+          {
+            "node": "Compare signature in fixed time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare signature in fixed time": {
+      "main": [
+        [
+          {
+            "node": "Signature valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature valid?": {
+      "main": [
+        [
+          {
+            "node": "Receiver configured?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject invalid signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Receiver configured?": {
+      "main": [
+        [
+          {
+            "node": "Facility approved?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject unconfigured receiver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Facility approved?": {
+      "main": [
+        [
+          {
+            "node": "Claim event ID atomically",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject unapproved facility",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim event ID atomically": {
+      "main": [
+        [
+          {
+            "node": "New receipt?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New receipt?": {
+      "main": [
+        [
+          {
+            "node": "Accept new receipt",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Acknowledge duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false
+  },
+  "versionId": "495642aa-5401-43bd-9da6-6d760126fd66",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}

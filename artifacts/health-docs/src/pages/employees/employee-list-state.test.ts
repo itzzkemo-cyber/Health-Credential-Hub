@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildEmployeeInvitationInput,
   buildEmployeeInput,
   buildEmployeeUpdate,
   canEditOrganizationalFields,
@@ -11,6 +12,8 @@ import {
   getDepartmentOptions,
   getEmployeeDisplayName,
   getEmployeeInitial,
+  getInvitationDisplayName,
+  getInvitationListParams,
   getSupervisorOptions,
   hasEmployeeOrganizationalChanges,
   isPasswordDeliveryReady,
@@ -30,6 +33,25 @@ describe("employee list presentation", () => {
       "Noura",
     );
     expect(getEmployeeInitial("")).toBe("•");
+  });
+
+  it("uses the localized invitation name without exposing invitation secrets", () => {
+    const invitation = { name: "Noura", nameAr: "نورة" };
+
+    expect(getInvitationDisplayName(invitation, true)).toBe("نورة");
+    expect(getInvitationDisplayName(invitation, false)).toBe("Noura");
+    expect(getInvitationDisplayName({ name: "Noura", nameAr: "" }, true)).toBe(
+      "Noura",
+    );
+  });
+
+  it("applies invitation facility filters only for system administrators", () => {
+    expect(getInvitationListParams("hospital_admin", "9")).toBeUndefined();
+    expect(getInvitationListParams("system_admin", "")).toBeUndefined();
+    expect(getInvitationListParams("system_admin", "invalid")).toBeUndefined();
+    expect(getInvitationListParams("system_admin", "9")).toEqual({
+      facilityId: 9,
+    });
   });
 
   it("normalizes malformed compliance values for progress display", () => {
@@ -122,6 +144,43 @@ describe("employee list presentation", () => {
       currentPassword: " administrator password ",
       code: "123456",
     });
+  });
+
+  it("builds an employee-only invitation without a role or password", () => {
+    const payload = buildEmployeeInvitationInput(
+      {
+        name: " Noura ",
+        nameAr: " نورة ",
+        email: " Noura@Hospital.SA ",
+        password: "must-never-be-sent",
+        role: "system_admin",
+        departmentId: "4",
+        supervisorId: "8",
+        facilityId: "3",
+        jobTitle: " Nurse ",
+        jobTitleAr: " ممرضة ",
+        employeeNumber: " N-204 ",
+        phone: " 0500000000 ",
+      },
+      { currentPassword: "admin password", code: "123456" },
+    );
+
+    expect(payload).toEqual({
+      name: "Noura",
+      nameAr: "نورة",
+      email: "noura@hospital.sa",
+      jobTitle: "Nurse",
+      jobTitleAr: "ممرضة",
+      employeeNumber: "N-204",
+      phone: "0500000000",
+      facilityId: 3,
+      departmentId: 4,
+      supervisorId: 8,
+      currentPassword: "admin password",
+      code: "123456",
+    });
+    expect(payload).not.toHaveProperty("role");
+    expect(payload).not.toHaveProperty("password");
   });
 
   it("generates a strong temporary password without a fixed value", () => {

@@ -117,6 +117,34 @@ export const en = {
     login_button: "Sign In",
     welcome_back: "Welcome Back",
     login_subtitle: "Login to access your dashboard.",
+    employee_registration: "تسجيل موظف / Employee registration",
+    employee_registration_hint:
+      "Invited by your facility manager? Complete your employee account registration from the invitation link.",
+  },
+  register: {
+    title: "Employee account registration",
+    subtitle:
+      "Create your private password to complete your facility invitation.",
+    invitation_required_title: "A facility manager invitation is required",
+    no_invitation_hint:
+      "Open the invitation link sent to your work email. If you did not receive one, ask your facility manager to send a registration invitation.",
+    invitation_required:
+      "Registration requires a valid invitation from your facility manager. Public account creation and choosing permissions are not available here.",
+    password: "New password",
+    confirm_password: "Confirm password",
+    password_hint: "Use at least 12 characters.",
+    mismatch: "The passwords do not match.",
+    submit: "Complete account registration",
+    success_title: "Your account is ready",
+    success_message:
+      "Your employee account was registered. You can now sign in.",
+    login_action: "Go to sign in",
+    invalid_title: "This invitation link is invalid or has expired",
+    invalid_hint:
+      "Ask your facility manager to send a new invitation. An invitation link can be used only once.",
+    weak_password: "Choose a stronger password with at least 12 characters.",
+    failed:
+      "The invitation could not be completed. Ask your facility manager to send a new invitation.",
   },
   twofa: {
     title: "Two-Factor Authentication (2FA)",
@@ -280,8 +308,48 @@ export const en = {
     subtitle:
       "Manage employee records and document compliance within your authorized scope.",
     add_employee: "Add employee",
+    add_employee_directly: "Create directly",
     add_employee_description:
       "Create an organizational account for an employee in your authorized facility.",
+    invite_employee: "Invite employee",
+    invite_employee_description:
+      "Enter the authoritative organizational details, then email the employee a secure link to choose their own password.",
+    invitation_employee_role_hint:
+      "Invitations create employee accounts only; administrative roles cannot be granted through this path.",
+    invitation_step_up_hint:
+      "Sending an employee invitation is a protected administrative action. Enter your current password and two-factor or backup code.",
+    invitation_email_title: "Secure delivery to the employee's email",
+    invitation_email_hint:
+      "The employee receives a short-lived, single-use link to choose their password. No password or invitation token is shown here. If email delivery is unavailable, no account is created.",
+    send_invitation: "Send registration invitation",
+    invitation_sent: "The registration invitation was sent to the employee.",
+    invitation_failed:
+      "The invitation could not be sent and no account was created. Check the email, details, and your account security, then try again.",
+    active_invitations: "Active registration invitations",
+    active_invitations_hint:
+      "Review unused invitations and revoke any that are no longer needed. Invitation tokens are never shown on this page.",
+    invitation_count: "Active invitation count",
+    invitation_facility_filter: "Filter invitations by facility",
+    all_facilities: "All facilities",
+    no_active_invitations: "No active registration invitations",
+    no_active_invitations_hint:
+      "Sent invitations that employees have not accepted yet will appear here.",
+    job_title: "Job title",
+    invitation_expires: "Invitation expires",
+    revoke_invitation: "Revoke invitation",
+    revoke_invitation_title: "Revoke registration invitation?",
+    revoke_invitation_description: "You are revoking the invitation for",
+    revoke_invitation_warning:
+      "The employee will no longer be able to use this invitation link. You can send a new invitation later if needed.",
+    invitation_revoke_step_up_hint:
+      "Revoking an invitation is a protected administrative action. Enter your current password exactly and your two-factor or backup code.",
+    invitation_revoked: "Registration invitation revoked.",
+    invitation_revoke_not_found:
+      "This invitation is no longer active or is outside your authorized scope. Refresh the list and try again.",
+    invitation_revoke_rate_limited:
+      "Too many verification attempts were made. Wait briefly, then try again.",
+    invitation_revoke_failed:
+      "The invitation could not be revoked. Check your security details and permissions, then try again.",
     search_label: "Search employees",
     search_placeholder: "Search by name, employee number, or email…",
     empty: "No employees are available in your authorized scope",
@@ -431,7 +499,7 @@ export const en = {
     uploading_for: "Uploading for employee",
     owner_loading: "Loading the selected employee…",
     private_upload_notice:
-      "The selected photo stays on this device until you save. After upload, it remains private and can be viewed only by you and authorized staff within your facility.",
+      "The selected photo stays on this device until you save or explicitly choose document reading. After upload, it remains private and can be viewed only by you and authorized staff within your facility.",
     manual_upload_hint:
       "Optional: take a photo on your phone or choose a JPG/PNG image up to 8 MB. PDF uploads are temporarily unsupported.",
     upload_checking_title: "Checking secure photo upload availability",
@@ -446,10 +514,31 @@ export const en = {
     english: "English",
     arabic: "Arabic",
     save_document: "Save Document",
-    file_ready: "Selected locally — the photo uploads only when you save",
+    file_ready:
+      "Selected locally — use document reading or save when you are ready",
     replace_file: "Replace Photo",
     remove_file: "Remove Photo",
     choose_file: "Take or Choose a Photo",
+    ocr_title: "Optional document reading",
+    ocr_disclosure:
+      "Only when you choose Read document, the sanitized private image is sent to your organization's approved OCR processor. Always review the suggestions before using them.",
+    ocr_read_action: "Read Document",
+    ocr_uploading: "Uploading privately…",
+    ocr_reading: "Reading document…",
+    ocr_checking: "Checking whether document reading is enabled…",
+    ocr_unavailable:
+      "Automatic reading is not enabled for this facility. Enter the details manually.",
+    ocr_read_success: "Suggestions are ready for your review",
+    ocr_read_failed:
+      "The document could not be read. Your current form values were not changed.",
+    ocr_review_title: "Review extracted suggestions",
+    ocr_review_notice:
+      "OCR can be wrong. Compare every value with the photo. Nothing is saved or verified until you apply any suggestions and submit the form yourself.",
+    ocr_confidence: "Overall confidence",
+    ocr_not_detected: "Not detected",
+    ocr_apply_reviewed: "Apply Reviewed Suggestions",
+    ocr_review_applied:
+      "Suggestions copied to the form — confirm or correct them before saving",
     load_error: "Could not load the document",
     deleted: "Document deleted",
     link_copied: "Verification link copied",

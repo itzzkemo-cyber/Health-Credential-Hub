@@ -5,6 +5,8 @@ import { sql } from "drizzle-orm";
 import { getDocumentUploadReadiness } from "../lib/documentUploads";
 import { checkObjectStorageReadiness } from "../lib/gcsReadiness";
 import { safeErrorLogFields } from "../lib/safeError";
+import { getEmailDeliveryReadiness } from "../lib/email/sender";
+import { getOcrOperationalReadiness } from "../lib/ocrConfig";
 
 const router: IRouter = Router();
 
@@ -14,6 +16,24 @@ router.get("/healthz", (_req, res) => {
 });
 
 router.get("/readyz", async (req, res) => {
+  const emailDelivery = getEmailDeliveryReadiness();
+  if (emailDelivery === "misconfigured") {
+    req.log.error(
+      { errorName: "EmailConfigurationError" },
+      "Readiness check failed",
+    );
+    res.status(503).json({ status: "not_ready", emailDelivery });
+    return;
+  }
+  const ocr = getOcrOperationalReadiness();
+  if (ocr === "misconfigured") {
+    req.log.error(
+      { errorName: "OcrConfigurationError" },
+      "Readiness check failed",
+    );
+    res.status(503).json({ status: "not_ready", ocr });
+    return;
+  }
   try {
     await db.execute(sql`select 1`);
     const objectStorage = await checkObjectStorageReadiness();
@@ -22,6 +42,8 @@ router.get("/readyz", async (req, res) => {
       database: "ok",
       objectStorage,
       documentUploads: getDocumentUploadReadiness(),
+      emailDelivery,
+      ocr,
     });
   } catch (error) {
     req.log.error(safeErrorLogFields(error), "Readiness check failed");

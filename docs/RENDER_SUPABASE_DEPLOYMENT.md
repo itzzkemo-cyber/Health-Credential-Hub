@@ -261,6 +261,17 @@ The Blueprint generates independent 256-bit `SESSION_SECRET` and
 the first invalidates sessions and rotating the second requires a controlled
 TOTP migration.
 
+Email remains disabled on the first deployment. After the dedicated Resend
+sending domain is verified and its click/open tracking is disabled, add
+`EMAIL_FROM` and the restricted server-only `RESEND_API_KEY` in Render. Confirm
+that `PUBLIC_APP_URL` is the canonical HTTPS application URL, then change
+`EMAIL_ALERTS_DISABLED` to exactly `0` and redeploy. A successful
+`/api/readyz` response must report `emailDelivery: "configured"`; a 503 with
+`emailDelivery: "misconfigured"` means the opt-in is incomplete or malformed.
+The readiness response never contains the sender address or API key. Bounce
+and complaint monitoring remains an operator responsibility until a verified,
+replay-safe webhook is implemented.
+
 Do not place the migration URL, project-owner URL, database passwords,
 bootstrap values, service-role keys, or document data in the Blueprint.
 

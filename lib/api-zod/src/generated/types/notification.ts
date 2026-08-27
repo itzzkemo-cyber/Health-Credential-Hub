@@ -17,7 +17,10 @@ export interface Notification {
   messageEn: string;
   /** @nullable */
   credentialId?: number | null;
-  /** @nullable */
+  /**
+     * @minimum 1
+     * @nullable
+     */
   employeeId?: number | null;
   isRead: boolean;
   /** @nullable */

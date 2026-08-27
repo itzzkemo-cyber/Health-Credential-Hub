@@ -8,9 +8,9 @@
 
 export type GetMissingCredentialsParams = {
 /**
- * @nullable
+ * @minimum 1
  */
-employeeId?: number | null;
+employeeId?: number;
 /**
  * @nullable
  */

@@ -20,6 +20,11 @@ an idempotency key, and return a non-2xx status on failure so the API can apply
 bounded retries. Treat a public hosted workflow service as a new subprocessor
 that needs privacy, retention, residency, incident, and deletion approval.
 
+An inactive, fail-closed n8n receipt workflow, dedicated inbox SQL, safe
+environment example, and offline verifier are available in
+[`docs/automation`](./automation/README.md). Importing that template does not
+enable the application outbox or deliver an event to an external provider.
+
 ## GitHub Actions production deployment
 
 `.github/workflows/deploy-production.yml` is a manual-only release workflow.

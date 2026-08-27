@@ -22,6 +22,20 @@ vi.mock("../lib/gcsReadiness", () => ({
 import router from "./health";
 
 const originalDocumentUploadsEnabled = process.env.DOCUMENT_UPLOADS_ENABLED;
+const originalEmailEnvironment = {
+  EMAIL_ALERTS_DISABLED: process.env.EMAIL_ALERTS_DISABLED,
+  EMAIL_FROM: process.env.EMAIL_FROM,
+  RESEND_API_KEY: process.env.RESEND_API_KEY,
+  PUBLIC_APP_URL: process.env.PUBLIC_APP_URL,
+  NODE_ENV: process.env.NODE_ENV,
+};
+const originalOcrEnvironment = {
+  OCR_ENABLED: process.env.OCR_ENABLED,
+  OCR_FACILITY_ALLOWLIST: process.env.OCR_FACILITY_ALLOWLIST,
+  OCR_PROVIDER_HOST_ALLOWLIST: process.env.OCR_PROVIDER_HOST_ALLOWLIST,
+  AI_INTEGRATIONS_GEMINI_BASE_URL: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL,
+  AI_INTEGRATIONS_GEMINI_API_KEY: process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
+};
 
 describe("health routes", () => {
   let server: ReturnType<express.Express["listen"]> | undefined;
@@ -32,6 +46,8 @@ describe("health routes", () => {
     state.checkObjectStorageReadiness.mockReset();
     state.checkObjectStorageReadiness.mockResolvedValue("verified");
     state.logError.mockReset();
+    process.env.EMAIL_ALERTS_DISABLED = "1";
+    delete process.env.OCR_ENABLED;
   });
 
   afterEach(async () => {
@@ -39,6 +55,14 @@ describe("health routes", () => {
       delete process.env.DOCUMENT_UPLOADS_ENABLED;
     } else {
       process.env.DOCUMENT_UPLOADS_ENABLED = originalDocumentUploadsEnabled;
+    }
+    for (const [name, value] of Object.entries(originalEmailEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    for (const [name, value] of Object.entries(originalOcrEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
     }
     if (server) {
       await new Promise<void>((resolve, reject) =>
@@ -85,7 +109,46 @@ describe("health routes", () => {
       database: "ok",
       objectStorage: "verified",
       documentUploads: "disabled",
+      emailDelivery: "disabled",
+      ocr: "disabled",
     });
+  });
+
+  it("fails readiness without contacting dependencies when email opt-in is malformed", async () => {
+    process.env.EMAIL_ALERTS_DISABLED = "0";
+    delete process.env.RESEND_API_KEY;
+
+    const response = await request("/readyz");
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      status: "not_ready",
+      emailDelivery: "misconfigured",
+    });
+    expect(state.execute).not.toHaveBeenCalled();
+    expect(state.checkObjectStorageReadiness).not.toHaveBeenCalled();
+    expect(state.logError).toHaveBeenCalledWith(
+      { errorName: "EmailConfigurationError" },
+      "Readiness check failed",
+    );
+  });
+
+  it("fails readiness without contacting dependencies when OCR opt-in is incomplete", async () => {
+    process.env.OCR_ENABLED = "true";
+
+    const response = await request("/readyz");
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      status: "not_ready",
+      ocr: "misconfigured",
+    });
+    expect(state.execute).not.toHaveBeenCalled();
+    expect(state.checkObjectStorageReadiness).not.toHaveBeenCalled();
+    expect(state.logError).toHaveBeenCalledWith(
+      { errorName: "OcrConfigurationError" },
+      "Readiness check failed",
+    );
   });
 
   it("fails closed when storage verification fails", async () => {

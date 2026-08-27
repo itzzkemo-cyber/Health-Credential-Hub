@@ -64,6 +64,13 @@
       "when": 1787853612583,
       "tag": "0008_white_bushwacker",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787866332322,
+      "tag": "0009_goofy_bloodaxe",
+      "breakpoints": true
     }
   ]
 }

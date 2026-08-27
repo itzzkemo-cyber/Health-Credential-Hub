@@ -82,7 +82,9 @@ export const GetStorageObjectResponse = zod.unknown()
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
-  "status": zod.string()
+  "status": zod.string(),
+  "emailDelivery": zod.enum(['configured', 'disabled', 'misconfigured']).optional(),
+  "ocr": zod.enum(['configured', 'disabled', 'misconfigured']).optional()
 })
 
 
@@ -93,7 +95,9 @@ export const ReadinessCheckResponse = zod.object({
   "status": zod.string(),
   "database": zod.string(),
   "objectStorage": zod.string(),
-  "documentUploads": zod.enum(['enabled', 'disabled'])
+  "documentUploads": zod.enum(['enabled', 'disabled']),
+  "emailDelivery": zod.enum(['configured', 'disabled']),
+  "ocr": zod.enum(['configured', 'disabled'])
 })
 
 
@@ -233,6 +237,28 @@ export const ResetPasswordResponse = zod.object({
 
 
 /**
+ * Public invite-acceptance endpoint. The bearer token and employee-chosen password are the only accepted fields. Organization scope and profile data come from the administrator-issued invitation. A successful activation does not create a browser session; the employee signs in through the normal login flow.
+ * @summary Activate an employee account from a single-use invitation
+ */
+export const acceptEmployeeInvitationBodyTokenRegExp = new RegExp('^[0-9a-f]{64}$');
+export const acceptEmployeeInvitationBodyPasswordMin = 12;
+export const acceptEmployeeInvitationBodyPasswordMax = 1024;
+
+
+
+export const AcceptEmployeeInvitationBody = zod.object({
+  "token": zod.string().regex(acceptEmployeeInvitationBodyTokenRegExp),
+  "password": zod.string().min(acceptEmployeeInvitationBodyPasswordMin).max(acceptEmployeeInvitationBodyPasswordMax)
+})
+
+export const AcceptEmployeeInvitationResponse = zod.object({
+  "success": zod.literal(true),
+  "message": zod.string(),
+  "messageAr": zod.string()
+})
+
+
+/**
  * @summary Begin enabling 2FA — returns the secret, QR image and a signed setup token (nothing persisted yet)
  */
 export const TotpSetupBody = zod.object({
@@ -330,6 +356,7 @@ export const TotpAdminDisableResponse = zod.unknown()
 /**
  * @summary Get role-based dashboard stats
  */
+
 export const getDashboardStatsResponseUpcomingExpirationsItemVersionMultipleOf = 1;
 
 
@@ -345,7 +372,7 @@ export const GetDashboardStatsResponse = zod.object({
   "atRiskEmployees": zod.number(),
   "upcomingExpirations": zod.array(zod.object({
   "id": zod.number(),
-  "employeeId": zod.number(),
+  "employeeId": zod.number().int().min(1),
   "employee": zod.object({
   "id": zod.number(),
   "name": zod.string(),
@@ -424,19 +451,21 @@ export const GetRecentActivityResponse = zod.array(GetRecentActivityResponseItem
 /**
  * @summary List self-owned or strictly lower-ranked in-scope credentials
  */
+
 export const listCredentialsQueryPageDefault = 1;
 export const listCredentialsQueryPageSizeDefault = 20;
 
 export const ListCredentialsQueryParams = zod.object({
   "status": zod.enum(['active', 'expiring_soon', 'expired', 'missing']).optional(),
   "type": zod.coerce.string().optional(),
-  "employeeId": zod.coerce.number().nullish(),
+  "employeeId": zod.coerce.number().int().min(1).optional(),
   "departmentId": zod.coerce.number().nullish(),
   "search": zod.coerce.string().optional(),
   "isVerified": zod.coerce.boolean().optional().describe('Filter verification state after tenant and role scoping and before pagination. Use false for the manager review queue.'),
   "page": zod.coerce.number().default(listCredentialsQueryPageDefault),
   "pageSize": zod.coerce.number().default(listCredentialsQueryPageSizeDefault)
 })
+
 
 export const listCredentialsResponseDataItemVersionMultipleOf = 1;
 
@@ -445,7 +474,7 @@ export const listCredentialsResponseDataItemVersionMultipleOf = 1;
 export const ListCredentialsResponse = zod.object({
   "data": zod.array(zod.object({
   "id": zod.number(),
-  "employeeId": zod.number(),
+  "employeeId": zod.number().int().min(1),
   "employee": zod.object({
   "id": zod.number(),
   "name": zod.string(),
@@ -486,8 +515,11 @@ export const ListCredentialsResponse = zod.object({
 /**
  * @summary Create a self-owned or strictly lower-ranked in-scope credential
  */
+
+
+
 export const CreateCredentialBody = zod.object({
-  "employeeId": zod.number(),
+  "employeeId": zod.number().int().min(1),
   "type": zod.enum(['BLS', 'ACLS', 'PALS', 'NRP', 'TNCC', 'TCRN', 'code_red', 'code_blue', 'fire_safety', 'infection_control', 'SCFHS_license', 'SCFHS_classification', 'malpractice_insurance', 'employment_id', 'passport', 'iqama', 'visa', 'driving_license', 'medical_license', 'custom']),
   "customTypeName": zod.string().optional(),
   "customTypeNameAr": zod.string().optional(),
@@ -506,13 +538,14 @@ export const CreateCredentialBody = zod.object({
   "confidence": zod.number().optional()
 })
 
+
 export const createCredentialResponseVersionMultipleOf = 1;
 
 
 
 export const CreateCredentialResponse = zod.object({
   "id": zod.number(),
-  "employeeId": zod.number(),
+  "employeeId": zod.number().int().min(1),
   "employee": zod.object({
   "id": zod.number(),
   "name": zod.string(),
@@ -555,13 +588,14 @@ export const GetExpiringCredentialsQueryParams = zod.object({
   "days": zod.coerce.number().default(getExpiringCredentialsQueryDaysDefault)
 })
 
+
 export const getExpiringCredentialsResponseVersionMultipleOf = 1;
 
 
 
 export const GetExpiringCredentialsResponseItem = zod.object({
   "id": zod.number(),
-  "employeeId": zod.number(),
+  "employeeId": zod.number().int().min(1),
   "employee": zod.object({
   "id": zod.number(),
   "name": zod.string(),
@@ -599,13 +633,19 @@ export const GetExpiringCredentialsResponse = zod.array(GetExpiringCredentialsRe
 /**
  * @summary Get missing required credentials
  */
+
+
+
 export const GetMissingCredentialsQueryParams = zod.object({
-  "employeeId": zod.coerce.number().nullish(),
+  "employeeId": zod.coerce.number().int().min(1).optional(),
   "departmentId": zod.coerce.number().nullish()
 })
 
+
+
+
 export const GetMissingCredentialsResponseItem = zod.object({
-  "employeeId": zod.number(),
+  "employeeId": zod.number().int().min(1),
   "employeeName": zod.string(),
   "employeeNameAr": zod.string().optional(),
   "credentialType": zod.string(),
@@ -615,10 +655,29 @@ export const GetMissingCredentialsResponse = zod.array(GetMissingCredentialsResp
 
 
 /**
+ * @summary Check reviewed OCR availability for an in-scope employee facility
+ */
+
+
+
+export const GetCredentialOcrReadinessQueryParams = zod.object({
+  "employeeId": zod.coerce.number().int().min(1).optional()
+})
+
+export const GetCredentialOcrReadinessResponse = zod.object({
+  "status": zod.enum(['enabled', 'disabled', 'misconfigured'])
+})
+
+
+/**
  * @summary Extract credential data from the uploaded document using AI vision
  */
+
+
+
 export const ExtractCredentialOcrBody = zod.object({
   "fileUrl": zod.string(),
+  "employeeId": zod.number().int().min(1),
   "fileName": zod.string().nullish()
 })
 
@@ -650,13 +709,14 @@ export const GetCredentialParams = zod.object({
   "id": zod.coerce.number()
 })
 
+
 export const getCredentialResponseVersionMultipleOf = 1;
 
 
 
 export const GetCredentialResponse = zod.object({
   "id": zod.number(),
-  "employeeId": zod.number(),
+  "employeeId": zod.number().int().min(1),
   "employee": zod.object({
   "id": zod.number(),
   "name": zod.string(),
@@ -721,13 +781,14 @@ export const UpdateCredentialBody = zod.object({
   "isVerified": zod.boolean().optional()
 })
 
+
 export const updateCredentialResponseVersionMultipleOf = 1;
 
 
 
 export const UpdateCredentialResponse = zod.object({
   "id": zod.number(),
-  "employeeId": zod.number(),
+  "employeeId": zod.number().int().min(1),
   "employee": zod.object({
   "id": zod.number(),
   "name": zod.string(),
@@ -791,11 +852,15 @@ export const VerifyCredentialResponse = zod.object({
 /**
  * @summary Check for duplicate credential
  */
+
+
+
 export const CheckDuplicateBody = zod.object({
-  "employeeId": zod.number(),
+  "employeeId": zod.number().int().min(1),
   "type": zod.string(),
   "certificateNumber": zod.string()
 })
+
 
 export const checkDuplicateResponseExistingCredentialVersionMultipleOf = 1;
 
@@ -805,7 +870,7 @@ export const CheckDuplicateResponse = zod.object({
   "isDuplicate": zod.boolean(),
   "existingCredential": zod.object({
   "id": zod.number(),
-  "employeeId": zod.number(),
+  "employeeId": zod.number().int().min(1),
   "employee": zod.object({
   "id": zod.number(),
   "name": zod.string(),
@@ -931,11 +996,115 @@ export const CreateEmployeeResponse = zod.object({
 
 
 /**
+ * Hospital administrators receive only active invitations in their own facility. System administrators may receive all active invitations or filter by facility. Results are capped at 200 and never include the stored token digest.
+ * @summary List active employee invitations in administrator scope
+ */
+
+
+
+export const ListEmployeeInvitationsQueryParams = zod.object({
+  "facilityId": zod.coerce.number().int().min(1).optional().describe('Optional facility selector honored only for system administrators.')
+})
+
+export const ListEmployeeInvitationsResponseItem = zod.object({
+  "id": zod.number().int(),
+  "email": zod.string().email(),
+  "name": zod.string(),
+  "nameAr": zod.string(),
+  "jobTitle": zod.string(),
+  "jobTitleAr": zod.string(),
+  "employeeNumber": zod.string(),
+  "phone": zod.string().nullable(),
+  "facilityId": zod.number().int(),
+  "departmentId": zod.number().int().nullable(),
+  "supervisorId": zod.number().int().nullable(),
+  "expiresAt": zod.coerce.date(),
+  "createdAt": zod.coerce.date()
+})
+export const ListEmployeeInvitationsResponse = zod.array(ListEmployeeInvitationsResponseItem).max(200)
+
+
+/**
+ * Hospital and system administrators only. The server hardcodes the role to employee, derives and validates tenant scope, consumes a fresh password plus TOTP/backup-code step-up, stores only a SHA-256 token digest, and emails a 24-hour single-use link. The raw token is never returned.
+ * @summary Send a single-use employee registration invitation
+ */
+export const createEmployeeInvitationBodyNameMax = 200;
+
+export const createEmployeeInvitationBodyNameArMax = 200;
+
+export const createEmployeeInvitationBodyEmailMax = 320;
+
+export const createEmployeeInvitationBodyJobTitleMax = 200;
+
+export const createEmployeeInvitationBodyJobTitleArMax = 200;
+
+export const createEmployeeInvitationBodyEmployeeNumberMax = 100;
+
+export const createEmployeeInvitationBodyPhoneMax = 50;
+
+
+
+
+export const createEmployeeInvitationBodyCurrentPasswordMax = 1024;
+
+export const createEmployeeInvitationBodyCodeMax = 128;
+
+
+
+export const CreateEmployeeInvitationBody = zod.object({
+  "name": zod.string().min(1).max(createEmployeeInvitationBodyNameMax),
+  "nameAr": zod.string().min(1).max(createEmployeeInvitationBodyNameArMax),
+  "email": zod.string().email().max(createEmployeeInvitationBodyEmailMax),
+  "jobTitle": zod.string().min(1).max(createEmployeeInvitationBodyJobTitleMax),
+  "jobTitleAr": zod.string().min(1).max(createEmployeeInvitationBodyJobTitleArMax),
+  "employeeNumber": zod.string().min(1).max(createEmployeeInvitationBodyEmployeeNumberMax),
+  "phone": zod.string().max(createEmployeeInvitationBodyPhoneMax).nullish(),
+  "facilityId": zod.number().int().min(1).nullish().describe('Optional target facility; honored only for system administrators.'),
+  "departmentId": zod.number().int().min(1).nullish(),
+  "supervisorId": zod.number().int().min(1).nullish(),
+  "currentPassword": zod.string().min(1).max(createEmployeeInvitationBodyCurrentPasswordMax),
+  "code": zod.string().min(1).max(createEmployeeInvitationBodyCodeMax).describe('Single-use TOTP or backup code for administrator step-up.')
+})
+
+export const CreateEmployeeInvitationResponse = zod.object({
+  "status": zod.enum(['sent']),
+  "message": zod.string(),
+  "messageAr": zod.string()
+})
+
+
+/**
+ * Hospital and system administrators only. Revalidates tenant scope and consumes a fresh current-password plus TOTP/backup-code step-up while holding row locks. Missing, expired, consumed, revoked, and out-of-scope invitations share the same not-found response.
+ * @summary Revoke an active employee invitation
+ */
+
+
+
+export const RevokeEmployeeInvitationParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const revokeEmployeeInvitationBodyCurrentPasswordMax = 1024;
+
+export const revokeEmployeeInvitationBodyCodeMax = 128;
+
+
+
+export const RevokeEmployeeInvitationBody = zod.object({
+  "currentPassword": zod.string().min(1).max(revokeEmployeeInvitationBodyCurrentPasswordMax).describe('Current password of the authenticated administrator.'),
+  "code": zod.string().min(1).max(revokeEmployeeInvitationBodyCodeMax).describe('Single-use TOTP or backup code for administrator step-up verification.')
+})
+
+export const RevokeEmployeeInvitationResponse = zod.void()
+
+
+/**
  * @summary Get employee by ID
  */
 export const GetEmployeeParams = zod.object({
   "id": zod.coerce.number()
 })
+
 
 export const getEmployeeResponseTwoCredentialsItemVersionMultipleOf = 1;
 
@@ -973,7 +1142,7 @@ export const GetEmployeeResponse = zod.object({
 })).and(zod.object({
   "credentials": zod.array(zod.object({
   "id": zod.number(),
-  "employeeId": zod.number(),
+  "employeeId": zod.number().int().min(1),
   "employee": zod.object({
   "id": zod.number(),
   "name": zod.string(),
@@ -1065,9 +1234,15 @@ export const DeleteEmployeeParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const deleteEmployeeBodyCurrentPasswordMax = 1024;
+
+export const deleteEmployeeBodyCodeMax = 128;
+
+
+
 export const DeleteEmployeeBody = zod.object({
-  "currentPassword": zod.string().describe('Current password of the authenticated administrator.'),
-  "code": zod.string().describe('Single-use TOTP or backup code for administrator step-up verification.')
+  "currentPassword": zod.string().min(1).max(deleteEmployeeBodyCurrentPasswordMax).describe('Current password of the authenticated administrator.'),
+  "code": zod.string().min(1).max(deleteEmployeeBodyCodeMax).describe('Single-use TOTP or backup code for administrator step-up verification.')
 })
 
 export const DeleteEmployeeResponse = zod.void()
@@ -1080,9 +1255,15 @@ export const ActivateEmployeeParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const activateEmployeeBodyCurrentPasswordMax = 1024;
+
+export const activateEmployeeBodyCodeMax = 128;
+
+
+
 export const ActivateEmployeeBody = zod.object({
-  "currentPassword": zod.string().describe('Current password of the authenticated administrator.'),
-  "code": zod.string().describe('Single-use TOTP or backup code for administrator step-up verification.')
+  "currentPassword": zod.string().min(1).max(activateEmployeeBodyCurrentPasswordMax).describe('Current password of the authenticated administrator.'),
+  "code": zod.string().min(1).max(activateEmployeeBodyCodeMax).describe('Single-use TOTP or backup code for administrator step-up verification.')
 })
 
 export const ActivateEmployeeResponse = zod.object({
@@ -1112,9 +1293,15 @@ export const DeactivateEmployeeParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const deactivateEmployeeBodyCurrentPasswordMax = 1024;
+
+export const deactivateEmployeeBodyCodeMax = 128;
+
+
+
 export const DeactivateEmployeeBody = zod.object({
-  "currentPassword": zod.string().describe('Current password of the authenticated administrator.'),
-  "code": zod.string().describe('Single-use TOTP or backup code for administrator step-up verification.')
+  "currentPassword": zod.string().min(1).max(deactivateEmployeeBodyCurrentPasswordMax).describe('Current password of the authenticated administrator.'),
+  "code": zod.string().min(1).max(deactivateEmployeeBodyCodeMax).describe('Single-use TOTP or backup code for administrator step-up verification.')
 })
 
 export const DeactivateEmployeeResponse = zod.object({
@@ -1244,6 +1431,9 @@ export const ListNotificationsQueryParams = zod.object({
   "unreadOnly": zod.coerce.boolean().optional()
 })
 
+
+
+
 export const ListNotificationsResponseItem = zod.object({
   "id": zod.number(),
   "userId": zod.number(),
@@ -1253,7 +1443,7 @@ export const ListNotificationsResponseItem = zod.object({
   "messageAr": zod.string(),
   "messageEn": zod.string(),
   "credentialId": zod.number().nullish(),
-  "employeeId": zod.number().nullish(),
+  "employeeId": zod.number().int().min(1).nullish(),
   "isRead": zod.boolean(),
   "daysUntilExpiry": zod.number().nullish(),
   "createdAt": zod.string()

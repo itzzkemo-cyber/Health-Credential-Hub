@@ -172,6 +172,18 @@ export default function Login() {
                   : t("auth.login_button")}
               </Button>
             </form>
+            <div className="rounded-xl border bg-muted/30 p-4 text-center">
+              <p className="text-sm leading-6 text-muted-foreground">
+                {t("auth.employee_registration_hint")}
+              </p>
+              <Button
+                asChild
+                variant="link"
+                className="min-h-11 px-2 font-semibold"
+              >
+                <Link href="/register">{t("auth.employee_registration")}</Link>
+              </Button>
+            </div>
           </div>
         </div>
       </div>

@@ -1,25 +1,33 @@
 import { useDeferredValue, useRef, useState } from "react";
 import {
   ApiError,
+  type EmployeeInvitation,
   type EmployeeWithStats,
   getGetFacilitiesQueryKey,
   useGetFacilities,
   getListDepartmentsQueryKey,
+  getListEmployeeInvitationsQueryKey,
   getListEmployeesQueryKey,
   useCreateEmployee,
+  useCreateEmployeeInvitation,
   useListDepartments,
+  useListEmployeeInvitations,
   useListEmployees,
+  useRevokeEmployeeInvitation,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
   AlertCircle,
+  Clock,
   Copy,
   Eye,
   EyeOff,
   HeartPulse,
   KeyRound,
   Loader2,
+  MailPlus,
+  MailX,
   Plus,
   Search,
   ShieldCheck,
@@ -55,12 +63,15 @@ import { useLanguage } from "@/lib/language-context";
 import { cn } from "@/lib/utils";
 import {
   buildEmployeeInput,
+  buildEmployeeInvitationInput,
   generateTemporaryPassword,
   type EmployeeAccountForm,
   getComplianceRate,
   getDepartmentOptions,
   getEmployeeDisplayName,
   getEmployeeInitial,
+  getInvitationDisplayName,
+  getInvitationListParams,
   getSupervisorOptions,
   getAssignableRoles,
   isPasswordDeliveryReady,
@@ -80,6 +91,8 @@ function apiErrorCode(error: unknown): string | undefined {
     : undefined;
 }
 
+type EmployeeDialogMode = "direct" | "invitation";
+
 export default function EmployeesList() {
   const { t, isRTL } = useLanguage();
   const queryClient = useQueryClient();
@@ -92,6 +105,14 @@ export default function EmployeesList() {
   const canCreateEmployee = user?.role === "hospital_admin" || isSystemAdmin;
   const [search, setSearch] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [invitationFacilityFilter, setInvitationFacilityFilter] = useState("");
+  const [invitationToRevoke, setInvitationToRevoke] =
+    useState<EmployeeInvitation | null>(null);
+  const [revokeFeedbackKey, setRevokeFeedbackKey] = useState<string | null>(
+    null,
+  );
+  const [employeeDialogMode, setEmployeeDialogMode] =
+    useState<EmployeeDialogMode>("invitation");
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
   const [passwordDeliveryAcknowledged, setPasswordDeliveryAcknowledged] =
     useState(false);
@@ -100,6 +121,8 @@ export default function EmployeesList() {
   );
   const createStepUpPasswordRef = useRef<HTMLInputElement>(null);
   const createStepUpCodeRef = useRef<HTMLInputElement>(null);
+  const revokeStepUpPasswordRef = useRef<HTMLInputElement>(null);
+  const revokeStepUpCodeRef = useRef<HTMLInputElement>(null);
   const [employeeForm, setEmployeeForm] = useState(() =>
     createEmptyEmployeeForm(isSystemAdmin ? user?.facilityId : undefined),
   );
@@ -125,7 +148,7 @@ export default function EmployeesList() {
   const facilitiesQuery = useGetFacilities({
     query: {
       queryKey: getGetFacilitiesQueryKey(),
-      enabled: isSystemAdmin && isCreateOpen,
+      enabled: isSystemAdmin,
     },
   });
   const managementDirectoryParams =
@@ -139,7 +162,24 @@ export default function EmployeesList() {
     },
   });
   const createEmployee = useCreateEmployee({ mutation: { gcTime: 0 } });
+  const createEmployeeInvitation = useCreateEmployeeInvitation({
+    mutation: { gcTime: 0 },
+  });
+  const invitationListParams = getInvitationListParams(
+    user?.role,
+    invitationFacilityFilter,
+  );
+  const invitationsQuery = useListEmployeeInvitations(invitationListParams, {
+    query: {
+      queryKey: getListEmployeeInvitationsQueryKey(invitationListParams),
+      enabled: canCreateEmployee,
+    },
+  });
+  const revokeEmployeeInvitation = useRevokeEmployeeInvitation({
+    mutation: { gcTime: 0 },
+  });
   const employees = employeesQuery.data ?? [];
+  const invitations = invitationsQuery.data ?? [];
   const assignableRoles = getAssignableRoles(user?.role ?? "");
   const managementDirectory = managementDirectoryQuery.data ?? [];
   const departmentOptions = getDepartmentOptions(
@@ -153,6 +193,10 @@ export default function EmployeesList() {
     selectedFacilityId,
   );
   const createRequiresStepUp = requiresEmployeeCreateStepUp(employeeForm.role);
+  const isInvitationMode = employeeDialogMode === "invitation";
+  const dialogRequiresStepUp = isInvitationMode || createRequiresStepUp;
+  const employeeActionPending =
+    createEmployee.isPending || createEmployeeInvitation.isPending;
 
   const clearCreateStepUpSecrets = () => {
     if (createStepUpPasswordRef.current) {
@@ -164,6 +208,7 @@ export default function EmployeesList() {
   const resetCreateEmployeeForm = () => {
     clearCreateStepUpSecrets();
     createEmployee.reset();
+    createEmployeeInvitation.reset();
     setEmployeeForm(
       createEmptyEmployeeForm(isSystemAdmin ? user?.facilityId : undefined),
     );
@@ -174,11 +219,19 @@ export default function EmployeesList() {
 
   const openCreateEmployee = () => {
     resetCreateEmployeeForm();
+    setEmployeeDialogMode("direct");
+    setIsCreateOpen(true);
+  };
+
+  const openInviteEmployee = () => {
+    resetCreateEmployeeForm();
+    setEmployeeDialogMode("invitation");
+    setEmployeeForm((previous) => ({ ...previous, role: "employee" }));
     setIsCreateOpen(true);
   };
 
   const closeCreateEmployee = () => {
-    if (createEmployee.isPending) return;
+    if (employeeActionPending) return;
     resetCreateEmployeeForm();
     setIsCreateOpen(false);
   };
@@ -205,6 +258,7 @@ export default function EmployeesList() {
   const handleCreateEmployee = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (
+      !isInvitationMode &&
       !isPasswordDeliveryReady(
         employeeForm.password,
         passwordDeliveryAcknowledged,
@@ -215,12 +269,54 @@ export default function EmployeesList() {
 
     setCreateFeedbackKey(null);
     const form = event.currentTarget;
-    const stepUp = createRequiresStepUp
+    const stepUp = dialogRequiresStepUp
       ? readAdminMfaStepUpCredentials(new FormData(form))
       : undefined;
-    if (createRequiresStepUp && !stepUp) {
+    if (dialogRequiresStepUp && !stepUp) {
       setCreateFeedbackKey("employees_page.step_up_required");
       createStepUpPasswordRef.current?.focus();
+      return;
+    }
+
+    if (isInvitationMode && stepUp) {
+      createEmployeeInvitation.mutate(
+        {
+          data: buildEmployeeInvitationInput(employeeForm, stepUp),
+        },
+        {
+          onSuccess: () => {
+            clearCreateStepUpSecrets();
+            createEmployeeInvitation.reset();
+            toast.success(t("employees_page.invitation_sent"));
+            setIsCreateOpen(false);
+            setEmployeeForm(
+              createEmptyEmployeeForm(
+                isSystemAdmin ? user?.facilityId : undefined,
+              ),
+            );
+            setCreateFeedbackKey(null);
+            void queryClient.invalidateQueries({
+              queryKey: getListEmployeeInvitationsQueryKey(),
+            });
+          },
+          onError: (error: unknown) => {
+            const fallbackKey =
+              error instanceof ApiError && error.status === 409
+                ? "employees_page.email_exists"
+                : "employees_page.invitation_failed";
+            const errorKey = getAdminMfaStepUpErrorKey(
+              apiErrorCode(error),
+              fallbackKey,
+            );
+            clearCreateStepUpSecrets();
+            createEmployeeInvitation.reset();
+            setCreateFeedbackKey(errorKey);
+            requestAnimationFrame(() =>
+              createStepUpPasswordRef.current?.focus(),
+            );
+          },
+        },
+      );
       return;
     }
 
@@ -264,6 +360,73 @@ export default function EmployeesList() {
     );
   };
 
+  const clearRevokeStepUpSecrets = () => {
+    if (revokeStepUpPasswordRef.current) {
+      revokeStepUpPasswordRef.current.value = "";
+    }
+    if (revokeStepUpCodeRef.current) revokeStepUpCodeRef.current.value = "";
+  };
+
+  const openRevokeInvitation = (invitation: EmployeeInvitation) => {
+    clearRevokeStepUpSecrets();
+    revokeEmployeeInvitation.reset();
+    setRevokeFeedbackKey(null);
+    setInvitationToRevoke(invitation);
+  };
+
+  const closeRevokeInvitation = () => {
+    if (revokeEmployeeInvitation.isPending) return;
+    clearRevokeStepUpSecrets();
+    revokeEmployeeInvitation.reset();
+    setRevokeFeedbackKey(null);
+    setInvitationToRevoke(null);
+  };
+
+  const handleRevokeInvitation = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!invitationToRevoke) return;
+
+    const stepUp = readAdminMfaStepUpCredentials(
+      new FormData(event.currentTarget),
+    );
+    if (!stepUp) {
+      setRevokeFeedbackKey("employees_page.step_up_required");
+      revokeStepUpPasswordRef.current?.focus();
+      return;
+    }
+
+    setRevokeFeedbackKey(null);
+    revokeEmployeeInvitation.mutate(
+      { id: invitationToRevoke.id, data: stepUp },
+      {
+        onSuccess: () => {
+          clearRevokeStepUpSecrets();
+          revokeEmployeeInvitation.reset();
+          setInvitationToRevoke(null);
+          toast.success(t("employees_page.invitation_revoked"));
+          void queryClient.invalidateQueries({
+            queryKey: getListEmployeeInvitationsQueryKey(),
+          });
+        },
+        onError: (error: unknown) => {
+          const status = error instanceof ApiError ? error.status : undefined;
+          const fallbackKey =
+            status === 404
+              ? "employees_page.invitation_revoke_not_found"
+              : status === 429
+                ? "employees_page.invitation_revoke_rate_limited"
+                : "employees_page.invitation_revoke_failed";
+          setRevokeFeedbackKey(
+            getAdminMfaStepUpErrorKey(apiErrorCode(error), fallbackKey),
+          );
+          clearRevokeStepUpSecrets();
+          revokeEmployeeInvitation.reset();
+          requestAnimationFrame(() => revokeStepUpPasswordRef.current?.focus());
+        },
+      },
+    );
+  };
+
   return (
     <div className="space-y-5 animate-in fade-in duration-500 sm:space-y-6">
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
@@ -276,14 +439,25 @@ export default function EmployeesList() {
           </p>
         </div>
         {canCreateEmployee && (
-          <Button
-            type="button"
-            onClick={openCreateEmployee}
-            className="min-h-11 w-full gap-2 sm:w-auto"
-          >
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            {t("employees_page.add_employee")}
-          </Button>
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={openCreateEmployee}
+              className="min-h-11 w-full gap-2 sm:w-auto"
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              {t("employees_page.add_employee_directly")}
+            </Button>
+            <Button
+              type="button"
+              onClick={openInviteEmployee}
+              className="min-h-11 w-full gap-2 sm:w-auto"
+            >
+              <MailPlus className="h-4 w-4" aria-hidden="true" />
+              {t("employees_page.invite_employee")}
+            </Button>
+          </div>
         )}
       </div>
 
@@ -303,6 +477,126 @@ export default function EmployeesList() {
           />
         </div>
       </div>
+
+      {canCreateEmployee && (
+        <section
+          className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm sm:p-5"
+          aria-labelledby="active-invitations-title"
+          aria-busy={invitationsQuery.isFetching}
+        >
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Clock className="h-5 w-5 text-primary" aria-hidden="true" />
+                <h2 id="active-invitations-title" className="text-lg font-bold">
+                  {t("employees_page.active_invitations")}
+                </h2>
+                {!invitationsQuery.isLoading && (
+                  <Badge
+                    variant="secondary"
+                    aria-label={`${t("employees_page.invitation_count")}: ${invitations.length}`}
+                  >
+                    {invitations.length}
+                  </Badge>
+                )}
+              </div>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                {t("employees_page.active_invitations_hint")}
+              </p>
+            </div>
+
+            {isSystemAdmin && (
+              <div className="w-full space-y-2 sm:w-64">
+                <Label htmlFor="invitation-facility-filter">
+                  {t("employees_page.invitation_facility_filter")}
+                </Label>
+                <Select
+                  value={invitationFacilityFilter || "all"}
+                  onValueChange={(value) =>
+                    setInvitationFacilityFilter(value === "all" ? "" : value)
+                  }
+                >
+                  <SelectTrigger
+                    id="invitation-facility-filter"
+                    className="min-h-11"
+                    disabled={facilitiesQuery.isLoading}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">
+                      {t("employees_page.all_facilities")}
+                    </SelectItem>
+                    {(facilitiesQuery.data ?? []).map((facility) => (
+                      <SelectItem key={facility.id} value={String(facility.id)}>
+                        {isRTL ? facility.nameAr : facility.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          <p className="sr-only" role="status" aria-live="polite">
+            {!invitationsQuery.isLoading && !invitationsQuery.isError
+              ? `${t("employees_page.invitation_count")}: ${invitations.length}`
+              : ""}
+          </p>
+          <div>
+            {invitationsQuery.isLoading ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Skeleton className="h-56 rounded-xl" />
+                <Skeleton className="h-56 rounded-xl" />
+              </div>
+            ) : invitationsQuery.isError ? (
+              <QueryErrorState
+                error={invitationsQuery.error}
+                onRetry={() => void invitationsQuery.refetch()}
+              />
+            ) : invitations.length === 0 ? (
+              <div className="rounded-xl border border-dashed px-4 py-8 text-center">
+                <MailPlus
+                  className="mx-auto mb-3 h-10 w-10 text-muted-foreground opacity-30"
+                  aria-hidden="true"
+                />
+                <p className="font-medium">
+                  {t("employees_page.no_active_invitations")}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {t("employees_page.no_active_invitations_hint")}
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {invitations.map((invitation) => {
+                  const facility = (facilitiesQuery.data ?? []).find(
+                    (candidate) => candidate.id === invitation.facilityId,
+                  );
+                  const facilityLabel = isSystemAdmin
+                    ? facility
+                      ? isRTL
+                        ? facility.nameAr
+                        : facility.name
+                      : `${t("employees_page.facility")} #${invitation.facilityId}`
+                    : undefined;
+
+                  return (
+                    <InvitationCard
+                      key={invitation.id}
+                      invitation={invitation}
+                      isRTL={isRTL}
+                      facilityLabel={facilityLabel}
+                      t={t}
+                      onRevoke={() => openRevokeInvitation(invitation)}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       <section aria-busy={employeesQuery.isFetching} aria-live="polite">
         {employeesQuery.isLoading ? (
@@ -383,9 +677,19 @@ export default function EmployeesList() {
       >
         <DialogContent className="max-h-[90dvh] max-w-2xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{t("employees_page.add_employee")}</DialogTitle>
+            <DialogTitle>
+              {t(
+                isInvitationMode
+                  ? "employees_page.invite_employee"
+                  : "employees_page.add_employee",
+              )}
+            </DialogTitle>
             <DialogDescription>
-              {t("employees_page.add_employee_description")}
+              {t(
+                isInvitationMode
+                  ? "employees_page.invite_employee_description"
+                  : "employees_page.add_employee_description",
+              )}
             </DialogDescription>
           </DialogHeader>
 
@@ -430,6 +734,17 @@ export default function EmployeesList() {
                   }))
                 }
                 dir="ltr"
+              />
+              <EmployeeFormField
+                id="employee-phone"
+                label={t("employees_page.phone")}
+                value={employeeForm.phone ?? ""}
+                onChange={(phone) =>
+                  setEmployeeForm((previous) => ({ ...previous, phone }))
+                }
+                type="tel"
+                dir="ltr"
+                required={false}
               />
               <EmployeeFormField
                 id="employee-job-title-en"
@@ -492,30 +807,42 @@ export default function EmployeesList() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="employee-role">
-                  {t("employees_page.role")}
-                </Label>
-                <Select
-                  value={employeeForm.role}
-                  onValueChange={(role) => {
-                    clearCreateStepUpSecrets();
-                    setCreateFeedbackKey(null);
-                    setEmployeeForm((previous) => ({ ...previous, role }));
-                  }}
-                >
-                  <SelectTrigger id="employee-role" className="min-h-11">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assignableRoles.map((role) => (
-                      <SelectItem key={role} value={role}>
-                        {t(`roles.${role}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {isInvitationMode ? (
+                <div className="space-y-2">
+                  <Label>{t("employees_page.role")}</Label>
+                  <div className="flex min-h-11 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
+                    {t("roles.employee")}
+                  </div>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {t("employees_page.invitation_employee_role_hint")}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="employee-role">
+                    {t("employees_page.role")}
+                  </Label>
+                  <Select
+                    value={employeeForm.role}
+                    onValueChange={(role) => {
+                      clearCreateStepUpSecrets();
+                      setCreateFeedbackKey(null);
+                      setEmployeeForm((previous) => ({ ...previous, role }));
+                    }}
+                  >
+                    <SelectTrigger id="employee-role" className="min-h-11">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assignableRoles.map((role) => (
+                        <SelectItem key={role} value={role}>
+                          {t(`roles.${role}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="employee-department">
@@ -594,7 +921,7 @@ export default function EmployeesList() {
                 </Select>
               </div>
 
-              {createRequiresStepUp && (
+              {dialogRequiresStepUp && (
                 <section
                   className="space-y-4 rounded-xl border border-primary/20 bg-primary/5 p-4 sm:col-span-2"
                   aria-labelledby="create-step-up-title"
@@ -613,7 +940,11 @@ export default function EmployeesList() {
                         id="create-step-up-description"
                         className="mt-1 text-sm leading-6 text-muted-foreground"
                       >
-                        {t("employees_page.create_step_up_hint")}
+                        {t(
+                          isInvitationMode
+                            ? "employees_page.invitation_step_up_hint"
+                            : "employees_page.create_step_up_hint",
+                        )}
                       </p>
                     </div>
                   </div>
@@ -659,102 +990,119 @@ export default function EmployeesList() {
                 </section>
               )}
 
-              <div className="space-y-2 sm:col-span-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <Label htmlFor="employee-temporary-password">
-                    {t("employees_page.temporary_password")}
-                  </Label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={generatePassword}
-                    disabled={createEmployee.isPending}
-                    className="min-h-11 gap-2"
-                  >
-                    <KeyRound className="h-4 w-4" aria-hidden="true" />
-                    {t("employees_page.generate_password")}
-                  </Button>
-                </div>
-                <div className="relative" dir="ltr">
-                  <Input
-                    id="employee-temporary-password"
-                    type={showTemporaryPassword ? "text" : "password"}
-                    minLength={12}
-                    required
-                    autoComplete="new-password"
-                    value={employeeForm.password}
-                    onChange={(event) => {
-                      setEmployeeForm((previous) => ({
-                        ...previous,
-                        password: event.target.value,
-                      }));
-                      setPasswordDeliveryAcknowledged(false);
-                    }}
-                    aria-describedby="employee-temporary-password-hint"
-                    dir="ltr"
-                    className="min-h-11 pr-12"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0 h-11 w-11"
-                    onClick={() =>
-                      setShowTemporaryPassword((previous) => !previous)
-                    }
-                    aria-label={t(
-                      showTemporaryPassword
-                        ? "employees_page.hide_password"
-                        : "employees_page.show_password",
-                    )}
-                  >
-                    {showTemporaryPassword ? (
-                      <EyeOff className="h-4 w-4" aria-hidden="true" />
-                    ) : (
-                      <Eye className="h-4 w-4" aria-hidden="true" />
-                    )}
-                  </Button>
-                </div>
-                <p
-                  id="employee-temporary-password-hint"
-                  className="text-xs leading-5 text-muted-foreground"
-                >
-                  {t("employees_page.temporary_password_hint")}
-                </p>
-                <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void copyTemporaryPassword()}
-                    disabled={
-                      !employeeForm.password || createEmployee.isPending
-                    }
-                    className="min-h-11 gap-2"
-                  >
-                    <Copy className="h-4 w-4" aria-hidden="true" />
-                    {t("employees_page.copy_temporary_password")}
-                  </Button>
-                  <div className="flex items-start gap-3">
-                    <Checkbox
-                      id="employee-password-delivery-ack"
-                      checked={passwordDeliveryAcknowledged}
-                      onCheckedChange={(checked) =>
-                        setPasswordDeliveryAcknowledged(checked === true)
-                      }
-                      disabled={
-                        !employeeForm.password || createEmployee.isPending
-                      }
-                      className="mt-1"
-                    />
-                    <Label
-                      htmlFor="employee-password-delivery-ack"
-                      className="cursor-pointer text-xs leading-5 text-muted-foreground"
-                    >
-                      {t("employees_page.password_delivery_ack")}
+              {!isInvitationMode ? (
+                <div className="space-y-2 sm:col-span-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Label htmlFor="employee-temporary-password">
+                      {t("employees_page.temporary_password")}
                     </Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={generatePassword}
+                      disabled={employeeActionPending}
+                      className="min-h-11 gap-2"
+                    >
+                      <KeyRound className="h-4 w-4" aria-hidden="true" />
+                      {t("employees_page.generate_password")}
+                    </Button>
+                  </div>
+                  <div className="relative" dir="ltr">
+                    <Input
+                      id="employee-temporary-password"
+                      type={showTemporaryPassword ? "text" : "password"}
+                      minLength={12}
+                      required
+                      autoComplete="new-password"
+                      value={employeeForm.password}
+                      onChange={(event) => {
+                        setEmployeeForm((previous) => ({
+                          ...previous,
+                          password: event.target.value,
+                        }));
+                        setPasswordDeliveryAcknowledged(false);
+                      }}
+                      aria-describedby="employee-temporary-password-hint"
+                      dir="ltr"
+                      className="min-h-11 pr-12"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-11 w-11"
+                      onClick={() =>
+                        setShowTemporaryPassword((previous) => !previous)
+                      }
+                      aria-label={t(
+                        showTemporaryPassword
+                          ? "employees_page.hide_password"
+                          : "employees_page.show_password",
+                      )}
+                    >
+                      {showTemporaryPassword ? (
+                        <EyeOff className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <Eye className="h-4 w-4" aria-hidden="true" />
+                      )}
+                    </Button>
+                  </div>
+                  <p
+                    id="employee-temporary-password-hint"
+                    className="text-xs leading-5 text-muted-foreground"
+                  >
+                    {t("employees_page.temporary_password_hint")}
+                  </p>
+                  <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void copyTemporaryPassword()}
+                      disabled={!employeeForm.password || employeeActionPending}
+                      className="min-h-11 gap-2"
+                    >
+                      <Copy className="h-4 w-4" aria-hidden="true" />
+                      {t("employees_page.copy_temporary_password")}
+                    </Button>
+                    <div className="flex items-start gap-3">
+                      <Checkbox
+                        id="employee-password-delivery-ack"
+                        checked={passwordDeliveryAcknowledged}
+                        onCheckedChange={(checked) =>
+                          setPasswordDeliveryAcknowledged(checked === true)
+                        }
+                        disabled={
+                          !employeeForm.password || employeeActionPending
+                        }
+                        className="mt-1"
+                      />
+                      <Label
+                        htmlFor="employee-password-delivery-ack"
+                        className="cursor-pointer text-xs leading-5 text-muted-foreground"
+                      >
+                        {t("employees_page.password_delivery_ack")}
+                      </Label>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ) : (
+                <section className="space-y-2 rounded-xl border border-primary/20 bg-primary/5 p-4 sm:col-span-2">
+                  <div className="flex items-start gap-3">
+                    <MailPlus
+                      className="mt-0.5 h-5 w-5 shrink-0 text-primary"
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <h3 className="font-semibold">
+                        {t("employees_page.invitation_email_title")}
+                      </h3>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                        {t("employees_page.invitation_email_hint")}
+                      </p>
+                    </div>
+                  </div>
+                </section>
+              )}
             </div>
 
             {createFeedbackKey && (
@@ -778,22 +1126,178 @@ export default function EmployeesList() {
               <Button
                 type="submit"
                 disabled={
-                  createEmployee.isPending ||
+                  employeeActionPending ||
                   (isSystemAdmin && !employeeForm.facilityId) ||
-                  !isPasswordDeliveryReady(
-                    employeeForm.password,
-                    passwordDeliveryAcknowledged,
-                  )
+                  (!isInvitationMode &&
+                    !isPasswordDeliveryReady(
+                      employeeForm.password,
+                      passwordDeliveryAcknowledged,
+                    ))
                 }
                 className="min-h-11 w-full gap-2 sm:w-auto"
               >
-                {createEmployee.isPending && (
+                {employeeActionPending && (
                   <Loader2
                     className="h-4 w-4 animate-spin"
                     aria-hidden="true"
                   />
                 )}
-                {t("employees_page.create_employee")}
+                {t(
+                  isInvitationMode
+                    ? "employees_page.send_invitation"
+                    : "employees_page.create_employee",
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={invitationToRevoke != null}
+        onOpenChange={(open) => {
+          if (!open) closeRevokeInvitation();
+        }}
+      >
+        <DialogContent
+          className="max-h-[90dvh] max-w-md overflow-y-auto"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            revokeStepUpPasswordRef.current?.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {t("employees_page.revoke_invitation_title")}
+            </DialogTitle>
+            <DialogDescription id="revoke-invitation-description">
+              {t("employees_page.revoke_invitation_description")}
+              {invitationToRevoke && (
+                <>
+                  {" "}
+                  <bdi>
+                    {getInvitationDisplayName(invitationToRevoke, isRTL)}
+                  </bdi>
+                  {" ("}
+                  <bdi dir="ltr" className="break-all">
+                    {invitationToRevoke.email}
+                  </bdi>
+                  {")"}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleRevokeInvitation} className="space-y-5">
+            <div
+              className="flex items-start gap-3 rounded-xl border border-destructive/25 bg-destructive/5 p-4"
+              role="note"
+            >
+              <MailX
+                className="mt-0.5 h-5 w-5 shrink-0 text-destructive"
+                aria-hidden="true"
+              />
+              <p className="text-sm leading-6 text-muted-foreground">
+                {t("employees_page.revoke_invitation_warning")}
+              </p>
+            </div>
+
+            <section
+              className="space-y-4 rounded-xl border border-primary/20 bg-primary/5 p-4"
+              aria-labelledby="revoke-step-up-title"
+              aria-describedby="revoke-step-up-description"
+            >
+              <div className="flex items-start gap-3">
+                <ShieldCheck
+                  className="mt-0.5 h-5 w-5 shrink-0 text-primary"
+                  aria-hidden="true"
+                />
+                <div className="min-w-0">
+                  <h3 id="revoke-step-up-title" className="font-semibold">
+                    {t("employees_page.step_up_title")}
+                  </h3>
+                  <p
+                    id="revoke-step-up-description"
+                    className="mt-1 text-sm leading-6 text-muted-foreground"
+                  >
+                    {t("employees_page.invitation_revoke_step_up_hint")}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="revoke-step-up-password">
+                    {t("twofa.current_password")}
+                  </Label>
+                  <Input
+                    ref={revokeStepUpPasswordRef}
+                    id="revoke-step-up-password"
+                    name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
+                    type="password"
+                    dir="ltr"
+                    autoComplete="current-password"
+                    aria-describedby="revoke-step-up-description"
+                    required
+                    className="min-h-11"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="revoke-step-up-code">
+                    {t("twofa.code_label")}
+                  </Label>
+                  <Input
+                    ref={revokeStepUpCodeRef}
+                    id="revoke-step-up-code"
+                    name={ADMIN_MFA_CODE_FIELD}
+                    type="text"
+                    dir="ltr"
+                    inputMode="text"
+                    autoComplete="one-time-code"
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    aria-describedby="revoke-step-up-description"
+                    placeholder="123456 / XXXXX-XXXXX"
+                    required
+                    className="min-h-11 font-mono"
+                  />
+                </div>
+              </div>
+            </section>
+
+            {revokeFeedbackKey && (
+              <p
+                className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+                role="alert"
+              >
+                {t(revokeFeedbackKey)}
+              </p>
+            )}
+
+            <DialogFooter className="gap-2 sm:space-x-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={closeRevokeInvitation}
+                disabled={revokeEmployeeInvitation.isPending}
+                className="min-h-11 w-full sm:w-auto"
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="submit"
+                variant="destructive"
+                disabled={revokeEmployeeInvitation.isPending}
+                className="min-h-11 w-full gap-2 sm:w-auto"
+              >
+                {revokeEmployeeInvitation.isPending && (
+                  <Loader2
+                    className="h-4 w-4 animate-spin"
+                    aria-hidden="true"
+                  />
+                )}
+                {t("employees_page.revoke_invitation")}
               </Button>
             </DialogFooter>
           </form>
@@ -801,6 +1305,119 @@ export default function EmployeesList() {
       </Dialog>
     </div>
   );
+}
+
+function InvitationCard({
+  invitation,
+  facilityLabel,
+  isRTL,
+  t,
+  onRevoke,
+}: {
+  invitation: EmployeeInvitation;
+  facilityLabel?: string;
+  isRTL: boolean;
+  t: Translator;
+  onRevoke: () => void;
+}) {
+  const name = getInvitationDisplayName(invitation, isRTL);
+  const jobTitle = isRTL
+    ? invitation.jobTitleAr.trim() || invitation.jobTitle.trim()
+    : invitation.jobTitle.trim() || invitation.jobTitleAr.trim();
+  const headingId = `employee-invitation-${invitation.id}`;
+
+  return (
+    <Card
+      className="min-w-0 overflow-hidden"
+      role="article"
+      aria-labelledby={headingId}
+    >
+      <CardContent className="flex h-full flex-col gap-4 p-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary/10 font-bold text-primary"
+            aria-hidden="true"
+          >
+            {getEmployeeInitial(name)}
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 id={headingId} className="truncate font-semibold">
+              {name}
+            </h3>
+            <p
+              className="mt-1 break-all text-xs text-muted-foreground"
+              dir="ltr"
+            >
+              {invitation.email}
+            </p>
+          </div>
+          <Badge variant="secondary" className="shrink-0">
+            {t("roles.employee")}
+          </Badge>
+        </div>
+
+        <dl className="grid grid-cols-1 gap-3 rounded-lg bg-muted/40 p-3 text-sm min-[360px]:grid-cols-2">
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">
+              {t("employees_page.employee_number")}
+            </dt>
+            <dd className="mt-1 truncate font-medium" dir="auto">
+              {invitation.employeeNumber}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">
+              {t("employees_page.job_title")}
+            </dt>
+            <dd className="mt-1 truncate font-medium" dir="auto">
+              {jobTitle}
+            </dd>
+          </div>
+          {facilityLabel && (
+            <div className="min-w-0 min-[360px]:col-span-2">
+              <dt className="text-xs text-muted-foreground">
+                {t("employees_page.facility")}
+              </dt>
+              <dd className="mt-1 truncate font-medium" dir="auto">
+                {facilityLabel}
+              </dd>
+            </div>
+          )}
+          <div className="min-w-0 min-[360px]:col-span-2">
+            <dt className="text-xs text-muted-foreground">
+              {t("employees_page.invitation_expires")}
+            </dt>
+            <dd className="mt-1 font-medium">
+              <time dateTime={invitation.expiresAt}>
+                {formatInvitationDate(invitation.expiresAt, isRTL)}
+              </time>
+            </dd>
+          </div>
+        </dl>
+
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onRevoke}
+          className="mt-auto min-h-11 w-full gap-2 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+          aria-label={`${t("employees_page.revoke_invitation")}: ${name}`}
+        >
+          <MailX className="h-4 w-4" aria-hidden="true" />
+          {t("employees_page.revoke_invitation")}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatInvitationDate(value: string, isRTL: boolean): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat(isRTL ? "ar-SA" : "en-SA", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 function EmployeeMobileCard({ employee, isRTL, t }: EmployeeItemProps) {
@@ -992,13 +1609,15 @@ function EmployeeFormField({
   onChange,
   type = "text",
   dir,
+  required = true,
 }: {
   id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
-  type?: "text" | "email";
+  type?: "text" | "email" | "tel";
   dir: "rtl" | "ltr";
+  required?: boolean;
 }) {
   return (
     <div className="space-y-2">
@@ -1006,7 +1625,7 @@ function EmployeeFormField({
       <Input
         id={id}
         type={type}
-        required
+        required={required}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         dir={dir}
@@ -1029,6 +1648,7 @@ function createEmptyEmployeeForm(facilityId?: number): EmployeeAccountForm {
     jobTitle: "",
     jobTitleAr: "",
     employeeNumber: "",
+    phone: "",
   };
 }
 

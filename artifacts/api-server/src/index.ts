@@ -3,6 +3,7 @@ import { pool } from "@workspace/db";
 import { logger } from "./lib/logger";
 import { safeErrorLogFields } from "./lib/safeError";
 import { startEmailScheduler } from "./lib/email/scheduler";
+import { startEmployeeInvitationCleanup } from "./lib/employeeInvitationCleanup";
 import { resolveBindHost } from "./lib/bindHost";
 import {
   readDatabaseRoleBoundaryConfig,
@@ -37,4 +38,5 @@ app.listen(port, bindHost, (err) => {
 
   logger.info({ port, bindHost }, "Server listening");
   startEmailScheduler();
+  startEmployeeInvitationCleanup();
 });

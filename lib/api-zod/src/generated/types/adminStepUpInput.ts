@@ -7,8 +7,16 @@
  */
 
 export interface AdminStepUpInput {
-  /** Current password of the authenticated administrator. */
+  /**
+     * Current password of the authenticated administrator.
+     * @minLength 1
+     * @maxLength 1024
+     */
   currentPassword: string;
-  /** Single-use TOTP or backup code for administrator step-up verification. */
+  /**
+     * Single-use TOTP or backup code for administrator step-up verification.
+     * @minLength 1
+     * @maxLength 128
+     */
   code: string;
 }

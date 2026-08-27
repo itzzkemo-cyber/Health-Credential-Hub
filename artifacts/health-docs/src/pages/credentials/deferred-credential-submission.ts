@@ -35,6 +35,7 @@ export class CredentialSubmissionError extends Error {
 
 export interface DeferredCredentialSubmissionOptions<TResult> {
   file: File | null;
+  existingUpload?: UploadedCredentialFile;
   prepareFile: (file: File) => Promise<PreparedCredentialFile>;
   requestUpload: (
     file: File,
@@ -70,9 +71,11 @@ export function releaseCredentialSubmission(
 }
 
 export function getUnlinkedUploadId(objectPath: string): string | null {
-  return /^\/objects\/uploads\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(
-    objectPath,
-  )?.[1] ?? null;
+  return (
+    /^\/objects\/uploads\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(
+      objectPath,
+    )?.[1] ?? null
+  );
 }
 
 /**
@@ -83,6 +86,7 @@ export function getUnlinkedUploadId(objectPath: string): string | null {
  */
 export async function submitCredentialWithDeferredUpload<TResult>({
   file,
+  existingUpload,
   prepareFile,
   requestUpload,
   putUpload,
@@ -90,12 +94,12 @@ export async function submitCredentialWithDeferredUpload<TResult>({
   cleanupUpload,
   onStage,
 }: DeferredCredentialSubmissionOptions<TResult>): Promise<TResult> {
-  let objectPath: string | undefined;
-  let uploadedFile: UploadedCredentialFile | undefined;
+  let objectPath = existingUpload?.objectPath;
+  let uploadedFile = existingUpload;
   let failedStage: Exclude<CredentialSubmissionStage, "cleanup"> = "create";
 
   try {
-    if (file) {
+    if (file && !uploadedFile) {
       failedStage = "upload";
       onStage?.("upload");
       const prepared = await prepareFile(file);

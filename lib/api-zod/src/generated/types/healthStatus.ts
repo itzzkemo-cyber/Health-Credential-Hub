@@ -5,7 +5,11 @@
  * HealthDocs - Healthcare Credential Management Platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { HealthStatusEmailDelivery } from './healthStatusEmailDelivery';
+import type { HealthStatusOcr } from './healthStatusOcr';
 
 export interface HealthStatus {
   status: string;
+  emailDelivery?: HealthStatusEmailDelivery;
+  ocr?: HealthStatusOcr;
 }

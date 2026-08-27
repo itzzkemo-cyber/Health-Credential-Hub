@@ -6,10 +6,14 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ReadinessStatusDocumentUploads } from './readinessStatusDocumentUploads';
+import type { ReadinessStatusEmailDelivery } from './readinessStatusEmailDelivery';
+import type { ReadinessStatusOcr } from './readinessStatusOcr';
 
 export interface ReadinessStatus {
   status: string;
   database: string;
   objectStorage: string;
   documentUploads: ReadinessStatusDocumentUploads;
+  emailDelivery: ReadinessStatusEmailDelivery;
+  ocr: ReadinessStatusOcr;
 }

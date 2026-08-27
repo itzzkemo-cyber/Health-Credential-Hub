@@ -7,6 +7,7 @@
  */
 
 export interface DuplicateCheckInput {
+  /** @minimum 1 */
   employeeId: number;
   type: string;
   certificateNumber: string;

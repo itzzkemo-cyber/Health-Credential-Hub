@@ -12,14 +12,14 @@ Every enabled integration below must use the reviewed production controls.
 
 ## Status at a glance
 
-| Integration                        | Implemented in the repository                                                                                                          | Provisioned by supplied infrastructure                                                                                                                                                                                  | Production status                                                                                                                                                                                                                                                                                                     |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Supabase private Storage (S3 API)  | Server-mediated JPEG/PNG intake with bounded ingress, server-side decode/rebuild to a metadata-free JPEG, private reads, and application ACL checks. | The operator configures the existing private bucket and injects server-only S3 keys into Render. | **Controlled pilot only.** Original bytes are never persisted and PDF/general files are blocked. Image rewriting is not general malware scanning; Frankfurt transfer, free-tier SLA, backup, retention, orphan cleanup, and incident controls remain approval gates. |
-| Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                   | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | **No-go for real documents in this release.** Signed direct PUT has no provider-ingress byte cap and no malware quarantine. Keep synthetic-only until bounded ingress, AV/quarantine, orphan cleanup, and restore drills are accepted.                                                                                |
-| Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.         | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | **No-go for real documents in this release.** Keep disabled until the same bounded-ingress, AV/quarantine, lifecycle, tenancy, IAM/CORS, and synthetic restore gates pass.                                                                                                                                            |
-| Gemini OCR                         | Authenticated users can send an authorized stored file to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields. | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                        |
-| Resend email                       | Password resets, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API.                                 | No. The bootstrap explicitly deploys with email disabled and does not create the Resend secret.                                                                                                                         | Optional and fail-closed until an operator enables it. Subprocessor approval, data-region/retention confirmation, bounce handling, and delivery reconciliation remain required.                                                                                                                                       |
-| Signed automation webhook          | A PostgreSQL transactional outbox and optional HMAC-signed worker emit three minimized credential lifecycle events.                    | Partly. The bootstrap provisions or updates an inert one-shot Cloud Run Job, dedicated worker/scheduler identities, a regional HMAC secret, and a paused five-minute Scheduler job. It does not provision the receiver. | Disabled by default. Supports explicit facility routing, exact-host/public-IP enforcement, idempotency, bounded timeout, retry/backoff, stale-claim recovery, dead-letter retention, and no document/token fields. The recipient remains an operator-approved subprocessor and must verify signatures/replay windows. |
+| Integration                        | Implemented in the repository                                                                                                                        | Provisioned by supplied infrastructure                                                                                                                                                                                  | Production status                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Supabase private Storage (S3 API)  | Server-mediated JPEG/PNG intake with bounded ingress, server-side decode/rebuild to a metadata-free JPEG, private reads, and application ACL checks. | The operator configures the existing private bucket and injects server-only S3 keys into Render.                                                                                                                        | **Controlled pilot only.** Original bytes are never persisted and PDF/general files are blocked. Image rewriting is not general malware scanning; Frankfurt transfer, free-tier SLA, backup, retention, orphan cleanup, and incident controls remain approval gates.                                                  |
+| Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                                 | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | **No-go for real documents in this release.** Signed direct PUT has no provider-ingress byte cap and no malware quarantine. Keep synthetic-only until bounded ingress, AV/quarantine, orphan cleanup, and restore drills are accepted.                                                                                |
+| Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.                       | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | **No-go for real documents in this release.** Keep disabled until the same bounded-ingress, AV/quarantine, lifecycle, tenancy, IAM/CORS, and synthetic restore gates pass.                                                                                                                                            |
+| Gemini OCR                         | Authenticated users can send an authorized stored file to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields.               | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                        |
+| Resend email                       | Password resets, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API.                                               | No. The bootstrap explicitly deploys with email disabled and does not create the Resend secret.                                                                                                                         | Optional and fail-closed until an operator enables it. Subprocessor approval, data-region/retention confirmation, bounce handling, and delivery reconciliation remain required.                                                                                                                                       |
+| Signed automation webhook          | A PostgreSQL transactional outbox and optional HMAC-signed worker emit three minimized credential lifecycle events.                                  | Partly. The bootstrap provisions or updates an inert one-shot Cloud Run Job, dedicated worker/scheduler identities, a regional HMAC secret, and a paused five-minute Scheduler job. It does not provision the receiver. | Disabled by default. Supports explicit facility routing, exact-host/public-IP enforcement, idempotency, bounded timeout, retry/backoff, stale-claim recovery, dead-letter retention, and no document/token fields. The recipient remains an operator-approved subprocessor and must verify signatures/replay windows. |
 
 "Implemented" does not mean that the provider has been enabled in a deployed
 environment. No FHIR, HL7, SMART on FHIR, regulator API, or other health-data
@@ -229,19 +229,27 @@ no-store, max-age=0`; only explicitly public objects may use cacheable
 
 ### Current data flow
 
-1. An authenticated user submits only an internal `/objects/...` path to
-   `POST /api/credentials/ocr`.
-2. The API resolves the private object from the configured provider, requires either the caller's active
+1. OCR remains unavailable unless `OCR_ENABLED=true`, the target employee's
+   facility is in `OCR_FACILITY_ALLOWLIST`, and the HTTPS processor hostname is
+   an exact member of `OCR_PROVIDER_HOST_ALLOWLIST`. The authenticated
+   `/credentials/ocr/readiness` response applies the same facility scope before
+   the web UI offers document reading.
+2. After selecting a photo, the user must explicitly choose **Read document**.
+   The browser applies the existing image preparation, uploads the result to
+   private storage, and submits only the internal `/objects/...` path and the
+   in-scope employee ID to `POST /api/credentials/ocr`.
+3. The API resolves the private object from the configured provider, requires either the caller's active
    upload grant or an existing owner/scoped-manager ACL decision, validates its
    actual MIME type and maximum 8 MiB size, and downloads the bytes privately.
-3. The API Base64-encodes the entire document and sends it inline with an
+4. The API Base64-encodes the entire document and sends it inline with an
    extraction prompt to the configured Gemini-compatible base URL, using model
    `gemini-2.5-flash`. The prompt requests document type, holder names, issuer
    names, certificate number, issue/expiry dates, and per-field confidence.
-4. The API parses the provider JSON, constrains types/dates/confidence, records
+5. The API parses the provider JSON, constrains types/dates/confidence, records
    an audit event that AI extraction was used, and returns extracted values to
-   the browser for human review. The user must still save/correct credential
-   fields through the normal application flow.
+   a review card in the browser. No value is copied until the user chooses
+   **Apply reviewed suggestions**, and OCR never saves or verifies a credential.
+   The user must still correct fields and submit the normal application form.
 
 The external request contains the full credential image/PDF, which can expose
 names, identifiers, license/certificate numbers, dates, photographs, and
@@ -251,8 +259,10 @@ there is no redaction or page selection before transmission.
 
 ### Destination, region, credentials, and retention
 
-- The destination is whatever operator-configured
-  `AI_INTEGRATIONS_GEMINI_BASE_URL` resolves to. The repository does not pin or
+- The destination is the operator-configured
+  `AI_INTEGRATIONS_GEMINI_BASE_URL`, but the runtime requires HTTPS with no URL
+  credentials/query/fragment and an exact hostname match in
+  `OCR_PROVIDER_HOST_ALLOWLIST`. The repository does not pin or
   attest a Google Cloud project, Vertex AI location, or Saudi processing region
   for OCR. `me-central2` storage does not imply that Gemini processing remains
   in Dammam.
@@ -278,8 +288,10 @@ there is no redaction or page selection before transmission.
   most two attempts. There is no application idempotency key, durable retry
   ledger, or documented SDK backoff classification. A retry or repeated OCR
   call can create another billed provider request.
-- A missing endpoint/key, provider error, invalid provider JSON, or other
-  extraction failure returns HTTP 502 and does not silently fabricate values.
+- A disabled facility returns HTTP 503 before object storage or the provider is
+  touched. A missing/invalid configuration fails operational readiness. A
+  provider error, invalid provider JSON, or other extraction failure returns
+  HTTP 502 and does not silently fabricate or change form values.
   The uploaded GCS object may still remain and requires normal cleanup/retention.
 - Production must establish provider quotas and spend alerts, validate that
   retries are limited to safe transient failures with jitter and a retry
@@ -292,14 +304,19 @@ there is no redaction or page selection before transmission.
 
 ### Operator setup
 
-1. Keep both Gemini variables absent until legal/privacy/security approval is
-   recorded for the exact endpoint and product.
+1. Keep `OCR_ENABLED=false` and both Gemini variables absent until
+   legal/privacy/security approval is recorded for the exact paid/private
+   endpoint and product. Do not use a free/unpaid processor for real workforce
+   documents.
 2. Choose and document the processing region, data residency limits, retention,
    model-use terms, quota, and escalation owner. A generic API key plus base URL
    is not sufficient evidence of residency.
-3. Add the approved secret through Secret Manager; never place it in `.env`,
+3. Set exact positive facility IDs in `OCR_FACILITY_ALLOWLIST`, the exact
+   approved destination hostname in `OCR_PROVIDER_HOST_ALLOWLIST`, then add the
+   approved secret through Secret Manager; never place it in `.env`,
    logs, source control, screenshots, or support tickets.
-4. Test missing configuration, permission denial, timeout, 429, 5xx, malformed
+4. Set `OCR_ENABLED=true` only after readiness and facility tests pass. Test
+   missing configuration, permission denial, timeout, 429, 5xx, malformed
    JSON, oversized/unsupported files, cross-scope object paths, and provider
    outage. Confirm that the UI leaves fields reviewable and never treats OCR as
    authoritative verification.
@@ -310,12 +327,16 @@ there is no redaction or page selection before transmission.
 
 The API sends HTTPS POST requests to `https://api.resend.com/emails` containing
 the configured sender, recipient email address, bilingual subject, and HTML
-body. Three message types are relevant:
+body. Four message types are relevant:
 
 - Password reset: recipient address, recipient Arabic/English names, and a raw
   single-use reset link valid for one hour. Only the SHA-256 token hash is kept
   in PostgreSQL, but the raw token necessarily crosses Resend and downstream
   mail infrastructure inside the email.
+- Employee invitation: recipient address, invited employee Arabic/English
+  names, and a raw single-use registration link valid for 24 hours. Only the
+  SHA-256 token hash is stored. The accepting browser supplies only the token
+  and a new password; role and organization fields remain server-authoritative.
 - Expiry alert: recipient address, credential type label, expiry date, status,
   and days remaining/overdue. It does not attach the credential document.
 - Weekly manager digest: manager address/name, team-member Arabic/English names,
@@ -343,18 +364,33 @@ this ledger.
 - Neither provider retention nor an application retention/deletion schedule for
   `email_log` and expired password-reset-token rows is implemented here. Define
   both, including security-log exceptions and deletion evidence.
+- Employee-invitation rows contain workforce profile and organization data.
+  Every API process starts a bounded hourly cleanup with a process-local
+  overlap guard. It deletes at most 200 rows per run once expiry, revocation, or
+  acceptance is at least 30 days old. The cleanup selects and logs no recipient
+  or token data; durable audit events remain separate. Operators must monitor
+  backlog and retain deletion evidence because this application schedule does
+  not define Resend's provider-side retention.
 
 ### Resilience, quotas, and failure behavior
 
-- Each provider call has a 30-second timeout and no automatic retry. Expiry and
+- Each provider call has a 30-second timeout. One bounded retry is made for a
+  network failure, HTTP 429, or HTTP 500/502/503/504, using the same hashed
+  Resend idempotency key so an ambiguous first acceptance cannot create a
+  duplicate within the provider's idempotency window. Expiry and
   digest delivery uses a database claim-first ledger: unique indexes allow only
   one attempt per notification and one digest per manager/week across
   concurrent dispatchers.
+- Employee-invitation delivery is fail-closed. If Resend delivery fails, the
+  active invitation is revoked and the revocation audit event is committed in
+  the same database transaction. If audit persistence itself fails, the API
+  makes a direct fallback revocation and emits only an invitation ID in its
+  operational error signal; it never logs the recipient or raw token.
 - Configuration/authorization failures (including HTTP 401/403) release the
   claim so the message stays pending after configuration is repaired. Other
   provider errors are recorded as failed and are not retried. An ambiguous
-  timeout after Resend accepted a message can therefore be marked failed; no
-  provider idempotency key or delivery-status reconciliation/webhook exists.
+  timeout after both idempotent attempts can still be marked failed; no
+  delivery-status reconciliation/webhook exists.
 - The scheduler runs hourly inside the API process, processes at most 200
   pending alerts per query, sends sequentially, and uses an in-process overlap
   guard. It is not a durable queue. The bootstrap's one-instance cap avoids some
@@ -365,10 +401,9 @@ this ledger.
 - Production needs a durable job/queue strategy, documented retry classes and
   dead-letter/manual replay procedure, provider idempotency/reconciliation where
   available, bounce/complaint/suppression processing, and quota/backlog alerts.
-- Provider response text can enter stored error text and error objects plus
-  recipient addresses enter logs on send failure. Review this against the
-  logging policy; sanitize provider details and avoid logging addresses or any
-  message/reset-token content.
+- Provider response bodies, recipient addresses, message bodies, reset URLs,
+  and idempotency keys are not written to application logs or stored failure
+  text. Stored failures are limited to a bounded error name/code class.
 
 ### Operator setup
 
@@ -378,8 +413,17 @@ this ledger.
    service account, set `EMAIL_FROM`, and only then set
    `EMAIL_ALERTS_DISABLED=0`.
 3. Ensure `PUBLIC_APP_URL` is the canonical HTTPS origin before password-reset
-   mail is enabled.
-4. Test fixture suppression, inactive users, 401/403 recovery, timeout/429/5xx,
+   mail is enabled. The API readiness check reports `emailDelivery` as
+   `disabled` or `configured`, and returns 503 with `misconfigured` when an
+   invalid opt-in is attempted; it never exposes the sender or key.
+4. Disable Resend click and open tracking for the sender domain. Password reset
+   bearer tokens are kept in URL fragments so they do not enter HTTP request
+   logs, but link-rewriting/tracking must remain off.
+5. Configure bounce/complaint monitoring and a suppression/manual-review
+   procedure in Resend. The application does not yet accept a Resend webhook;
+   do not add one without signature verification, replay protection, and a
+   documented retention policy.
+6. Test fixture suppression, inactive users, 401/403 recovery, timeout/429/5xx,
    duplicate scheduler execution, backlog catch-up, reset-token expiry and
    single use, bounce/complaint response, and log redaction.
 

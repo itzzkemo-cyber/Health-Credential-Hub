@@ -20,6 +20,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AcceptEmployeeInvitationInput,
   ActivityItem,
   AdminStepUpInput,
   AuditLogListResponse,
@@ -28,6 +29,7 @@ import type {
   ChangePasswordInput,
   ChangePasswordResult,
   ComplianceReport,
+  CreateEmployeeInvitationInput,
   Credential,
   CredentialInput,
   CredentialListResponse,
@@ -46,24 +48,32 @@ import type {
   Employee,
   EmployeeDetail,
   EmployeeInput,
+  EmployeeInvitation,
+  EmployeeInvitationAccepted,
+  EmployeeInvitationCreated,
   EmployeeUpdate,
   EmployeeWithStats,
   ErrorEnvelope,
   FacilityOption,
   ForgotPasswordInput,
   GetComplianceReportParams,
+  GetCredentialOcrReadinessParams,
   GetExpiringCredentialsParams,
   GetMissingCredentialsParams,
   HealthStatus,
+  InvitationError,
   ListAuditLogsParams,
   ListCredentialsParams,
   ListDepartmentsParams,
+  ListEmployeeInvitationsParams,
   ListEmployeesParams,
   ListNotificationsParams,
   LoginInput,
+  MessageEnvelope,
   MissingCredential,
   Notification,
   OcrInput,
+  OcrReadiness,
   OcrResult,
   ReadinessStatus,
   ResetPasswordInput,
@@ -1007,6 +1017,78 @@ export const useResetPassword = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getResetPasswordMutationOptions(options));
+    }
+
+export const getAcceptEmployeeInvitationUrl = () => {
+
+
+
+
+  return `/api/auth/accept-invitation`
+}
+
+/**
+ * Public invite-acceptance endpoint. The bearer token and employee-chosen password are the only accepted fields. Organization scope and profile data come from the administrator-issued invitation. A successful activation does not create a browser session; the employee signs in through the normal login flow.
+ * @summary Activate an employee account from a single-use invitation
+ */
+export const acceptEmployeeInvitation = async (acceptEmployeeInvitationInput: AcceptEmployeeInvitationInput, options?: Parameters<typeof customFetch>[1]): Promise<EmployeeInvitationAccepted> => {
+
+  return customFetch<EmployeeInvitationAccepted>(getAcceptEmployeeInvitationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(acceptEmployeeInvitationInput)
+  }
+);}
+
+
+
+
+
+export const getAcceptEmployeeInvitationMutationOptions = <TError = ErrorType<InvitationError | void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptEmployeeInvitation>>, TError,{data: BodyType<AcceptEmployeeInvitationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof acceptEmployeeInvitation>>, TError,{data: BodyType<AcceptEmployeeInvitationInput>}, TContext> => {
+
+const mutationKey = ['acceptEmployeeInvitation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof acceptEmployeeInvitation>>, {data: BodyType<AcceptEmployeeInvitationInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  acceptEmployeeInvitation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AcceptEmployeeInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof acceptEmployeeInvitation>>>
+    export type AcceptEmployeeInvitationMutationBody = BodyType<AcceptEmployeeInvitationInput>
+    export type AcceptEmployeeInvitationMutationError = ErrorType<InvitationError | void>
+
+    /**
+ * @summary Activate an employee account from a single-use invitation
+ */
+export const useAcceptEmployeeInvitation = <TError = ErrorType<InvitationError | void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptEmployeeInvitation>>, TError,{data: BodyType<AcceptEmployeeInvitationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof acceptEmployeeInvitation>>,
+        TError,
+        {data: BodyType<AcceptEmployeeInvitationInput>},
+        TContext
+      > => {
+      return useMutation(getAcceptEmployeeInvitationMutationOptions(options));
     }
 
 export const getTotpSetupUrl = () => {
@@ -1989,6 +2071,90 @@ export function useGetMissingCredentials<TData = Awaited<ReturnType<typeof getMi
 
 
 
+export const getGetCredentialOcrReadinessUrl = (params?: GetCredentialOcrReadinessParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/credentials/ocr/readiness?${stringifiedParams}` : `/api/credentials/ocr/readiness`
+}
+
+/**
+ * @summary Check reviewed OCR availability for an in-scope employee facility
+ */
+export const getCredentialOcrReadiness = async (params?: GetCredentialOcrReadinessParams, options?: Parameters<typeof customFetch>[1]): Promise<OcrReadiness> => {
+
+  return customFetch<OcrReadiness>(getGetCredentialOcrReadinessUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetCredentialOcrReadinessQueryKey = (params?: GetCredentialOcrReadinessParams,) => {
+    return [
+    `/api/credentials/ocr/readiness`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetCredentialOcrReadinessQueryOptions = <TData = Awaited<ReturnType<typeof getCredentialOcrReadiness>>, TError = ErrorType<void>>(params?: GetCredentialOcrReadinessParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCredentialOcrReadiness>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetCredentialOcrReadinessQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getCredentialOcrReadiness>>> = ({ signal }) => getCredentialOcrReadiness(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getCredentialOcrReadiness>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetCredentialOcrReadinessQueryResult = NonNullable<Awaited<ReturnType<typeof getCredentialOcrReadiness>>>
+export type GetCredentialOcrReadinessQueryError = ErrorType<void>
+
+
+/**
+ * @summary Check reviewed OCR availability for an in-scope employee facility
+ */
+
+export function useGetCredentialOcrReadiness<TData = Awaited<ReturnType<typeof getCredentialOcrReadiness>>, TError = ErrorType<void>>(
+ params?: GetCredentialOcrReadinessParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getCredentialOcrReadiness>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetCredentialOcrReadinessQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getExtractCredentialOcrUrl = () => {
 
 
@@ -2015,7 +2181,7 @@ export const extractCredentialOcr = async (ocrInput: OcrInput, options?: Paramet
 
 
 
-export const getExtractCredentialOcrMutationOptions = <TError = ErrorType<unknown>,
+export const getExtractCredentialOcrMutationOptions = <TError = ErrorType<MessageEnvelope>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof extractCredentialOcr>>, TError,{data: BodyType<OcrInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof extractCredentialOcr>>, TError,{data: BodyType<OcrInput>}, TContext> => {
 
@@ -2044,12 +2210,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ExtractCredentialOcrMutationResult = NonNullable<Awaited<ReturnType<typeof extractCredentialOcr>>>
     export type ExtractCredentialOcrMutationBody = BodyType<OcrInput>
-    export type ExtractCredentialOcrMutationError = ErrorType<unknown>
+    export type ExtractCredentialOcrMutationError = ErrorType<MessageEnvelope>
 
     /**
  * @summary Extract credential data from the uploaded document using AI vision
  */
-export const useExtractCredentialOcr = <TError = ErrorType<unknown>,
+export const useExtractCredentialOcr = <TError = ErrorType<MessageEnvelope>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof extractCredentialOcr>>, TError,{data: BodyType<OcrInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof extractCredentialOcr>>,
@@ -2581,6 +2747,236 @@ export const useCreateEmployee = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateEmployeeMutationOptions(options));
+    }
+
+export const getListEmployeeInvitationsUrl = (params?: ListEmployeeInvitationsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/employees/invitations?${stringifiedParams}` : `/api/employees/invitations`
+}
+
+/**
+ * Hospital administrators receive only active invitations in their own facility. System administrators may receive all active invitations or filter by facility. Results are capped at 200 and never include the stored token digest.
+ * @summary List active employee invitations in administrator scope
+ */
+export const listEmployeeInvitations = async (params?: ListEmployeeInvitationsParams, options?: Parameters<typeof customFetch>[1]): Promise<EmployeeInvitation[]> => {
+
+  return customFetch<EmployeeInvitation[]>(getListEmployeeInvitationsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListEmployeeInvitationsQueryKey = (params?: ListEmployeeInvitationsParams,) => {
+    return [
+    `/api/employees/invitations`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListEmployeeInvitationsQueryOptions = <TData = Awaited<ReturnType<typeof listEmployeeInvitations>>, TError = ErrorType<void>>(params?: ListEmployeeInvitationsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listEmployeeInvitations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListEmployeeInvitationsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listEmployeeInvitations>>> = ({ signal }) => listEmployeeInvitations(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listEmployeeInvitations>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListEmployeeInvitationsQueryResult = NonNullable<Awaited<ReturnType<typeof listEmployeeInvitations>>>
+export type ListEmployeeInvitationsQueryError = ErrorType<void>
+
+
+/**
+ * @summary List active employee invitations in administrator scope
+ */
+
+export function useListEmployeeInvitations<TData = Awaited<ReturnType<typeof listEmployeeInvitations>>, TError = ErrorType<void>>(
+ params?: ListEmployeeInvitationsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listEmployeeInvitations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListEmployeeInvitationsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateEmployeeInvitationUrl = () => {
+
+
+
+
+  return `/api/employees/invitations`
+}
+
+/**
+ * Hospital and system administrators only. The server hardcodes the role to employee, derives and validates tenant scope, consumes a fresh password plus TOTP/backup-code step-up, stores only a SHA-256 token digest, and emails a 24-hour single-use link. The raw token is never returned.
+ * @summary Send a single-use employee registration invitation
+ */
+export const createEmployeeInvitation = async (createEmployeeInvitationInput: CreateEmployeeInvitationInput, options?: Parameters<typeof customFetch>[1]): Promise<EmployeeInvitationCreated> => {
+
+  return customFetch<EmployeeInvitationCreated>(getCreateEmployeeInvitationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createEmployeeInvitationInput)
+  }
+);}
+
+
+
+
+
+export const getCreateEmployeeInvitationMutationOptions = <TError = ErrorType<void | InvitationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createEmployeeInvitation>>, TError,{data: BodyType<CreateEmployeeInvitationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createEmployeeInvitation>>, TError,{data: BodyType<CreateEmployeeInvitationInput>}, TContext> => {
+
+const mutationKey = ['createEmployeeInvitation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createEmployeeInvitation>>, {data: BodyType<CreateEmployeeInvitationInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createEmployeeInvitation(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateEmployeeInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof createEmployeeInvitation>>>
+    export type CreateEmployeeInvitationMutationBody = BodyType<CreateEmployeeInvitationInput>
+    export type CreateEmployeeInvitationMutationError = ErrorType<void | InvitationError>
+
+    /**
+ * @summary Send a single-use employee registration invitation
+ */
+export const useCreateEmployeeInvitation = <TError = ErrorType<void | InvitationError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createEmployeeInvitation>>, TError,{data: BodyType<CreateEmployeeInvitationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createEmployeeInvitation>>,
+        TError,
+        {data: BodyType<CreateEmployeeInvitationInput>},
+        TContext
+      > => {
+      return useMutation(getCreateEmployeeInvitationMutationOptions(options));
+    }
+
+export const getRevokeEmployeeInvitationUrl = (id: number,) => {
+
+
+
+
+  return `/api/employees/invitations/${id}`
+}
+
+/**
+ * Hospital and system administrators only. Revalidates tenant scope and consumes a fresh current-password plus TOTP/backup-code step-up while holding row locks. Missing, expired, consumed, revoked, and out-of-scope invitations share the same not-found response.
+ * @summary Revoke an active employee invitation
+ */
+export const revokeEmployeeInvitation = async (id: number,
+    adminStepUpInput: AdminStepUpInput, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getRevokeEmployeeInvitationUrl(id),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(adminStepUpInput)
+  }
+);}
+
+
+
+
+
+export const getRevokeEmployeeInvitationMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeEmployeeInvitation>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof revokeEmployeeInvitation>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext> => {
+
+const mutationKey = ['revokeEmployeeInvitation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revokeEmployeeInvitation>>, {id: number;data: BodyType<AdminStepUpInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  revokeEmployeeInvitation(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RevokeEmployeeInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof revokeEmployeeInvitation>>>
+    export type RevokeEmployeeInvitationMutationBody = BodyType<AdminStepUpInput>
+    export type RevokeEmployeeInvitationMutationError = ErrorType<void>
+
+    /**
+ * @summary Revoke an active employee invitation
+ */
+export const useRevokeEmployeeInvitation = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeEmployeeInvitation>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof revokeEmployeeInvitation>>,
+        TError,
+        {id: number;data: BodyType<AdminStepUpInput>},
+        TContext
+      > => {
+      return useMutation(getRevokeEmployeeInvitationMutationOptions(options));
     }
 
 export const getGetEmployeeUrl = (id: number,) => {
