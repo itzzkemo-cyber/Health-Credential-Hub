@@ -48,14 +48,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
   Dialog,
@@ -82,6 +80,7 @@ import { getDepartmentQueryParams } from "./department-query";
 import {
   ADMIN_MFA_CODE_FIELD,
   ADMIN_MFA_CURRENT_PASSWORD_FIELD,
+  getAccountStateStepUpErrorKey,
   getAdminMfaDisableErrorKey,
   getAdminMfaStepUpErrorKey,
   readAdminMfaStepUpCredentials,
@@ -89,6 +88,7 @@ import {
 } from "./admin-mfa-step-up";
 
 const ADMIN_ROLES = ["hospital_admin", "system_admin"];
+type AccountStateAction = "activate" | "deactivate";
 
 function apiErrorCode(error: unknown): string | undefined {
   return error instanceof ApiError
@@ -113,6 +113,14 @@ export default function EmployeeDetail() {
   const [editFeedbackKey, setEditFeedbackKey] = useState<string | null>(null);
   const editStepUpPasswordRef = useRef<HTMLInputElement>(null);
   const editStepUpCodeRef = useRef<HTMLInputElement>(null);
+  const [accountStateAction, setAccountStateAction] =
+    useState<AccountStateAction | null>(null);
+  const [accountStateFeedbackKey, setAccountStateFeedbackKey] = useState<
+    string | null
+  >(null);
+  const accountStateFormRef = useRef<HTMLFormElement>(null);
+  const accountStatePasswordRef = useRef<HTMLInputElement>(null);
+  const accountStateTriggerRef = useRef<HTMLButtonElement>(null);
   const [isAdminDisableOpen, setIsAdminDisableOpen] = useState(false);
   const adminDisableFormRef = useRef<HTMLFormElement>(null);
   const adminDisablePasswordRef = useRef<HTMLInputElement>(null);
@@ -142,8 +150,10 @@ export default function EmployeeDetail() {
     },
   });
   const updateEmployee = useUpdateEmployee({ mutation: { gcTime: 0 } });
-  const activateEmployee = useActivateEmployee();
-  const deactivateEmployee = useDeactivateEmployee();
+  const activateEmployee = useActivateEmployee({ mutation: { gcTime: 0 } });
+  const deactivateEmployee = useDeactivateEmployee({
+    mutation: { gcTime: 0 },
+  });
   const adminDisableMutation = useTotpAdminDisable({
     mutation: { gcTime: 0 },
   });
@@ -263,23 +273,79 @@ export default function EmployeeDetail() {
     );
   };
 
-  const handleAccountStateChange = () => {
-    if (!emp || !canChangeActivation) return;
-    const mutation = emp.isActive ? deactivateEmployee : activateEmployee;
+  const clearAccountStateSecrets = () => {
+    accountStateFormRef.current?.reset();
+    activateEmployee.reset();
+    deactivateEmployee.reset();
+  };
+
+  const openAccountStateDialog = (action: AccountStateAction) => {
+    clearAccountStateSecrets();
+    setAccountStateFeedbackKey(null);
+    setAccountStateAction(action);
+  };
+
+  const closeAccountStateDialog = () => {
+    if (activateEmployee.isPending || deactivateEmployee.isPending) return;
+    clearAccountStateSecrets();
+    setAccountStateFeedbackKey(null);
+    setAccountStateAction(null);
+  };
+
+  const handleAccountStateChange = (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+    if (
+      !emp ||
+      !canChangeActivation ||
+      !accountStateAction ||
+      activateEmployee.isPending ||
+      deactivateEmployee.isPending
+    ) {
+      return;
+    }
+
+    const credentials = readAdminMfaStepUpCredentials(
+      new FormData(event.currentTarget),
+    );
+    if (!credentials) {
+      setAccountStateFeedbackKey("employees_page.step_up_required");
+      accountStatePasswordRef.current?.focus();
+      return;
+    }
+
+    setAccountStateFeedbackKey(null);
+    const action = accountStateAction;
+    const mutation =
+      action === "deactivate" ? deactivateEmployee : activateEmployee;
     mutation.mutate(
-      { id: emp.id },
+      { id: emp.id, data: credentials },
       {
         onSuccess: async () => {
+          clearAccountStateSecrets();
+          setAccountStateFeedbackKey(null);
+          setAccountStateAction(null);
           await invalidateEmployeeQueries();
           toast.success(
             t(
-              emp.isActive
+              action === "deactivate"
                 ? "employees_page.deactivate_success"
                 : "employees_page.activate_success",
             ),
           );
         },
-        onError: () => toast.error(t("employees_page.account_state_failed")),
+        onError: (error) => {
+          const errorKey = getAccountStateStepUpErrorKey(
+            apiErrorCode(error),
+            error instanceof ApiError ? error.status : undefined,
+          );
+          clearAccountStateSecrets();
+          setAccountStateFeedbackKey(errorKey);
+          requestAnimationFrame(() =>
+            accountStatePasswordRef.current?.focus(),
+          );
+        },
       },
     );
   };
@@ -391,61 +457,167 @@ export default function EmployeeDetail() {
               {t("employees_page.edit_account")}
             </Button>
             {canChangeActivation && (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    type="button"
-                    variant={emp.isActive ? "destructive" : "default"}
-                    disabled={accountMutationPending}
-                    className="min-h-11 gap-2"
+              <>
+                <Button
+                  ref={accountStateTriggerRef}
+                  type="button"
+                  variant={emp.isActive ? "destructive" : "default"}
+                  disabled={accountMutationPending}
+                  className="min-h-11 gap-2"
+                  onClick={() =>
+                    openAccountStateDialog(
+                      emp.isActive ? "deactivate" : "activate",
+                    )
+                  }
+                >
+                  {accountMutationPending ? (
+                    <Loader2
+                      className="h-4 w-4 animate-spin"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <Power className="h-4 w-4" aria-hidden="true" />
+                  )}
+                  {t(
+                    emp.isActive
+                      ? "employees_page.deactivate_account"
+                      : "employees_page.activate_account",
+                  )}
+                </Button>
+                <AlertDialog
+                  open={accountStateAction !== null}
+                  onOpenChange={(open) => {
+                    if (!open) closeAccountStateDialog();
+                  }}
+                >
+                  <AlertDialogContent
+                    className="max-h-[90dvh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-md"
+                    onOpenAutoFocus={(event) => {
+                      event.preventDefault();
+                      accountStatePasswordRef.current?.focus();
+                    }}
+                    onCloseAutoFocus={(event) => {
+                      event.preventDefault();
+                      accountStateTriggerRef.current?.focus();
+                    }}
                   >
-                    {accountMutationPending ? (
-                      <Loader2
-                        className="h-4 w-4 animate-spin"
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <Power className="h-4 w-4" aria-hidden="true" />
-                    )}
-                    {t(
-                      emp.isActive
-                        ? "employees_page.deactivate_account"
-                        : "employees_page.activate_account",
-                    )}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>
-                      {t(
-                        emp.isActive
-                          ? "employees_page.deactivate_confirm_title"
-                          : "employees_page.activate_confirm_title",
-                      )}
-                    </AlertDialogTitle>
-                    <AlertDialogDescription>
-                      {t(
-                        emp.isActive
-                          ? "employees_page.deactivate_confirm_description"
-                          : "employees_page.activate_confirm_description",
-                      )}
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={handleAccountStateChange}
-                      className={
-                        emp.isActive
-                          ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                          : undefined
-                      }
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>
+                        {t(
+                          accountStateAction === "deactivate"
+                            ? "employees_page.deactivate_confirm_title"
+                            : "employees_page.activate_confirm_title",
+                        )}
+                      </AlertDialogTitle>
+                      <AlertDialogDescription
+                        id="account-state-step-up-description"
+                        className="space-y-2"
+                      >
+                        <span className="block">
+                          {t(
+                            accountStateAction === "deactivate"
+                              ? "employees_page.deactivate_confirm_description"
+                              : "employees_page.activate_confirm_description",
+                          )}
+                        </span>
+                        <span className="block">
+                          {t("employees_page.account_state_step_up_hint")}
+                        </span>
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <form
+                      ref={accountStateFormRef}
+                      onSubmit={handleAccountStateChange}
+                      className="space-y-4"
                     >
-                      {t("common.confirm")}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+                      <div className="space-y-2">
+                        <Label htmlFor="account-state-current-password">
+                          {t("twofa.current_password")}
+                        </Label>
+                        <Input
+                          ref={accountStatePasswordRef}
+                          id="account-state-current-password"
+                          name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
+                          type="password"
+                          dir="ltr"
+                          autoComplete="current-password"
+                          aria-describedby={
+                            accountStateFeedbackKey
+                              ? "account-state-step-up-description account-state-feedback"
+                              : "account-state-step-up-description"
+                          }
+                          required
+                          className="min-h-11"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="account-state-code">
+                          {t("twofa.code_label")}
+                        </Label>
+                        <Input
+                          id="account-state-code"
+                          name={ADMIN_MFA_CODE_FIELD}
+                          type="text"
+                          dir="ltr"
+                          inputMode="text"
+                          autoComplete="one-time-code"
+                          autoCapitalize="characters"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          aria-describedby={
+                            accountStateFeedbackKey
+                              ? "account-state-step-up-description account-state-feedback"
+                              : "account-state-step-up-description"
+                          }
+                          placeholder="123456 / XXXXX-XXXXX"
+                          required
+                          className="min-h-11 font-mono"
+                        />
+                      </div>
+                      {accountStateFeedbackKey && (
+                        <p
+                          id="account-state-feedback"
+                          className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive"
+                          role="alert"
+                        >
+                          {t(accountStateFeedbackKey)}
+                        </p>
+                      )}
+                      <AlertDialogFooter className="gap-2 sm:space-x-0">
+                        <AlertDialogCancel
+                          type="button"
+                          className="min-h-11 w-full sm:w-auto"
+                          disabled={accountMutationPending}
+                        >
+                          {t("common.cancel")}
+                        </AlertDialogCancel>
+                        <Button
+                          type="submit"
+                          variant={
+                            accountStateAction === "deactivate"
+                              ? "destructive"
+                              : "default"
+                          }
+                          className="min-h-11 w-full gap-2 sm:w-auto"
+                          disabled={accountMutationPending}
+                        >
+                          {accountMutationPending && (
+                            <Loader2
+                              className="h-4 w-4 animate-spin"
+                              aria-hidden="true"
+                            />
+                          )}
+                          {t(
+                            accountStateAction === "deactivate"
+                              ? "employees_page.deactivate_account"
+                              : "employees_page.activate_account",
+                          )}
+                        </Button>
+                      </AlertDialogFooter>
+                    </form>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </>
             )}
           </div>
         )}

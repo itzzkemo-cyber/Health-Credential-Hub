@@ -58,6 +58,22 @@ export function getAdminMfaStepUpErrorKey(
   return fallbackKey;
 }
 
+export function getAccountStateStepUpErrorKey(
+  code: string | undefined,
+  status: number | undefined,
+): string {
+  const fallbackKey =
+    status === 403
+      ? "employees_page.account_state_forbidden"
+      : status === 404
+        ? "employees_page.account_state_not_found"
+        : status === 409
+          ? "employees_page.account_state_conflict"
+          : "employees_page.account_state_failed";
+
+  return getAdminMfaStepUpErrorKey(code, fallbackKey);
+}
+
 export function getAdminMfaDisableErrorKey(
   code: string | undefined,
 ):

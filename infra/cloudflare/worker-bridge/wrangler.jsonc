@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wathaiqi-health-bridge",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-27",
+  "workers_dev": true,
+  "preview_urls": false,
+  "vpc_services": [
+    {
+      "binding": "HEALTH_APP",
+      "service_id": "01a04323-2f3f-7c11-b5b9-248268687b74",
+      "remote": true
+    }
+  ]
+}

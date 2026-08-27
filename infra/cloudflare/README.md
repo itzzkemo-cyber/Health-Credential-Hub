@@ -174,28 +174,68 @@ After foreground verification, follow Cloudflare's current
 [Windows service guide](https://developers.cloudflare.com/tunnel/advanced/local-management/as-a-service/windows/).
 Use a stable executable path such as `C:\Cloudflared\bin\cloudflared.exe`; do not
 point the service at a temporary WinGet package directory. Install from an
-elevated prompt:
+elevated PowerShell prompt. Restrict the stable directory before copying the
+binary because the service runs as LocalSystem; a non-administrator must never
+be able to replace that executable. Replace `<SIGNED-CLOUDFLARED.EXE>` with the
+reviewed download or installed package path. These commands verify both the
+Cloudflare signer and the copied file before registering anything:
 
 ```powershell
-C:\Cloudflared\bin\cloudflared.exe service install
+$source = "<SIGNED-CLOUDFLARED.EXE>"
+$destinationRoot = "C:\Cloudflared\bin"
+$destination = Join-Path $destinationRoot "cloudflared.exe"
+
+$sourceSignature = Get-AuthenticodeSignature -LiteralPath $source
+if ($sourceSignature.Status -ne "Valid" -or
+    $sourceSignature.SignerCertificate.Subject -notmatch 'O="?Cloudflare, Inc\.') {
+  throw "The source cloudflared executable is not signed by Cloudflare, Inc."
+}
+
+New-Item -ItemType Directory -Path $destinationRoot -Force
+icacls "C:\Cloudflared" /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"
+icacls "C:\Cloudflared" /inheritance:r
+Copy-Item -LiteralPath $source -Destination $destination -Force
+
+$installedSignature = Get-AuthenticodeSignature -LiteralPath $destination
+if ($installedSignature.Status -ne "Valid" -or
+    $installedSignature.SignerCertificate.Subject -notmatch 'O="?Cloudflare, Inc\.') {
+  throw "The installed cloudflared executable is not signed by Cloudflare, Inc."
+}
+& $destination --version
+& $destination service install
 ```
 
-Set the `cloudflared` service `ImagePath` exactly to the following value (through
-the service registry entry described in Cloudflare's guide), then start it:
-
-```text
-C:\Cloudflared\bin\cloudflared.exe --config=C:\ProgramData\WathaiqiHealth\cloudflared\config.yml tunnel run
-```
+The install command must not contain a tunnel token. Set the `cloudflared`
+service `ImagePath` to the locally managed config path instead. The registry
+value contains paths only; the tunnel credential stays in the ACL-restricted
+JSON referenced by `config.yml`:
 
 ```powershell
-sc.exe start cloudflared
-sc.exe query cloudflared
+$imagePath = '"C:\Cloudflared\bin\cloudflared.exe" --config="C:\ProgramData\WathaiqiHealth\cloudflared\config.yml" tunnel run'
+Stop-Service -Name cloudflared -ErrorAction SilentlyContinue
+Set-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\cloudflared" `
+  -Name ImagePath -Value $imagePath
+sc.exe config cloudflared start= delayed-auto
+sc.exe failure cloudflared reset= 86400 actions= restart/5000/restart/30000/restart/60000
+sc.exe failureflag cloudflared 1
+Start-Service -Name cloudflared
+Get-CimInstance Win32_Service -Filter "Name='cloudflared'" |
+  Select-Object Name, State, StartMode, StartName, PathName
 PowerShell -NoProfile -ExecutionPolicy Bypass -File .\infra\cloudflare\verify-public.ps1
 ```
 
-Configure the production application, PostgreSQL, and storage processes to start
-before `cloudflared`, and alert when `/api/readyz` or the tunnel connector goes
-down. `cloudflared` starting at boot does not start the application or database.
+Confirm that `PathName` contains only the stable executable, config path, and
+`tunnel run`; it must not contain a token or inline credential. Configure the
+production application, PostgreSQL, and storage processes to start before
+`cloudflared`, and alert when `/api/readyz` or the tunnel connector goes down.
+`cloudflared` starting at boot does not start the application or database.
+Do not schedule the current interactive operator's `Start-Production.ps1`: its
+DPAPI bundle is user-bound and the script is not a long-running service
+supervisor. Automatic application startup first needs a dedicated Windows
+service identity, secrets re-created under that identity, a reviewed
+long-running wrapper/recovery policy, and tested PostgreSQL -> application ->
+tunnel ordering. Keep foreground startup until that separate change is
+implemented and verified.
 Update the stable executable under an approved maintenance window, restart the
 service, rerun both checks, and retain the previous signed executable for quick
 rollback. Never use debug logging in production because request headers can

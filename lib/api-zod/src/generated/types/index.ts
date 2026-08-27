@@ -7,6 +7,7 @@
  */
 
 export * from './activityItem';
+export * from './adminStepUpInput';
 export * from './auditLog';
 export * from './auditLogListResponse';
 export * from './authResponse';

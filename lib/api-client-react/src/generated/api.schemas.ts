@@ -131,6 +131,13 @@ export interface TotpConfirmInput {
   code: string;
 }
 
+export interface AdminStepUpInput {
+  /** Current password of the authenticated administrator. */
+  currentPassword: string;
+  /** Single-use TOTP or backup code for administrator step-up verification. */
+  code: string;
+}
+
 export interface TotpAdminDisableInput {
   userId: number;
   currentPassword: string;
@@ -489,9 +496,9 @@ export interface EmployeeUpdate {
   jobTitleAr?: string;
   phone?: string;
   isActive?: boolean;
-  /** Required with code when role, departmentId, or supervisorId actually changes. */
+  /** Required with code when role, departmentId, supervisorId, or isActive actually changes. */
   currentPassword?: string;
-  /** Required with currentPassword when role, departmentId, or supervisorId actually changes; accepts TOTP or a backup code. */
+  /** Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code. */
   code?: string;
 }
 

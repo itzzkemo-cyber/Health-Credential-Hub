@@ -1028,8 +1028,8 @@ export const UpdateEmployeeBody = zod.object({
   "jobTitleAr": zod.string().optional(),
   "phone": zod.string().optional(),
   "isActive": zod.boolean().optional(),
-  "currentPassword": zod.string().optional().describe('Required with code when role, departmentId, or supervisorId actually changes.'),
-  "code": zod.string().optional().describe('Required with currentPassword when role, departmentId, or supervisorId actually changes; accepts TOTP or a backup code.')
+  "currentPassword": zod.string().optional().describe('Required with code when role, departmentId, supervisorId, or isActive actually changes.'),
+  "code": zod.string().optional().describe('Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code.')
 })
 
 export const UpdateEmployeeResponse = zod.object({
@@ -1059,6 +1059,11 @@ export const DeleteEmployeeParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const DeleteEmployeeBody = zod.object({
+  "currentPassword": zod.string().describe('Current password of the authenticated administrator.'),
+  "code": zod.string().describe('Single-use TOTP or backup code for administrator step-up verification.')
+})
+
 export const DeleteEmployeeResponse = zod.void()
 
 
@@ -1067,6 +1072,11 @@ export const DeleteEmployeeResponse = zod.void()
  */
 export const ActivateEmployeeParams = zod.object({
   "id": zod.coerce.number()
+})
+
+export const ActivateEmployeeBody = zod.object({
+  "currentPassword": zod.string().describe('Current password of the authenticated administrator.'),
+  "code": zod.string().describe('Single-use TOTP or backup code for administrator step-up verification.')
 })
 
 export const ActivateEmployeeResponse = zod.object({
@@ -1094,6 +1104,11 @@ export const ActivateEmployeeResponse = zod.object({
  */
 export const DeactivateEmployeeParams = zod.object({
   "id": zod.coerce.number()
+})
+
+export const DeactivateEmployeeBody = zod.object({
+  "currentPassword": zod.string().describe('Current password of the authenticated administrator.'),
+  "code": zod.string().describe('Single-use TOTP or backup code for administrator step-up verification.')
 })
 
 export const DeactivateEmployeeResponse = zod.object({

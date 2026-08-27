@@ -860,6 +860,12 @@ paths:
           required: true
           schema:
             type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminStepUpInput"
       responses:
         "204":
           description: Deleted
@@ -877,6 +883,12 @@ paths:
           required: true
           schema:
             type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminStepUpInput"
       responses:
         "200":
           description: Employee activated
@@ -898,6 +910,12 @@ paths:
           required: true
           schema:
             type: number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminStepUpInput"
       responses:
         "200":
           description: Employee deactivated
@@ -1328,6 +1346,18 @@ components:
           type: string
         code:
           type: string
+
+    AdminStepUpInput:
+      type: object
+      required: [currentPassword, code]
+      properties:
+        currentPassword:
+          type: string
+          format: password
+          description: Current password of the authenticated administrator.
+        code:
+          type: string
+          description: Single-use TOTP or backup code for administrator step-up verification.
 
     TotpAdminDisableInput:
       type: object
@@ -1957,10 +1987,10 @@ components:
         currentPassword:
           type: string
           format: password
-          description: Required with code when role, departmentId, or supervisorId actually changes.
+          description: Required with code when role, departmentId, supervisorId, or isActive actually changes.
         code:
           type: string
-          description: Required with currentPassword when role, departmentId, or supervisorId actually changes; accepts TOTP or a backup code.
+          description: Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code.
 
     # Department
     DepartmentSummary:

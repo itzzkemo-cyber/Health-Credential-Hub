@@ -47,6 +47,10 @@ Thumbs.db
 # Local tooling
 .cursor/
 connect.lock
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
 
 # Temporary credentials emitted by google-github-actions/auth
 gha-creds-*.json

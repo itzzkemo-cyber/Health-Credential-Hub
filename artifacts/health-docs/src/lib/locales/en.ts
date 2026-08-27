@@ -350,8 +350,16 @@ export const en = {
     deactivate_confirm_title: "Deactivate this account?",
     deactivate_confirm_description:
       "The employee will be signed out and blocked from signing in. Credential and audit history will be preserved.",
+    account_state_step_up_hint:
+      "Confirm this action with your current administrator password and your own two-factor code or a backup code. These values are used only for this request.",
     activate_success: "Employee account activated.",
     deactivate_success: "Employee account deactivated.",
+    account_state_forbidden:
+      "Your administrator account is not permitted to change this employee's account state.",
+    account_state_not_found:
+      "This employee is no longer available in your authorized scope. Return to the employee list and refresh it.",
+    account_state_conflict:
+      "The employee account changed while this page was open. Refresh the profile before trying again.",
     account_state_failed:
       "The account state could not be changed. Refresh and try again.",
     load_error: "Could not load the employee profile",

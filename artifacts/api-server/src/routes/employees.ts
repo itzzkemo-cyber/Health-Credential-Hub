@@ -1,4 +1,10 @@
-import { Router, type IRouter, type Request, type Response } from "express";
+import {
+  Router,
+  type IRouter,
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
 import {
   db,
   usersTable,
@@ -21,6 +27,7 @@ import {
 } from "../lib/auth";
 import { consumeSecondFactor } from "../lib/secondFactor";
 import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
+import { rateLimit } from "../lib/rateLimit";
 import {
   getCredentialScopedUsers,
   getCredentialsFor,
@@ -56,6 +63,36 @@ const ACCOUNT_AUDIT_FIELDS = [
   "supervisorId",
   "isActive",
 ] as const;
+
+// This is an authenticated, single-instance safety net for repeated password
+// and second-factor guesses across every employee account-state endpoint. The
+// shared name makes PATCH, DELETE, activate, and deactivate consume one budget
+// per source IP instead of granting a separate brute-force budget per route.
+const employeeStepUpRateLimit = rateLimit({
+  name: "employee-step-up",
+  max: 10,
+  windowMs: 10 * 60_000,
+});
+
+function rateLimitOrganizationalPatch(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  const body =
+    typeof req.body === "object" && req.body !== null
+      ? (req.body as Record<string, unknown>)
+      : {};
+  if (
+    ACCOUNT_AUDIT_FIELDS.some((field) =>
+      Object.prototype.hasOwnProperty.call(body, field),
+    )
+  ) {
+    employeeStepUpRateLimit(req, res, next);
+    return;
+  }
+  next();
+}
 
 function accountChangeDetails(before: User, after: User): string | null {
   const changes: Record<string, { from: unknown; to: unknown }> = {};
@@ -474,6 +511,7 @@ router.get("/employees/:id", async (req, res) => {
 router.patch(
   "/employees/:id",
   requireRole(...MANAGER_ROLES),
+  rateLimitOrganizationalPatch,
   async (req, res) => {
     const requestUser = getUser(req);
     const id = Number(req.params.id);
@@ -485,14 +523,8 @@ router.patch(
     const currentPassword =
       typeof body.currentPassword === "string" ? body.currentPassword : "";
     const stepUpCode = typeof body.code === "string" ? body.code.trim() : "";
-    const organizationalFields = [
-      "role",
-      "departmentId",
-      "supervisorId",
-      "isActive",
-    ];
-    const changesOrganization = organizationalFields.some(
-      (field) => field in body,
+    const changesOrganization = ACCOUNT_AUDIT_FIELDS.some((field) =>
+      Object.prototype.hasOwnProperty.call(body, field),
     );
     const profilePatch: Record<string, unknown> = {};
     for (const f of ["name", "nameAr", "jobTitle", "jobTitleAr", "phone"]) {
@@ -598,7 +630,7 @@ router.patch(
       // Managers may edit themselves (non-organizational fields) or only a
       // currently scoped, strictly lower-ranked account.
       if (target.id !== actor.id && !canManageTarget(actor, target)) {
-        return { kind: "forbidden" as const };
+        return { kind: "not_found" as const };
       }
       if (target.id === actor.id && changesOrganization) {
         return { kind: "self_organization" as const };
@@ -677,7 +709,8 @@ router.patch(
       const requiresOrganizationStepUp =
         Object.prototype.hasOwnProperty.call(patch, "role") ||
         Object.prototype.hasOwnProperty.call(patch, "departmentId") ||
-        Object.prototype.hasOwnProperty.call(patch, "supervisorId");
+        Object.prototype.hasOwnProperty.call(patch, "supervisorId") ||
+        Object.prototype.hasOwnProperty.call(patch, "isActive");
       if (requiresOrganizationStepUp) {
         if (!actor.totpEnabled || !actor.totpSecret) {
           return { kind: "admin_mfa_required" as const };
@@ -828,8 +861,16 @@ router.patch(
 router.delete(
   "/employees/:id",
   requireRole(...ADMIN_ROLES),
+  employeeStepUpRateLimit,
   async (req, res) => {
     const requestUser = getUser(req);
+    const body =
+      typeof req.body === "object" && req.body !== null
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const currentPassword =
+      typeof body.currentPassword === "string" ? body.currentPassword : "";
+    const stepUpCode = typeof body.code === "string" ? body.code.trim() : "";
     const id = Number(req.params.id);
     if (!Number.isSafeInteger(id) || id < 1) {
       res.status(404).json({ message: "Employee not found" });
@@ -857,8 +898,21 @@ router.delete(
       }
       if (target.id === actor.id) return { kind: "self" as const };
       if (!canManageTarget(actor, target)) {
-        return { kind: "forbidden" as const };
+        return { kind: "not_found" as const };
       }
+      if (!actor.totpEnabled || !actor.totpSecret) {
+        return { kind: "admin_mfa_required" as const };
+      }
+      if (
+        !currentPassword ||
+        !(await comparePassword(currentPassword, actor.passwordHash))
+      ) {
+        return { kind: "step_up_failed" as const };
+      }
+      const steppedUp = stepUpCode
+        ? await consumeSecondFactor(tx, actor, stepUpCode)
+        : null;
+      if (!steppedUp) return { kind: "step_up_failed" as const };
       if (!target.isActive) return { kind: "deactivated" as const };
       const updated = await tx
         .update(usersTable)
@@ -908,6 +962,22 @@ router.delete(
       res.status(401).json({ message: "Unauthorized" });
       return;
     }
+    if (result.kind === "admin_mfa_required") {
+      res.status(403).json({
+        code: "admin_mfa_required",
+        message: "Enable two-factor authentication on your admin account first",
+        messageAr: "فعّل المصادقة الثنائية لحساب المسؤول أولاً",
+      });
+      return;
+    }
+    if (result.kind === "step_up_failed") {
+      res.status(403).json({
+        code: "step_up_failed",
+        message: "Administrator step-up verification failed",
+        messageAr: "فشل التحقق الإضافي من هوية المسؤول",
+      });
+      return;
+    }
     if (result.kind === "conflict") {
       res
         .status(409)
@@ -924,6 +994,13 @@ async function setActive(
   isActive: boolean,
 ): Promise<void> {
   const requestUser = getUser(req);
+  const body =
+    typeof req.body === "object" && req.body !== null
+      ? (req.body as Record<string, unknown>)
+      : {};
+  const currentPassword =
+    typeof body.currentPassword === "string" ? body.currentPassword : "";
+  const stepUpCode = typeof body.code === "string" ? body.code.trim() : "";
   const id = Number((req.params as Record<string, string>).id);
   if (!Number.isSafeInteger(id) || id < 1) {
     res.status(404).json({ message: "Employee not found" });
@@ -949,8 +1026,21 @@ async function setActive(
     }
     if (target.id === actor.id) return { kind: "self" as const };
     if (!canManageTarget(actor, target)) {
-      return { kind: "forbidden" as const };
+      return { kind: "not_found" as const };
     }
+    if (!actor.totpEnabled || !actor.totpSecret) {
+      return { kind: "admin_mfa_required" as const };
+    }
+    if (
+      !currentPassword ||
+      !(await comparePassword(currentPassword, actor.passwordHash))
+    ) {
+      return { kind: "step_up_failed" as const };
+    }
+    const steppedUp = stepUpCode
+      ? await consumeSecondFactor(tx, actor, stepUpCode)
+      : null;
+    if (!steppedUp) return { kind: "step_up_failed" as const };
     if (target.isActive === isActive) {
       return { kind: "updated" as const, user: target };
     }
@@ -1005,6 +1095,22 @@ async function setActive(
     res.status(401).json({ message: "Unauthorized" });
     return;
   }
+  if (result.kind === "admin_mfa_required") {
+    res.status(403).json({
+      code: "admin_mfa_required",
+      message: "Enable two-factor authentication on your admin account first",
+      messageAr: "فعّل المصادقة الثنائية لحساب المسؤول أولاً",
+    });
+    return;
+  }
+  if (result.kind === "step_up_failed") {
+    res.status(403).json({
+      code: "step_up_failed",
+      message: "Administrator step-up verification failed",
+      messageAr: "فشل التحقق الإضافي من هوية المسؤول",
+    });
+    return;
+  }
   if (result.kind === "conflict") {
     res
       .status(409)
@@ -1017,11 +1123,13 @@ async function setActive(
 router.post(
   "/employees/:id/activate",
   requireRole(...ADMIN_ROLES),
+  employeeStepUpRateLimit,
   (req, res) => setActive(req, res, true),
 );
 router.post(
   "/employees/:id/deactivate",
   requireRole(...ADMIN_ROLES),
+  employeeStepUpRateLimit,
   (req, res) => setActive(req, res, false),
 );
 

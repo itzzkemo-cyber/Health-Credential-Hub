@@ -21,6 +21,7 @@ import type {
 
 import type {
   ActivityItem,
+  AdminStepUpInput,
   AuditLogListResponse,
   AuthResponse,
   ChangePassword400,
@@ -2735,14 +2736,15 @@ export const getDeleteEmployeeUrl = (id: number,) => {
 /**
  * @summary Delete employee
  */
-export const deleteEmployee = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+export const deleteEmployee = async (id: number,
+    adminStepUpInput: AdminStepUpInput, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
 
   return customFetch<void>(getDeleteEmployeeUrl(id),
   {
     ...options,
-    method: 'DELETE'
-
-
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(adminStepUpInput)
   }
 );}
 
@@ -2751,8 +2753,8 @@ export const deleteEmployee = async (id: number, options?: Parameters<typeof cus
 
 
 export const getDeleteEmployeeMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteEmployee>>, TError,{id: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteEmployee>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteEmployee>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext> => {
 
 const mutationKey = ['deleteEmployee'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -2764,10 +2766,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteEmployee>>, {id: number}> = (props) => {
-          const {id} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteEmployee>>, {id: number;data: BodyType<AdminStepUpInput>}> = (props) => {
+          const {id,data} = props ?? {};
 
-          return  deleteEmployee(id,requestOptions)
+          return  deleteEmployee(id,data,requestOptions)
         }
 
 
@@ -2778,18 +2780,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type DeleteEmployeeMutationResult = NonNullable<Awaited<ReturnType<typeof deleteEmployee>>>
-
+    export type DeleteEmployeeMutationBody = BodyType<AdminStepUpInput>
     export type DeleteEmployeeMutationError = ErrorType<void>
 
     /**
  * @summary Delete employee
  */
 export const useDeleteEmployee = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteEmployee>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof deleteEmployee>>,
         TError,
-        {id: number},
+        {id: number;data: BodyType<AdminStepUpInput>},
         TContext
       > => {
       return useMutation(getDeleteEmployeeMutationOptions(options));
@@ -2806,14 +2808,15 @@ export const getActivateEmployeeUrl = (id: number,) => {
 /**
  * @summary Activate employee
  */
-export const activateEmployee = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<Employee> => {
+export const activateEmployee = async (id: number,
+    adminStepUpInput: AdminStepUpInput, options?: Parameters<typeof customFetch>[1]): Promise<Employee> => {
 
   return customFetch<Employee>(getActivateEmployeeUrl(id),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(adminStepUpInput)
   }
 );}
 
@@ -2822,8 +2825,8 @@ export const activateEmployee = async (id: number, options?: Parameters<typeof c
 
 
 export const getActivateEmployeeMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof activateEmployee>>, TError,{id: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateEmployee>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof activateEmployee>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext> => {
 
 const mutationKey = ['activateEmployee'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -2835,10 +2838,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof activateEmployee>>, {id: number}> = (props) => {
-          const {id} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof activateEmployee>>, {id: number;data: BodyType<AdminStepUpInput>}> = (props) => {
+          const {id,data} = props ?? {};
 
-          return  activateEmployee(id,requestOptions)
+          return  activateEmployee(id,data,requestOptions)
         }
 
 
@@ -2849,18 +2852,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type ActivateEmployeeMutationResult = NonNullable<Awaited<ReturnType<typeof activateEmployee>>>
-
+    export type ActivateEmployeeMutationBody = BodyType<AdminStepUpInput>
     export type ActivateEmployeeMutationError = ErrorType<void>
 
     /**
  * @summary Activate employee
  */
 export const useActivateEmployee = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateEmployee>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof activateEmployee>>,
         TError,
-        {id: number},
+        {id: number;data: BodyType<AdminStepUpInput>},
         TContext
       > => {
       return useMutation(getActivateEmployeeMutationOptions(options));
@@ -2877,14 +2880,15 @@ export const getDeactivateEmployeeUrl = (id: number,) => {
 /**
  * @summary Deactivate employee
  */
-export const deactivateEmployee = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<Employee> => {
+export const deactivateEmployee = async (id: number,
+    adminStepUpInput: AdminStepUpInput, options?: Parameters<typeof customFetch>[1]): Promise<Employee> => {
 
   return customFetch<Employee>(getDeactivateEmployeeUrl(id),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(adminStepUpInput)
   }
 );}
 
@@ -2893,8 +2897,8 @@ export const deactivateEmployee = async (id: number, options?: Parameters<typeof
 
 
 export const getDeactivateEmployeeMutationOptions = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deactivateEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof deactivateEmployee>>, TError,{id: number}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deactivateEmployee>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deactivateEmployee>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext> => {
 
 const mutationKey = ['deactivateEmployee'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -2906,10 +2910,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deactivateEmployee>>, {id: number}> = (props) => {
-          const {id} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deactivateEmployee>>, {id: number;data: BodyType<AdminStepUpInput>}> = (props) => {
+          const {id,data} = props ?? {};
 
-          return  deactivateEmployee(id,requestOptions)
+          return  deactivateEmployee(id,data,requestOptions)
         }
 
 
@@ -2920,18 +2924,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type DeactivateEmployeeMutationResult = NonNullable<Awaited<ReturnType<typeof deactivateEmployee>>>
-
+    export type DeactivateEmployeeMutationBody = BodyType<AdminStepUpInput>
     export type DeactivateEmployeeMutationError = ErrorType<void>
 
     /**
  * @summary Deactivate employee
  */
 export const useDeactivateEmployee = <TError = ErrorType<void>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deactivateEmployee>>, TError,{id: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deactivateEmployee>>, TError,{id: number;data: BodyType<AdminStepUpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof deactivateEmployee>>,
         TError,
-        {id: number},
+        {id: number;data: BodyType<AdminStepUpInput>},
         TContext
       > => {
       return useMutation(getDeactivateEmployeeMutationOptions(options));

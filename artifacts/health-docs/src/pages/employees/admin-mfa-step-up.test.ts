@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ADMIN_MFA_CODE_FIELD,
   ADMIN_MFA_CURRENT_PASSWORD_FIELD,
+  getAccountStateStepUpErrorKey,
   getAdminMfaDisableErrorKey,
   getAdminMfaStepUpErrorKey,
   readAdminMfaStepUpCredentials,
@@ -65,6 +66,27 @@ describe("administrator MFA step-up", () => {
     ).toBe("twofa.admin_step_up_failed");
     expect(getAdminMfaStepUpErrorKey(undefined, "fallback.message")).toBe(
       "fallback.message",
+    );
+  });
+
+  it("maps account-state failures without hiding step-up errors", () => {
+    expect(getAccountStateStepUpErrorKey("admin_mfa_required", 403)).toBe(
+      "twofa.admin_mfa_required",
+    );
+    expect(getAccountStateStepUpErrorKey("step_up_failed", 403)).toBe(
+      "twofa.admin_step_up_failed",
+    );
+    expect(getAccountStateStepUpErrorKey(undefined, 403)).toBe(
+      "employees_page.account_state_forbidden",
+    );
+    expect(getAccountStateStepUpErrorKey(undefined, 404)).toBe(
+      "employees_page.account_state_not_found",
+    );
+    expect(getAccountStateStepUpErrorKey(undefined, 409)).toBe(
+      "employees_page.account_state_conflict",
+    );
+    expect(getAccountStateStepUpErrorKey(undefined, 500)).toBe(
+      "employees_page.account_state_failed",
     );
   });
 });

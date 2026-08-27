@@ -232,7 +232,11 @@ if ($ready.StatusCode -ne 200 -or $readyBody.status -ne "ready" -or
 }
 
 $nameServers = @(Resolve-DnsName -Name $ApexDomain -Type NS -DnsOnly -ErrorAction Stop |
-    Where-Object { -not [string]::IsNullOrWhiteSpace($_.NameHost) })
+    Where-Object {
+      $nameHostProperty = $_.PSObject.Properties["NameHost"]
+      $null -ne $nameHostProperty -and
+        -not [string]::IsNullOrWhiteSpace([string]$nameHostProperty.Value)
+    })
 if ($nameServers.Count -lt 2 -or @($nameServers | Where-Object { $_.NameHost -notmatch '\.ns\.cloudflare\.com\.?$' }).Count -gt 0) {
   Fail "the authoritative nameservers are not active on Cloudflare"
 }

@@ -61,6 +61,8 @@ const testState = vi.hoisted(() => ({
   updateCondition: null as unknown,
   failAudit: false,
   casConflict: false,
+  sensitiveRequestCount: 0,
+  sensitiveRequestMax: 0,
   consumeSecondFactor: vi.fn(async (_tx: unknown, actor: unknown) => actor),
 }));
 
@@ -216,7 +218,9 @@ vi.mock("../lib/auth", () => ({
   ],
   getUser: vi.fn(() => testState.actor),
   hashPassword: vi.fn(),
-  comparePassword: vi.fn(async (password: string) => password === "admin-password"),
+  comparePassword: vi.fn(
+    async (password: string) => password === "admin-password",
+  ),
   requireAuth: (_req: Request, _res: Response, next: NextFunction) => next(),
   requireRole:
     (...roles: string[]) =>
@@ -231,6 +235,25 @@ vi.mock("../lib/auth", () => ({
 
 vi.mock("../lib/secondFactor", () => ({
   consumeSecondFactor: testState.consumeSecondFactor,
+}));
+
+vi.mock("../lib/rateLimit", () => ({
+  rateLimit: vi.fn((options: { max: number }) => {
+    testState.sensitiveRequestMax = options.max;
+    return (_req: Request, res: Response, next: NextFunction) => {
+      testState.sensitiveRequestCount += 1;
+      if (testState.sensitiveRequestCount > options.max) {
+        res.setHeader("Retry-After", "600");
+        res.status(429).json({
+          code: "rate_limited",
+          message: "Too many requests; try again later",
+          messageAr: "طلبات كثيرة؛ حاول مرة أخرى لاحقًا",
+        });
+        return;
+      }
+      next();
+    };
+  }),
 }));
 
 vi.mock("../lib/helpers", () => ({
@@ -281,6 +304,7 @@ describe("administrative employee mutations", () => {
     testState.updateCondition = null;
     testState.failAudit = false;
     testState.casConflict = false;
+    testState.sensitiveRequestCount = 0;
     testState.consumeSecondFactor.mockClear();
   });
 
@@ -343,6 +367,34 @@ describe("administrative employee mutations", () => {
 
     expect(response.status).toBe(404);
     expect(testState.transactionCount).toBe(0);
+  });
+
+  it("rate limits repeated employee account-state step-up attempts before opening a transaction", async () => {
+    testState.sensitiveRequestCount = testState.sensitiveRequestMax;
+
+    const response = await request("POST", "/employees/2/deactivate", {
+      currentPassword: "wrong-password",
+      code: "000000",
+    });
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("600");
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "rate_limited" }),
+    );
+    expect(testState.transactionCount).toBe(0);
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+  });
+
+  it("does not spend the step-up attempt budget on a profile-only PATCH", async () => {
+    testState.sensitiveRequestCount = testState.sensitiveRequestMax;
+
+    const response = await request("PATCH", "/employees/2", {
+      name: "Updated Employee",
+    });
+
+    expect(response.status).toBe(200);
+    expect(testState.sensitiveRequestCount).toBe(testState.sensitiveRequestMax);
   });
 
   it("commits a profile update and its audit event in one transaction", async () => {
@@ -434,10 +486,14 @@ describe("administrative employee mutations", () => {
   );
 
   it("commits soft deletion and its audit event in one transaction", async () => {
-    const response = await request("DELETE", "/employees/2");
+    const response = await request("DELETE", "/employees/2", {
+      currentPassword: "admin-password",
+      code: "123456",
+    });
 
     expect(response.status).toBe(204);
     expect(testState.transactionCount).toBe(1);
+    expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
     expect(testState.committedUpdate).toEqual(
       expect.objectContaining({ isActive: false }),
     );
@@ -454,7 +510,10 @@ describe("administrative employee mutations", () => {
   it("rolls soft deletion back when its audit insert fails", async () => {
     testState.failAudit = true;
 
-    const response = await request("DELETE", "/employees/2");
+    const response = await request("DELETE", "/employees/2", {
+      currentPassword: "admin-password",
+      code: "123456",
+    });
 
     expect(response.status).toBe(500);
     expect(testState.transactionRolledBack).toBe(true);
@@ -465,10 +524,14 @@ describe("administrative employee mutations", () => {
   it("commits account activation and its audit event in one transaction", async () => {
     testState.target.isActive = false;
 
-    const response = await request("POST", "/employees/2/activate");
+    const response = await request("POST", "/employees/2/activate", {
+      currentPassword: "admin-password",
+      code: "123456",
+    });
 
     expect(response.status).toBe(200);
     expect(testState.transactionCount).toBe(1);
+    expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
     expect(testState.committedUpdate).toEqual(
       expect.objectContaining({ isActive: true }),
     );
@@ -486,7 +549,10 @@ describe("administrative employee mutations", () => {
   it("rolls account deactivation back when its audit insert fails", async () => {
     testState.failAudit = true;
 
-    const response = await request("POST", "/employees/2/deactivate");
+    const response = await request("POST", "/employees/2/deactivate", {
+      currentPassword: "admin-password",
+      code: "123456",
+    });
 
     expect(response.status).toBe(500);
     expect(testState.transactionRolledBack).toBe(true);
@@ -551,10 +617,123 @@ describe("administrative employee mutations", () => {
     expect(testState.committedAudit).toBeNull();
   });
 
-  it("does not rotate the target session on an idempotent active-state request", async () => {
-    const response = await request("POST", "/employees/2/activate");
+  it.each([
+    {
+      label: "PATCH isActive",
+      method: "PATCH" as const,
+      path: "/employees/2",
+      body: { isActive: false },
+      targetIsActive: true,
+    },
+    {
+      label: "soft deletion",
+      method: "DELETE" as const,
+      path: "/employees/2",
+      body: undefined,
+      targetIsActive: true,
+    },
+    {
+      label: "activation",
+      method: "POST" as const,
+      path: "/employees/2/activate",
+      body: undefined,
+      targetIsActive: false,
+    },
+    {
+      label: "deactivation",
+      method: "POST" as const,
+      path: "/employees/2/deactivate",
+      body: undefined,
+      targetIsActive: true,
+    },
+  ])(
+    "requires administrator step-up for $label",
+    async ({ method, path, body, targetIsActive }) => {
+      testState.target.isActive = targetIsActive;
+
+      const response = await request(method, path, body);
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual(
+        expect.objectContaining({ code: "step_up_failed" }),
+      );
+      expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+      expect(testState.committedUpdate).toBeNull();
+      expect(testState.committedAudit).toBeNull();
+    },
+  );
+
+  it("requires an enrolled administrator second factor before deactivation", async () => {
+    testState.lockedActor.totpEnabled = false;
+    testState.lockedActor.totpSecret = null as unknown as string;
+
+    const response = await request("POST", "/employees/2/deactivate", {
+      currentPassword: "admin-password",
+      code: "123456",
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "admin_mfa_required" }),
+    );
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+    expect(testState.committedUpdate).toBeNull();
+  });
+
+  it("verifies the administrator password before consuming the second factor", async () => {
+    const response = await request("POST", "/employees/2/deactivate", {
+      currentPassword: "wrong-password",
+      code: "123456",
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "step_up_failed" }),
+    );
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+    expect(testState.committedUpdate).toBeNull();
+  });
+
+  it("rejects a replayed second factor without changing the employee", async () => {
+    testState.consumeSecondFactor.mockResolvedValueOnce(null);
+
+    const response = await request("DELETE", "/employees/2", {
+      currentPassword: "admin-password",
+      code: "123456",
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "step_up_failed" }),
+    );
+    expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
+    expect(testState.committedUpdate).toBeNull();
+    expect(testState.committedAudit).toBeNull();
+  });
+
+  it("requires and consumes step-up for PATCH activation state changes", async () => {
+    const response = await request("PATCH", "/employees/2", {
+      isActive: false,
+      currentPassword: "admin-password",
+      code: "123456",
+    });
 
     expect(response.status).toBe(200);
+    expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
+    expect(testState.committedUpdate).toEqual(
+      expect.objectContaining({ isActive: false }),
+    );
+    expect(testState.committedUpdate?.sessionVersion).not.toBe(1);
+  });
+
+  it("does not rotate the target session on an idempotent active-state request", async () => {
+    const response = await request("POST", "/employees/2/activate", {
+      currentPassword: "admin-password",
+      code: "123456",
+    });
+
+    expect(response.status).toBe(200);
+    expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
     expect(testState.committedUpdate).toBeNull();
     expect(testState.committedAudit).toBeNull();
   });
@@ -618,14 +797,44 @@ describe("administrative employee mutations", () => {
     expect(testState.committedAudit).toBeNull();
   });
 
-  it("rechecks the locked target rank before writing", async () => {
-    testState.target.role = "hospital_admin";
+  it.each([
+    {
+      label: "PATCH",
+      method: "PATCH" as const,
+      path: "/employees/2",
+      body: { name: "Hidden Peer" },
+    },
+    {
+      label: "DELETE",
+      method: "DELETE" as const,
+      path: "/employees/2",
+      body: undefined,
+    },
+    {
+      label: "activation",
+      method: "POST" as const,
+      path: "/employees/2/activate",
+      body: undefined,
+    },
+    {
+      label: "deactivation",
+      method: "POST" as const,
+      path: "/employees/2/deactivate",
+      body: undefined,
+    },
+  ])(
+    "returns the same not-found response for a hidden peer on $label",
+    async ({ method, path, body }) => {
+      testState.target.role = "hospital_admin";
 
-    const response = await request("POST", "/employees/2/deactivate");
+      const response = await request(method, path, body);
 
-    expect(response.status).toBe(403);
-    expect(testState.committedUpdate).toBeNull();
-  });
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ message: "Employee not found" });
+      expect(testState.committedUpdate).toBeNull();
+      expect(testState.committedAudit).toBeNull();
+    },
+  );
 
   it("returns a conflict and omits the audit when the conditional update loses CAS", async () => {
     testState.casConflict = true;
