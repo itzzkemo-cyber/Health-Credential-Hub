@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => {
     }>,
     hasObjectAcl: false,
     pendingGrant: null as object | null,
+    pendingGrantOwnerId: 7,
+    findActiveUploadGrant: vi.fn(),
     getObjectEntityFile: vi.fn(),
     downloadObject: vi.fn(),
     logAudit: vi.fn(),
@@ -100,7 +102,7 @@ vi.mock("../lib/uploadSecurity", () => ({
   ALLOWED_UPLOAD_CONTENT_TYPE: /^(?:application\/pdf)$/,
   MAX_UPLOAD_BYTES: 8 * 1024 * 1024,
   UPLOAD_GRANT_TTL_MS: 15 * 60 * 1000,
-  findActiveUploadGrant: vi.fn(async () => mocks.pendingGrant),
+  findActiveUploadGrant: mocks.findActiveUploadGrant,
   hasAllowedUploadSignature: vi.fn(() => true),
   scanUploadForMalware: vi.fn(),
   MalwareDetectedError: class extends Error {},
@@ -129,6 +131,12 @@ describe("private object download authorization", () => {
     mocks.scopedUsers = [];
     mocks.hasObjectAcl = false;
     mocks.pendingGrant = null;
+    mocks.pendingGrantOwnerId = mocks.actor.id;
+    mocks.findActiveUploadGrant.mockReset();
+    mocks.findActiveUploadGrant.mockImplementation(
+      async (_objectPath: string, requestedBy: number) =>
+        requestedBy === mocks.pendingGrantOwnerId ? mocks.pendingGrant : null,
+    );
     mocks.getObjectEntityFile.mockReset();
     mocks.getObjectEntityFile.mockResolvedValue({ name: "private object" });
     mocks.downloadObject.mockReset();
@@ -211,6 +219,33 @@ describe("private object download authorization", () => {
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe("private document");
     expect(mocks.logAudit).toHaveBeenCalledOnce();
+    expect(mocks.findActiveUploadGrant).toHaveBeenCalledWith(
+      objectPath,
+      mocks.actor.id,
+    );
+  });
+
+  it("hides a processed unlinked upload from a different requester", async () => {
+    mocks.linked = [];
+    mocks.pendingGrant = { status: "processed" };
+    mocks.pendingGrantOwnerId = owner.id;
+
+    const response = await get();
+
+    expect(response.status).toBe(404);
+    expect(mocks.downloadObject).not.toHaveBeenCalled();
+  });
+
+  it("does not let an upload grant bypass ACL after the object is linked", async () => {
+    mocks.hasObjectAcl = false;
+    mocks.pendingGrant = { status: "processed" };
+    mocks.pendingGrantOwnerId = mocks.actor.id;
+
+    const response = await get();
+
+    expect(response.status).toBe(404);
+    expect(mocks.findActiveUploadGrant).not.toHaveBeenCalled();
+    expect(mocks.downloadObject).not.toHaveBeenCalled();
   });
 
   it.each(["supervisor", "department_manager", "hospital_admin"])(
