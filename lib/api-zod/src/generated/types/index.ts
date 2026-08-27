@@ -59,6 +59,7 @@ export * from './healthStatus';
 export * from './listAuditLogsParams';
 export * from './listCredentialsParams';
 export * from './listCredentialsStatus';
+export * from './listDepartmentsParams';
 export * from './listEmployeesParams';
 export * from './listNotificationsParams';
 export * from './loginInput';

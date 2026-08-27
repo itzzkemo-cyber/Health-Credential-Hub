@@ -2,6 +2,8 @@ import { useDeferredValue, useState } from "react";
 import {
   ApiError,
   type EmployeeWithStats,
+  getGetFacilitiesQueryKey,
+  useGetFacilities,
   getListDepartmentsQueryKey,
   getListEmployeesQueryKey,
   useCreateEmployee,
@@ -55,44 +57,88 @@ import {
   generateTemporaryPassword,
   type EmployeeAccountForm,
   getComplianceRate,
+  getDepartmentOptions,
   getEmployeeDisplayName,
   getEmployeeInitial,
+  getSupervisorOptions,
+  getAssignableRoles,
   isPasswordDeliveryReady,
 } from "./employee-list-state";
+import { getDepartmentQueryParams } from "./department-query";
 
 export default function EmployeesList() {
   const { t, isRTL } = useLanguage();
   const queryClient = useQueryClient();
-  const user = getAuthUser() as { role?: string } | null;
-  const canCreateEmployee =
-    user?.role === "hospital_admin" || user?.role === "system_admin";
+  const user = getAuthUser() as {
+    id?: number;
+    role?: string;
+    facilityId?: number;
+  } | null;
+  const isSystemAdmin = user?.role === "system_admin";
+  const canCreateEmployee = user?.role === "hospital_admin" || isSystemAdmin;
   const [search, setSearch] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
   const [passwordDeliveryAcknowledged, setPasswordDeliveryAcknowledged] =
     useState(false);
-  const [employeeForm, setEmployeeForm] = useState(createEmptyEmployeeForm);
+  const [employeeForm, setEmployeeForm] = useState(() =>
+    createEmptyEmployeeForm(isSystemAdmin ? user?.facilityId : undefined),
+  );
   const deferredSearch = useDeferredValue(search.trim());
+  const selectedFacilityId = employeeForm.facilityId
+    ? Number(employeeForm.facilityId)
+    : (user?.facilityId ?? null);
 
   const employeesQuery = useListEmployees({
     search: deferredSearch || undefined,
   });
-  const departmentsQuery = useListDepartments({
+  const departmentDirectoryParams = getDepartmentQueryParams(
+    user?.role,
+    selectedFacilityId,
+  );
+  const departmentsQuery = useListDepartments(departmentDirectoryParams, {
     query: {
-      queryKey: getListDepartmentsQueryKey(),
-      enabled: canCreateEmployee,
+      queryKey: getListDepartmentsQueryKey(departmentDirectoryParams),
+      enabled:
+        canCreateEmployee && (!isSystemAdmin || selectedFacilityId != null),
+    },
+  });
+  const facilitiesQuery = useGetFacilities({
+    query: {
+      queryKey: getGetFacilitiesQueryKey(),
+      enabled: isSystemAdmin && isCreateOpen,
+    },
+  });
+  const managementDirectoryParams =
+    isSystemAdmin && selectedFacilityId != null
+      ? { facilityId: selectedFacilityId }
+      : undefined;
+  const managementDirectoryQuery = useListEmployees(managementDirectoryParams, {
+    query: {
+      queryKey: getListEmployeesQueryKey(managementDirectoryParams),
+      enabled: canCreateEmployee && isCreateOpen,
     },
   });
   const createEmployee = useCreateEmployee();
   const employees = employeesQuery.data ?? [];
-  const assignableRoles =
-    user?.role === "system_admin"
-      ? ["hospital_admin", "department_manager", "supervisor", "employee"]
-      : ["department_manager", "supervisor", "employee"];
+  const assignableRoles = getAssignableRoles(user?.role ?? "");
+  const managementDirectory = managementDirectoryQuery.data ?? [];
+  const departmentOptions = getDepartmentOptions(
+    departmentsQuery.data ?? [],
+    managementDirectory,
+    selectedFacilityId,
+  );
+  const supervisorOptions = getSupervisorOptions(
+    managementDirectory,
+    null,
+    selectedFacilityId,
+  );
 
   const openCreateEmployee = () => {
     createEmployee.reset();
-    setEmployeeForm(createEmptyEmployeeForm());
+    setEmployeeForm(
+      createEmptyEmployeeForm(isSystemAdmin ? user?.facilityId : undefined),
+    );
     setShowTemporaryPassword(false);
     setPasswordDeliveryAcknowledged(false);
     setIsCreateOpen(true);
@@ -136,7 +182,11 @@ export default function EmployeesList() {
         onSuccess: () => {
           toast.success(t("employees_page.create_success"));
           setIsCreateOpen(false);
-          setEmployeeForm(createEmptyEmployeeForm());
+          setEmployeeForm(
+            createEmptyEmployeeForm(
+              isSystemAdmin ? user?.facilityId : undefined,
+            ),
+          );
           setShowTemporaryPassword(false);
           setPasswordDeliveryAcknowledged(false);
           void queryClient.invalidateQueries({
@@ -148,7 +198,8 @@ export default function EmployeesList() {
   };
 
   const createErrorKey =
-    createEmployee.error instanceof ApiError && createEmployee.error.status === 409
+    createEmployee.error instanceof ApiError &&
+    createEmployee.error.status === 409
       ? "employees_page.email_exists"
       : "employees_page.create_failed";
 
@@ -268,7 +319,11 @@ export default function EmployeesList() {
           setIsCreateOpen(open);
           if (!open) {
             createEmployee.reset();
-            setEmployeeForm(createEmptyEmployeeForm());
+            setEmployeeForm(
+              createEmptyEmployeeForm(
+                isSystemAdmin ? user?.facilityId : undefined,
+              ),
+            );
             setShowTemporaryPassword(false);
             setPasswordDeliveryAcknowledged(false);
           }
@@ -343,6 +398,48 @@ export default function EmployeesList() {
                 dir="rtl"
               />
 
+              {isSystemAdmin && (
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="employee-facility">
+                    {t("employees_page.facility")}
+                  </Label>
+                  <Select
+                    value={employeeForm.facilityId}
+                    onValueChange={(facilityId) =>
+                      setEmployeeForm((previous) => ({
+                        ...previous,
+                        facilityId,
+                        departmentId: "",
+                        supervisorId: "",
+                      }))
+                    }
+                  >
+                    <SelectTrigger
+                      id="employee-facility"
+                      className="min-h-11"
+                      disabled={facilitiesQuery.isLoading}
+                    >
+                      <SelectValue
+                        placeholder={t("employees_page.select_facility")}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(facilitiesQuery.data ?? []).map((facility) => (
+                        <SelectItem
+                          key={facility.id}
+                          value={String(facility.id)}
+                        >
+                          {isRTL ? facility.nameAr : facility.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {t("employees_page.facility_create_hint")}
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="employee-role">
                   {t("employees_page.role")}
@@ -375,8 +472,7 @@ export default function EmployeesList() {
                   onValueChange={(departmentId) =>
                     setEmployeeForm((previous) => ({
                       ...previous,
-                      departmentId:
-                        departmentId === "none" ? "" : departmentId,
+                      departmentId: departmentId === "none" ? "" : departmentId,
                     }))
                   }
                 >
@@ -393,12 +489,51 @@ export default function EmployeesList() {
                     <SelectItem value="none">
                       {t("employees_page.no_department")}
                     </SelectItem>
-                    {(departmentsQuery.data ?? []).map((department) => (
+                    {departmentOptions.map((department) => (
                       <SelectItem
                         key={department.id}
                         value={String(department.id)}
                       >
                         {isRTL ? department.nameAr : department.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="employee-supervisor">
+                  {t("employees_page.supervisor")}
+                </Label>
+                <Select
+                  value={employeeForm.supervisorId || "none"}
+                  onValueChange={(supervisorId) =>
+                    setEmployeeForm((previous) => ({
+                      ...previous,
+                      supervisorId: supervisorId === "none" ? "" : supervisorId,
+                    }))
+                  }
+                >
+                  <SelectTrigger
+                    id="employee-supervisor"
+                    className="min-h-11"
+                    disabled={managementDirectoryQuery.isLoading}
+                  >
+                    <SelectValue
+                      placeholder={t("employees_page.no_supervisor")}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      {t("employees_page.no_supervisor")}
+                    </SelectItem>
+                    {supervisorOptions.map((supervisor) => (
+                      <SelectItem
+                        key={supervisor.id}
+                        value={String(supervisor.id)}
+                      >
+                        {getEmployeeDisplayName(supervisor, isRTL)} —{" "}
+                        {t(`roles.${supervisor.role}`)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -468,7 +603,9 @@ export default function EmployeesList() {
                     type="button"
                     variant="outline"
                     onClick={() => void copyTemporaryPassword()}
-                    disabled={!employeeForm.password || createEmployee.isPending}
+                    disabled={
+                      !employeeForm.password || createEmployee.isPending
+                    }
                     className="min-h-11 gap-2"
                   >
                     <Copy className="h-4 w-4" aria-hidden="true" />
@@ -481,7 +618,9 @@ export default function EmployeesList() {
                       onCheckedChange={(checked) =>
                         setPasswordDeliveryAcknowledged(checked === true)
                       }
-                      disabled={!employeeForm.password || createEmployee.isPending}
+                      disabled={
+                        !employeeForm.password || createEmployee.isPending
+                      }
                       className="mt-1"
                     />
                     <Label
@@ -517,6 +656,7 @@ export default function EmployeesList() {
                 type="submit"
                 disabled={
                   createEmployee.isPending ||
+                  (isSystemAdmin && !employeeForm.facilityId) ||
                   !isPasswordDeliveryReady(
                     employeeForm.password,
                     passwordDeliveryAcknowledged,
@@ -525,7 +665,10 @@ export default function EmployeesList() {
                 className="min-h-11 w-full gap-2 sm:w-auto"
               >
                 {createEmployee.isPending && (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  <Loader2
+                    className="h-4 w-4 animate-spin"
+                    aria-hidden="true"
+                  />
                 )}
                 {t("employees_page.create_employee")}
               </Button>
@@ -537,11 +680,7 @@ export default function EmployeesList() {
   );
 }
 
-function EmployeeMobileCard({
-  employee,
-  isRTL,
-  t,
-}: EmployeeItemProps) {
+function EmployeeMobileCard({ employee, isRTL, t }: EmployeeItemProps) {
   const name = getEmployeeDisplayName(employee, isRTL);
   const complianceRate = getComplianceRate(employee.complianceRate);
 
@@ -615,7 +754,10 @@ function EmployeeTableRow({ employee, isRTL, t }: EmployeeItemProps) {
             >
               {name}
             </Link>
-            <div className="max-w-56 truncate text-xs text-muted-foreground" dir="auto">
+            <div
+              className="max-w-56 truncate text-xs text-muted-foreground"
+              dir="auto"
+            >
               {employee.employeeNumber || employee.email}
             </div>
           </div>
@@ -751,7 +893,7 @@ function EmployeeFormField({
   );
 }
 
-function createEmptyEmployeeForm(): EmployeeAccountForm {
+function createEmptyEmployeeForm(facilityId?: number): EmployeeAccountForm {
   return {
     name: "",
     nameAr: "",
@@ -759,6 +901,8 @@ function createEmptyEmployeeForm(): EmployeeAccountForm {
     password: "",
     role: "employee",
     departmentId: "",
+    supervisorId: "",
+    facilityId: facilityId == null ? "" : String(facilityId),
     jobTitle: "",
     jobTitleAr: "",
     employeeNumber: "",

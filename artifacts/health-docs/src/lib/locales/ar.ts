@@ -266,8 +266,17 @@ export const ar = {
     employee_number: "الرقم الوظيفي",
     job_title_english: "المسمى الوظيفي بالإنجليزية",
     job_title_arabic: "المسمى الوظيفي بالعربية",
+    phone: "رقم الهاتف",
+    facility: "المنشأة",
+    select_facility: "اختر المنشأة",
+    facility_create_hint:
+      "سيُربط الحساب الجديد بهذه المنشأة بشكل دائم. تحقق من الاختيار قبل إنشاء الحساب.",
+    facility_read_only_hint:
+      "نقل حساب قائم بين المنشآت غير مدعوم في واجهة API الحالية. أنشئ حسابًا جديدًا بالنطاق الصحيح بدلًا من ذلك.",
     department: "القسم",
     no_department: "دون قسم",
+    supervisor: "المشرف",
+    no_supervisor: "دون مشرف",
     temporary_password: "كلمة المرور المؤقتة",
     generate_password: "إنشاء كلمة مرور قوية",
     show_password: "إظهار كلمة المرور المؤقتة",
@@ -285,6 +294,31 @@ export const ar = {
     create_failed:
       "تعذّر إنشاء حساب الموظف. تحقق من الحقول وصلاحياتك ثم حاول مرة أخرى.",
     email_exists: "هذا البريد الإلكتروني مسجل مسبقًا.",
+    edit_account: "تعديل الحساب",
+    edit_account_description:
+      "حدّث بيانات الملف والحقول التنظيمية التي يسمح بها دورك الإداري.",
+    save_account: "حفظ الحساب",
+    update_success: "تم تحديث حساب الموظف بنجاح.",
+    update_failed: "تعذّر تحديث الحساب. تحقق من الحقول وحاول مرة أخرى.",
+    update_forbidden: "حسابك غير مصرح له بإجراء هذا التغيير التنظيمي.",
+    self_scope_locked:
+      "يمكنك تعديل بيانات ملفك، لكن لا يمكنك تغيير دورك أو قسمك أو مشرفك أو منشأتك أو حالة تفعيل حسابك.",
+    hierarchy_scope_locked:
+      "الحقول التنظيمية مقفلة لأن هذا الحساب ليس أدنى من دورك الإداري.",
+    account_active: "الحساب نشط",
+    account_inactive: "الحساب موقوف",
+    activate_account: "تفعيل الحساب",
+    deactivate_account: "إيقاف الحساب",
+    activate_confirm_title: "تفعيل هذا الحساب؟",
+    activate_confirm_description:
+      "سيتمكن الموظف من تسجيل الدخول مجددًا. تبقى الجلسات السابقة ملغاة ويلزم تسجيل دخول جديد.",
+    deactivate_confirm_title: "إيقاف هذا الحساب؟",
+    deactivate_confirm_description:
+      "سيُسجّل خروج الموظف ويُمنع من الدخول، مع الاحتفاظ بتاريخ الوثائق والتدقيق.",
+    activate_success: "تم تفعيل حساب الموظف.",
+    deactivate_success: "تم إيقاف حساب الموظف.",
+    account_state_failed:
+      "تعذّر تغيير حالة الحساب. حدّث الصفحة وحاول مرة أخرى.",
     load_error: "تعذّر تحميل ملف الموظف",
     profile: "ملف الموظف",
     not_available: "غير متوفر",
@@ -341,8 +375,7 @@ export const ar = {
     owner_loading: "جارٍ تحميل بيانات الموظف المحدد…",
     private_upload_notice:
       "تُرفع الوثيقة إلى مساحة خاصة ومشفرة. لا تشارك روابط الرفع أو صور الوثيقة خارج المنصة.",
-    manual_upload_hint:
-      "اختياري: أرفق صورة أو ملف PDF بحد أقصى ٨ ميغابايت.",
+    manual_upload_hint: "اختياري: أرفق صورة أو ملف PDF بحد أقصى ٨ ميغابايت.",
     select_type: "اختر نوع الوثيقة",
     english: "بالإنجليزية",
     arabic: "بالعربية",

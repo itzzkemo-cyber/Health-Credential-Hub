@@ -33,11 +33,13 @@ describe("role management hierarchy", () => {
     expect(canManageTarget(actor, user(5, "employee", 20))).toBe(false);
   });
 
-  it("keeps system administration global", () => {
+  it("keeps the root administrator global without allowing another root", () => {
     const actor = user(1, "system_admin", 10);
 
-    expect(canManageTarget(actor, user(2, "system_admin", 20))).toBe(true);
-    expect(canAssignRole(actor, "system_admin")).toBe(true);
+    expect(canManageTarget(actor, user(2, "employee", 20))).toBe(true);
+    expect(canAssignRole(actor, "hospital_admin")).toBe(true);
+    expect(canManageTarget(actor, user(3, "system_admin", 20))).toBe(false);
+    expect(canAssignRole(actor, "system_admin")).toBe(false);
   });
 
   it("preserves self-owned credential access but rejects scoped peers and higher roles", () => {

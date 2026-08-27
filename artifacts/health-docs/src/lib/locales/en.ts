@@ -254,7 +254,8 @@ export const en = {
       "The document could not be verified. Refresh the queue and try again.",
   },
   employees_page: {
-    subtitle: "Manage employee records and document compliance within your authorized scope.",
+    subtitle:
+      "Manage employee records and document compliance within your authorized scope.",
     add_employee: "Add employee",
     add_employee_description:
       "Create an organizational account for an employee in your authorized facility.",
@@ -275,8 +276,17 @@ export const en = {
     employee_number: "Employee number",
     job_title_english: "Job title in English",
     job_title_arabic: "Job title in Arabic",
+    phone: "Phone number",
+    facility: "Facility",
+    select_facility: "Select a facility",
+    facility_create_hint:
+      "The new account is permanently scoped to this facility. Verify the selection before creating it.",
+    facility_read_only_hint:
+      "Moving an existing account between facilities is not supported by the current API. Create a correctly scoped account instead.",
     department: "Department",
     no_department: "No department",
+    supervisor: "Supervisor",
+    no_supervisor: "No supervisor",
     temporary_password: "Temporary password",
     generate_password: "Generate strong password",
     show_password: "Show temporary password",
@@ -294,6 +304,33 @@ export const en = {
     create_failed:
       "The employee account could not be created. Check the fields and your permissions, then try again.",
     email_exists: "This email address is already registered.",
+    edit_account: "Edit account",
+    edit_account_description:
+      "Update the profile and the organizational fields allowed by your administrator role.",
+    save_account: "Save account",
+    update_success: "Employee account updated successfully.",
+    update_failed:
+      "The account could not be updated. Check the fields and try again.",
+    update_forbidden:
+      "Your account is not permitted to make this organizational change.",
+    self_scope_locked:
+      "You may edit your profile details, but you cannot change your own role, department, supervisor, facility, or activation state.",
+    hierarchy_scope_locked:
+      "Organizational fields are locked because this account is not below your administrative role.",
+    account_active: "Account active",
+    account_inactive: "Account inactive",
+    activate_account: "Activate account",
+    deactivate_account: "Deactivate account",
+    activate_confirm_title: "Activate this account?",
+    activate_confirm_description:
+      "The employee will be able to sign in again. Existing sessions remain revoked and a new sign-in is required.",
+    deactivate_confirm_title: "Deactivate this account?",
+    deactivate_confirm_description:
+      "The employee will be signed out and blocked from signing in. Credential and audit history will be preserved.",
+    activate_success: "Employee account activated.",
+    deactivate_success: "Employee account deactivated.",
+    account_state_failed:
+      "The account state could not be changed. Refresh and try again.",
     load_error: "Could not load the employee profile",
     profile: "Employee Profile",
     not_available: "Not available",
@@ -352,8 +389,7 @@ export const en = {
     owner_loading: "Loading the selected employee…",
     private_upload_notice:
       "The document is uploaded to private encrypted storage. Do not share upload links or document images outside the platform.",
-    manual_upload_hint:
-      "Optional: attach an image or PDF (maximum 8 MB).",
+    manual_upload_hint: "Optional: attach an image or PDF (maximum 8 MB).",
     select_type: "Select document type",
     english: "English",
     arabic: "Arabic",

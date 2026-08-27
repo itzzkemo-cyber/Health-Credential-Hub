@@ -8,9 +8,14 @@ export const ROLE_RANK: Readonly<Record<User["role"], number>> = {
   system_admin: 4,
 };
 
-/** Privileged role assignment is reserved for admins below their own rank. */
+/**
+ * Privileged role assignment is reserved for admins below their own rank.
+ * The bootstrap command is the only supported way to create the single root
+ * system administrator; authenticated account-management APIs cannot mint a
+ * second root account.
+ */
 export function canAssignRole(actor: User, newRole: User["role"]): boolean {
-  if (actor.role === "system_admin") return true;
+  if (actor.role === "system_admin") return newRole !== "system_admin";
   if (actor.role !== "hospital_admin") return false;
   return ROLE_RANK[newRole] < ROLE_RANK[actor.role];
 }
@@ -21,7 +26,7 @@ export function canAssignRole(actor: User, newRole: User["role"]): boolean {
  * Callers handle explicitly allowed self-service separately.
  */
 export function canManageTarget(actor: User, target: User): boolean {
-  if (actor.role === "system_admin") return true;
+  if (actor.role === "system_admin") return target.role !== "system_admin";
   return (
     actor.facilityId === target.facilityId &&
     ROLE_RANK[target.role] < ROLE_RANK[actor.role]
@@ -53,10 +58,7 @@ export function isUserInScope(current: User, target: User): boolean {
  * Credential evidence permits self-service. Delegated access additionally
  * requires the target to be both team/facility-scoped and lower-ranked.
  */
-export function canAccessCredentialOwner(
-  current: User,
-  target: User,
-): boolean {
+export function canAccessCredentialOwner(current: User, target: User): boolean {
   if (!isUserInScope(current, target)) return false;
   return current.id === target.id || canManageTarget(current, target);
 }

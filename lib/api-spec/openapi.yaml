@@ -865,6 +865,13 @@ paths:
       operationId: listDepartments
       tags: [departments]
       summary: List departments
+      parameters:
+        - name: facilityId
+          in: query
+          description: Optional facility selector for system administrators. Other roles remain scoped to their own facility.
+          schema:
+            type: integer
+            minimum: 1
       responses:
         "200":
           description: List of departments

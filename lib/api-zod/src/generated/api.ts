@@ -1091,6 +1091,13 @@ export const DeactivateEmployeeResponse = zod.object({
 /**
  * @summary List departments
  */
+
+
+
+export const ListDepartmentsQueryParams = zod.object({
+  "facilityId": zod.coerce.number().int().min(1).optional().describe('Optional facility selector for system administrators. Other roles remain scoped to their own facility.')
+})
+
 export const ListDepartmentsResponseItem = zod.object({
   "id": zod.number(),
   "name": zod.string(),

@@ -796,6 +796,14 @@ search?: string;
 atRisk?: boolean;
 };
 
+export type ListDepartmentsParams = {
+/**
+ * Optional facility selector for system administrators. Other roles remain scoped to their own facility.
+ * @minimum 1
+ */
+facilityId?: number;
+};
+
 export type ListNotificationsParams = {
 unreadOnly?: boolean;
 };

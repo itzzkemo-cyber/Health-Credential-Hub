@@ -35,15 +35,27 @@ router.use("/departments", requireAuth);
 
 router.get("/departments", async (req, res) => {
   const user = getUser(req);
+  let facilityId = user.facilityId;
+  if (user.role === "system_admin" && req.query.facilityId != null) {
+    const requestedFacilityId =
+      typeof req.query.facilityId === "string"
+        ? Number(req.query.facilityId)
+        : Number.NaN;
+    if (!Number.isSafeInteger(requestedFacilityId) || requestedFacilityId < 1) {
+      res.status(400).json({ message: "A valid facilityId is required" });
+      return;
+    }
+    facilityId = requestedFacilityId;
+  }
   const departments = await db
     .select()
     .from(departmentsTable)
-    .where(eq(departmentsTable.facilityId, user.facilityId));
+    .where(eq(departmentsTable.facilityId, facilityId));
   const scopedUsers = (await getScopedUsers(user)).filter(
-    (candidate) => candidate.facilityId === user.facilityId,
+    (candidate) => candidate.facilityId === facilityId,
   );
   const creds = await getCredentialsFor(scopedUsers.map((u) => u.id));
-  const policies = await getPolicies(user.facilityId);
+  const policies = await getPolicies(facilityId);
 
   const result = departments.map((d) => {
     const members = scopedUsers.filter((u) => u.departmentId === d.id && u.isActive);

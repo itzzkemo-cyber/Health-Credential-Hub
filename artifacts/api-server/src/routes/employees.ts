@@ -28,7 +28,6 @@ import {
   serializeCredential,
   employeeSummary,
   getDepartments,
-  logAudit,
 } from "../lib/helpers";
 import { canAssignRole, canManageTarget } from "../lib/roleHierarchy";
 
@@ -43,6 +42,23 @@ function isPostgresUniqueViolation(error: unknown): boolean {
     current = candidate.cause;
   }
   return false;
+}
+
+const ACCOUNT_AUDIT_FIELDS = [
+  "role",
+  "departmentId",
+  "supervisorId",
+  "isActive",
+] as const;
+
+function accountChangeDetails(before: User, after: User): string | null {
+  const changes: Record<string, { from: unknown; to: unknown }> = {};
+  for (const field of ACCOUNT_AUDIT_FIELDS) {
+    if (before[field] !== after[field]) {
+      changes[field] = { from: before[field], to: after[field] };
+    }
+  }
+  return Object.keys(changes).length > 0 ? JSON.stringify(changes) : null;
 }
 
 router.use("/employees", requireAuth);
@@ -225,7 +241,11 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
   }
   if (supervisorId != null) {
     const supervisor = await db
-      .select({ id: usersTable.id })
+      .select({
+        id: usersTable.id,
+        role: usersTable.role,
+        isActive: usersTable.isActive,
+      })
       .from(usersTable)
       .where(
         and(
@@ -233,10 +253,15 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
           eq(usersTable.facilityId, facilityId),
         ),
       );
-    if (supervisor.length === 0) {
-      res
-        .status(400)
-        .json({ message: "Supervisor not found in the target facility" });
+    if (
+      supervisor.length === 0 ||
+      supervisor[0]?.role === "employee" ||
+      !supervisor[0]?.isActive
+    ) {
+      res.status(400).json({
+        message:
+          "Supervisor must be an active non-employee in the target facility",
+      });
       return;
     }
   }
@@ -372,22 +397,18 @@ router.patch(
       target.id === user.id &&
       organizationalFields.some((field) => field in body)
     ) {
-      res
-        .status(403)
-        .json({
-          message: "You cannot change your own role or organizational scope",
-        });
+      res.status(403).json({
+        message: "You cannot change your own role or organizational scope",
+      });
       return;
     }
     if (
       !ADMIN_ROLES.includes(user.role) &&
       organizationalFields.some((field) => field in body)
     ) {
-      res
-        .status(403)
-        .json({
-          message: "Only administrators may change organizational fields",
-        });
+      res.status(403).json({
+        message: "Only administrators may change organizational fields",
+      });
       return;
     }
     const patch: Record<string, unknown> = {};
@@ -464,7 +485,11 @@ router.patch(
       }
       if (supervisorId != null) {
         const supervisor = await db
-          .select({ id: usersTable.id })
+          .select({
+            id: usersTable.id,
+            role: usersTable.role,
+            isActive: usersTable.isActive,
+          })
           .from(usersTable)
           .where(
             and(
@@ -472,10 +497,15 @@ router.patch(
               eq(usersTable.facilityId, target.facilityId),
             ),
           );
-        if (supervisor.length === 0) {
-          res
-            .status(400)
-            .json({ message: "Supervisor not found in the employee facility" });
+        if (
+          supervisor.length === 0 ||
+          supervisor[0]?.role === "employee" ||
+          !supervisor[0]?.isActive
+        ) {
+          res.status(400).json({
+            message:
+              "Supervisor must be an active non-employee in the employee facility",
+          });
           return;
         }
       }
@@ -487,26 +517,33 @@ router.patch(
       // change. This is safe for idempotent retries and closes stale-write races.
       patch.sessionVersion = sql`${usersTable.sessionVersion} + 1`;
     }
-    const updated = await db
-      .update(usersTable)
-      .set(patch)
-      .where(eq(usersTable.id, id))
-      .returning();
-    const result = updated[0];
+    const result = await db.transaction(async (tx) => {
+      const updated = await tx
+        .update(usersTable)
+        .set(patch)
+        .where(eq(usersTable.id, id))
+        .returning();
+      const updatedUser = updated[0];
+      if (!updatedUser) return null;
+
+      await tx.insert(auditLogsTable).values({
+        userId: user.id,
+        facilityId: updatedUser.facilityId,
+        userName: user.name,
+        userNameAr: user.nameAr,
+        action: "Updated employee",
+        actionAr: "تحديث موظف",
+        target: updatedUser.name,
+        targetAr: updatedUser.nameAr,
+        details: accountChangeDetails(target, updatedUser),
+        ipAddress: req.ip ?? null,
+      });
+      return updatedUser;
+    });
     if (!result) {
       res.status(500).json({ message: "Update failed" });
       return;
     }
-    await logAudit(
-      user,
-      "Updated employee",
-      "تحديث موظف",
-      result.name,
-      result.nameAr,
-      undefined,
-      req.ip,
-      result.facilityId,
-    );
     res.json(serializeUser(result));
   },
 );
@@ -541,23 +578,27 @@ router.delete(
     }
     // Credential and audit history are regulated records. A DELETE request is
     // therefore implemented as a reversible deactivation and session revocation.
-    await db
-      .update(usersTable)
-      .set({
-        isActive: false,
-        sessionVersion: sql`${usersTable.sessionVersion} + 1`,
-      })
-      .where(eq(usersTable.id, id));
-    await logAudit(
-      user,
-      "Deactivated employee",
-      "إيقاف موظف",
-      target.name,
-      target.nameAr,
-      undefined,
-      req.ip,
-      target.facilityId,
-    );
+    await db.transaction(async (tx) => {
+      await tx
+        .update(usersTable)
+        .set({
+          isActive: false,
+          sessionVersion: sql`${usersTable.sessionVersion} + 1`,
+        })
+        .where(eq(usersTable.id, id));
+      await tx.insert(auditLogsTable).values({
+        userId: user.id,
+        facilityId: target.facilityId,
+        userName: user.name,
+        userNameAr: user.nameAr,
+        action: "Deactivated employee",
+        actionAr: "إيقاف موظف",
+        target: target.name,
+        targetAr: target.nameAr,
+        details: accountChangeDetails(target, { ...target, isActive: false }),
+        ipAddress: req.ip ?? null,
+      });
+    });
     res.status(204).end();
   },
 );
@@ -585,42 +626,49 @@ async function setActive(
     res.status(403).json({ message: "Not authorized to modify this employee" });
     return;
   }
-  const updated = await db
-    .update(usersTable)
-    .set({
-      isActive,
-      // Activation must revoke old tokens too; inactive accounts may still
-      // have an otherwise-valid JWT that must not revive after reactivation.
-      sessionVersion: sql`${usersTable.sessionVersion} + 1`,
-    })
-    .where(eq(usersTable.id, id))
-    .returning();
-  const result = updated[0];
+  const result = await db.transaction(async (tx) => {
+    const updated = await tx
+      .update(usersTable)
+      .set({
+        isActive,
+        // Activation must revoke old tokens too; inactive accounts may still
+        // have an otherwise-valid JWT that must not revive after reactivation.
+        sessionVersion: sql`${usersTable.sessionVersion} + 1`,
+      })
+      .where(eq(usersTable.id, id))
+      .returning();
+    const updatedUser = updated[0];
+    if (!updatedUser) return null;
+
+    await tx.insert(auditLogsTable).values({
+      userId: user.id,
+      facilityId: updatedUser.facilityId,
+      userName: user.name,
+      userNameAr: user.nameAr,
+      action: isActive ? "Activated employee" : "Deactivated employee",
+      actionAr: isActive ? "تفعيل موظف" : "إيقاف موظف",
+      target: updatedUser.name,
+      targetAr: updatedUser.nameAr,
+      details: accountChangeDetails(target, updatedUser),
+      ipAddress: req.ip ?? null,
+    });
+    return updatedUser;
+  });
   if (!result) {
     res.status(500).json({ message: "Update failed" });
     return;
   }
-  await logAudit(
-    user,
-    isActive ? "Activated employee" : "Deactivated employee",
-    isActive ? "تفعيل موظف" : "إيقاف موظف",
-    result.name,
-    result.nameAr,
-    undefined,
-    req.ip,
-    result.facilityId,
-  );
   res.json(serializeUser(result));
 }
 
 router.post(
   "/employees/:id/activate",
-  requireRole(...MANAGER_ROLES),
+  requireRole(...ADMIN_ROLES),
   (req, res) => setActive(req, res, true),
 );
 router.post(
   "/employees/:id/deactivate",
-  requireRole(...MANAGER_ROLES),
+  requireRole(...ADMIN_ROLES),
   (req, res) => setActive(req, res, false),
 );
 

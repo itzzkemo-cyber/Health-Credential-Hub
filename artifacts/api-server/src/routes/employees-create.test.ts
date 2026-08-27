@@ -1,4 +1,8 @@
-import express, { type NextFunction, type Request, type Response } from "express";
+import express, {
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testState = vi.hoisted(() => ({
@@ -33,6 +37,8 @@ vi.mock("@workspace/db", () => {
     id: "users.id",
     email: "users.email",
     facilityId: "users.facilityId",
+    role: "users.role",
+    isActive: "users.isActive",
   };
   const facilitiesTable = { id: "facilities.id" };
   const auditLogsTable = { kind: "auditLogs" };
@@ -41,7 +47,10 @@ vi.mock("@workspace/db", () => {
     credentialsTable: {},
     facilitiesTable,
     auditLogsTable,
-    departmentsTable: { id: "departments.id", facilityId: "departments.facilityId" },
+    departmentsTable: {
+      id: "departments.id",
+      facilityId: "departments.facilityId",
+    },
     USER_ROLES: [
       "employee",
       "supervisor",
@@ -183,17 +192,14 @@ describe("administrative employee provisioning", () => {
     }
   });
 
-  async function postEmployee(): Promise<globalThis.Response> {
+  async function postEmployee(
+    overrides: Record<string, unknown> = {},
+  ): Promise<globalThis.Response> {
     const app = express();
     app.use(express.json());
     app.use("/api", router);
     app.use(
-      (
-        _error: unknown,
-        _req: Request,
-        res: Response,
-        _next: NextFunction,
-      ) => {
+      (_error: unknown, _req: Request, res: Response, _next: NextFunction) => {
         res.status(500).json({ message: "Internal server error" });
       },
     );
@@ -216,6 +222,7 @@ describe("administrative employee provisioning", () => {
         jobTitle: "Nurse",
         jobTitleAr: "ممرض",
         employeeNumber: "EMP-2",
+        ...overrides,
       }),
     });
   }
@@ -273,6 +280,30 @@ describe("administrative employee provisioning", () => {
     });
     expect(testState.transactionRolledBack).toBe(true);
     expect(testState.committedUser).toBeNull();
+    expect(testState.auditValues).toBeNull();
+  });
+
+  it.each([
+    {
+      label: "employee",
+      supervisor: { id: 3, role: "employee", isActive: true },
+    },
+    {
+      label: "inactive manager",
+      supervisor: { id: 3, role: "supervisor", isActive: false },
+    },
+  ])("rejects an ineligible $label supervisor", async ({ supervisor }) => {
+    testState.selectResults = [[], [{ id: 10 }], [supervisor]];
+
+    const response = await postEmployee({ supervisorId: 3 });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      message:
+        "Supervisor must be an active non-employee in the target facility",
+    });
+    expect(testState.transactionCount).toBe(0);
+    expect(testState.insertValues).toBeNull();
     expect(testState.auditValues).toBeNull();
   });
 });
