@@ -628,10 +628,15 @@ router.get(
         linked.length === 0
           ? await findActiveUploadGrant(objectPath, user.id)
           : null;
-      const isOwner =
+      const isLinkedOwner =
         hasObjectAcl &&
-        (linked.some((entry) => entry.employeeId === user.id) ||
-          pendingGrant != null);
+        linked.some((entry) => entry.employeeId === user.id);
+      // An unlinked upload has no object ACL until credential creation. The
+      // processed, unclaimed grant is itself the short-lived authorization:
+      // findActiveUploadGrant already binds the exact object path to this user
+      // and requires the processed lifecycle, integrity hash, and expiry.
+      const isPendingOwner = linked.length === 0 && pendingGrant != null;
+      const isOwner = isLinkedOwner || isPendingOwner;
       let canManage = false;
       let auditFacilityId = user.facilityId;
       if (!isOwner && MANAGER_ROLES.includes(user.role)) {

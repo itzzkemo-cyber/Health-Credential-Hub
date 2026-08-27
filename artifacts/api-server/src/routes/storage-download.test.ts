@@ -201,6 +201,18 @@ describe("private object download authorization", () => {
     expect(mocks.logAudit).not.toHaveBeenCalled();
   });
 
+  it("allows the requester to read a processed unlinked upload before ACL association", async () => {
+    mocks.linked = [];
+    mocks.hasObjectAcl = false;
+    mocks.pendingGrant = { status: "processed" };
+
+    const response = await get();
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("private document");
+    expect(mocks.logAudit).toHaveBeenCalledOnce();
+  });
+
   it.each(["supervisor", "department_manager", "hospital_admin"])(
     "allows a %s only when the linked employee is in server-side scope",
     async (role) => {
