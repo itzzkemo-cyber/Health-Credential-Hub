@@ -220,7 +220,7 @@ export const en = {
       "Upload your professional certificates and licenses from your phone, then track their status and expiry dates in one place.",
     private_upload:
       "Your files are private and visible only to you and authorized staff within your facility.",
-    upload_action: "Upload New Document",
+    upload_action: "Add New Credential",
     document_summary: "Document summary",
     upcoming_expirations: "Upcoming Expirations",
     no_upcoming_expirations: "No documents are expiring soon.",
@@ -243,7 +243,7 @@ export const en = {
     try_another_search: "Try a different search term.",
     no_documents: "You have not uploaded any documents yet",
     no_documents_hint:
-      "Start with a clear photo or PDF of your professional certificate or license.",
+      "Start with a clear JPG or PNG photo of your professional certificate or license from your phone.",
     holder: "Document holder",
     issuer: "Issuer",
     expires: "Expires",
@@ -402,21 +402,23 @@ export const en = {
     certificate_number: "Certificate Number",
     issue_date: "Issue Date",
     expiry_date: "Expiry Date",
-    file: "Attached File",
+    file: "Attached Photo",
     notes: "Notes",
     file_too_large:
-      "File too large — the maximum is 8 MB. Try a smaller image or a compressed PDF",
+      "The photo is too large — the maximum is 8 MB. Take a smaller photo or reduce its resolution, then try again.",
+    file_type_unsupported:
+      "Choose a JPG or PNG photo only. PDF uploads are temporarily unsupported.",
     document_preview: "Document Preview",
     open_file: "Open File",
     no_document: "No document attached",
     pdf_open_hint:
       'Inline PDF preview isn\'t supported in this browser — use "Open File" to view it',
     upload_failed:
-      "Could not upload the file — check your connection and try again",
+      "Could not upload the photo — check your connection and try again",
     add_subtitle:
-      "Enter a new professional certificate or license; attach a file when secure uploads are available.",
-    uploading_title: "Uploading document…",
-    uploading_hint: "Keep this page open until the upload is complete",
+      "Enter a new professional certificate or license; attach a photo when secure uploads are available.",
+    uploading_title: "Uploading photo…",
+    uploading_hint: "Keep this page open until the photo upload is complete",
     saving_title: "Saving document…",
     cleanup_failed:
       "The document was not saved and cleanup could not be confirmed. Do not retry yet; contact your administrator.",
@@ -429,24 +431,25 @@ export const en = {
     uploading_for: "Uploading for employee",
     owner_loading: "Loading the selected employee…",
     private_upload_notice:
-      "The selected file stays on this device until you save. After upload, it remains private and can be viewed only by you and authorized staff within your facility.",
-    manual_upload_hint: "Optional: attach an image or PDF (maximum 8 MB).",
-    upload_checking_title: "Checking secure file upload availability",
+      "The selected photo stays on this device until you save. After upload, it remains private and can be viewed only by you and authorized staff within your facility.",
+    manual_upload_hint:
+      "Optional: take a photo on your phone or choose a JPG/PNG image up to 8 MB. PDF uploads are temporarily unsupported.",
+    upload_checking_title: "Checking secure photo upload availability",
     upload_checking_desc:
       "You can continue entering the details; file selection will appear when the check is complete.",
-    upload_unavailable_title: "File attachments are temporarily unavailable",
+    upload_unavailable_title: "Photo attachments are temporarily unavailable",
     upload_unavailable_desc:
-      "You can save the credential record without a file. File selection remains disabled until secure scanning and storage are enabled by an administrator.",
+      "You can save the credential record without a photo. Photo selection remains disabled until secure scanning and storage are enabled by an administrator.",
     record_without_attachment_hint:
-      "Optional: save the credential record without an attachment now, then add the file after uploads are enabled.",
+      "Optional: save the credential record without an attachment now, then add the photo after uploads are enabled.",
     select_type: "Select document type",
     english: "English",
     arabic: "Arabic",
     save_document: "Save Document",
-    file_ready: "Selected locally — it will upload only when you save",
-    replace_file: "Replace File",
-    remove_file: "Remove File",
-    choose_file: "Choose Image or PDF",
+    file_ready: "Selected locally — the photo uploads only when you save",
+    replace_file: "Replace Photo",
+    remove_file: "Remove Photo",
+    choose_file: "Take or Choose a Photo",
     load_error: "Could not load the document",
     deleted: "Document deleted",
     link_copied: "Verification link copied",

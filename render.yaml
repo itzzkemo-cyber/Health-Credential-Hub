@@ -51,10 +51,12 @@ services:
         sync: false
       - key: OBJECT_STORAGE_PROVIDER
         value: s3
-      # Controlled acceptance keeps document intake fail-closed. Set true only
-      # after an approved Linux malware scanner passes /api/readyz.
+      # Controlled acceptance permits bounded JPEG/PNG intake only. The API
+      # rebuilds every image as a metadata-free JPEG before private persistence.
       - key: DOCUMENT_UPLOADS_ENABLED
-        value: "false"
+        value: "true"
+      - key: UPLOAD_SECURITY_PROVIDER
+        value: raster-sanitizer
       - key: PRIVATE_OBJECT_DIR
         sync: false
       - key: S3_OBJECT_STORAGE_ENDPOINT

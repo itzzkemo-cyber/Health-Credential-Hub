@@ -8,24 +8,36 @@ const mocks = vi.hoisted(() => {
   class MalwareScanUnavailableError extends Error {}
   class MalwareScanBusyError extends MalwareScanUnavailableError {}
   class MalwareQuarantineCleanupError extends Error {}
+  class UploadSecurityRejectedError extends Error {}
+  class UploadSecurityUnavailableError extends Error {}
+  class UploadSecurityBusyError extends UploadSecurityUnavailableError {}
   class ObjectAlreadyExistsError extends Error {}
+  class ObjectNotFoundError extends Error {}
   const storedFile = { name: "private/uploads/test" };
   return {
     provider: "filesystem",
     uploadsEnabled: true,
     actor: { id: 7, role: "employee", facilityId: 3, isActive: true },
     findActiveUploadGrant: vi.fn(),
-    scanUploadForMalware: vi.fn(),
+    reserveUploadGrantForProcessing: vi.fn(),
+    processUploadSecurity: vi.fn(),
+    finalizeUploadGrantProcessing: vi.fn(),
+    reserveUploadGrantFailureCleanup: vi.fn(),
+    rollbackUploadGrantProcessing: vi.fn(),
     validateUploadedObject: vi.fn(),
     writeServerMediatedObject: vi.fn(),
     getObjectEntityFile: vi.fn(),
     deleteObject: vi.fn(),
     storedFile,
     ObjectAlreadyExistsError,
+    ObjectNotFoundError,
     MalwareDetectedError,
     MalwareScanUnavailableError,
     MalwareScanBusyError,
     MalwareQuarantineCleanupError,
+    UploadSecurityRejectedError,
+    UploadSecurityUnavailableError,
+    UploadSecurityBusyError,
   };
 });
 
@@ -85,7 +97,7 @@ vi.mock("../lib/objectAcl", () => ({
 vi.mock("../lib/objectStorage", () => ({
   getObjectStorageProvider: vi.fn(() => mocks.provider),
   ObjectAlreadyExistsError: mocks.ObjectAlreadyExistsError,
-  ObjectNotFoundError: class extends Error {},
+  ObjectNotFoundError: mocks.ObjectNotFoundError,
   ObjectStorageService: class {
     writeServerMediatedObject = mocks.writeServerMediatedObject;
     getObjectEntityFile = mocks.getObjectEntityFile;
@@ -94,18 +106,24 @@ vi.mock("../lib/objectStorage", () => ({
 }));
 
 vi.mock("../lib/uploadSecurity", () => ({
-  ALLOWED_UPLOAD_CONTENT_TYPE:
-    /^(?:application\/pdf|image\/(?:jpeg|png|webp))$/,
+  ALLOWED_UPLOAD_CONTENT_TYPE: /^(?:image\/jpeg|image\/png)$/,
   MAX_UPLOAD_BYTES: 8 * 1024 * 1024,
   UPLOAD_GRANT_TTL_MS: 15 * 60 * 1000,
   findActiveUploadGrant: mocks.findActiveUploadGrant,
+  reserveUploadGrantForProcessing: mocks.reserveUploadGrantForProcessing,
   hasAllowedUploadSignature: vi.fn(() => true),
-  scanUploadForMalware: mocks.scanUploadForMalware,
+  processUploadSecurity: mocks.processUploadSecurity,
+  finalizeUploadGrantProcessing: mocks.finalizeUploadGrantProcessing,
+  reserveUploadGrantFailureCleanup: mocks.reserveUploadGrantFailureCleanup,
+  rollbackUploadGrantProcessing: mocks.rollbackUploadGrantProcessing,
   validateUploadedObject: mocks.validateUploadedObject,
   MalwareDetectedError: mocks.MalwareDetectedError,
   MalwareScanUnavailableError: mocks.MalwareScanUnavailableError,
   MalwareScanBusyError: mocks.MalwareScanBusyError,
   MalwareQuarantineCleanupError: mocks.MalwareQuarantineCleanupError,
+  UploadSecurityRejectedError: mocks.UploadSecurityRejectedError,
+  UploadSecurityUnavailableError: mocks.UploadSecurityUnavailableError,
+  UploadSecurityBusyError: mocks.UploadSecurityBusyError,
 }));
 
 import router from "./storage";
@@ -113,8 +131,17 @@ import { csrfOriginGuard } from "../lib/csrf";
 
 describe("server-mediated private object upload route", () => {
   const uploadId = "f3fddc5a-9315-4b7b-8e7c-8ac98bc9f6c5";
-  const bytes = Buffer.from("%PDF-1.7\nprivate credential", "utf8");
-  const expectedSha256 = createHash("sha256").update(bytes).digest("hex");
+  const bytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWP4//8/AAX+Av5Y8msOAAAAAElFTkSuQmCC",
+    "base64",
+  );
+  const processedBytes = Buffer.from(
+    "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AKpAB//Z",
+    "base64",
+  );
+  const expectedSha256 = createHash("sha256")
+    .update(processedBytes)
+    .digest("hex");
   let server: ReturnType<express.Express["listen"]> | undefined;
   let origin = "";
 
@@ -123,17 +150,46 @@ describe("server-mediated private object upload route", () => {
     mocks.uploadsEnabled = true;
     mocks.findActiveUploadGrant.mockReset();
     mocks.findActiveUploadGrant.mockResolvedValue({
+      id: 19,
       declaredSize: bytes.length,
-      declaredContentType: "application/pdf",
+      declaredContentType: "image/png",
     });
-    mocks.scanUploadForMalware.mockReset();
-    mocks.scanUploadForMalware.mockResolvedValue(undefined);
+    mocks.reserveUploadGrantForProcessing.mockReset();
+    mocks.reserveUploadGrantForProcessing.mockImplementation(
+      async (
+        objectPath: string,
+        requestedBy: number,
+        declaredSize: number,
+        declaredContentType: string,
+        processingToken: string,
+      ) => ({
+        id: 19,
+        objectPath,
+        requestedBy,
+        declaredSize,
+        declaredContentType,
+        status: "processing",
+        processingToken,
+      }),
+    );
+    mocks.processUploadSecurity.mockReset();
+    mocks.processUploadSecurity.mockResolvedValue({
+      bytes: processedBytes,
+      contentType: "image/jpeg",
+      sha256: expectedSha256,
+    });
+    mocks.finalizeUploadGrantProcessing.mockReset();
+    mocks.finalizeUploadGrantProcessing.mockResolvedValue(true);
+    mocks.reserveUploadGrantFailureCleanup.mockReset();
+    mocks.reserveUploadGrantFailureCleanup.mockResolvedValue(true);
+    mocks.rollbackUploadGrantProcessing.mockReset();
+    mocks.rollbackUploadGrantProcessing.mockResolvedValue(true);
     mocks.validateUploadedObject.mockReset();
     mocks.validateUploadedObject.mockResolvedValue({
-      contentType: "application/pdf",
-      size: bytes.length,
+      contentType: "image/jpeg",
+      size: processedBytes.length,
       sha256: expectedSha256,
-      bytes,
+      bytes: processedBytes,
     });
     mocks.writeServerMediatedObject.mockReset();
     mocks.writeServerMediatedObject.mockResolvedValue(undefined);
@@ -172,7 +228,7 @@ describe("server-mediated private object upload route", () => {
   async function put(
     body = bytes,
     routeHeaders: Record<string, string> = {
-      "content-type": "application/pdf",
+      "content-type": "image/png",
       "if-none-match": "*",
     },
     includeClientMarker = true,
@@ -196,26 +252,40 @@ describe("server-mediated private object upload route", () => {
     const response = await put();
 
     expect(response.status).toBe(204);
-    expect(mocks.findActiveUploadGrant).toHaveBeenCalledWith(
+    expect(mocks.reserveUploadGrantForProcessing).toHaveBeenCalledWith(
       `/objects/uploads/${uploadId}`,
       mocks.actor.id,
+      bytes.length,
+      "image/png",
+      expect.any(String),
     );
-    expect(mocks.scanUploadForMalware).toHaveBeenCalledWith(bytes);
+    expect(mocks.processUploadSecurity).toHaveBeenCalledWith(
+      bytes,
+      "image/png",
+    );
     expect(mocks.writeServerMediatedObject).toHaveBeenCalledWith(
       `/objects/uploads/${uploadId}`,
-      bytes,
-      "application/pdf",
+      processedBytes,
+      "image/jpeg",
       expectedSha256,
     );
-    expect(mocks.scanUploadForMalware.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.writeServerMediatedObject.mock.invocationCallOrder[0],
-    );
-    expect(mocks.validateUploadedObject).toHaveBeenCalledWith(
-      mocks.storedFile,
-      expect.objectContaining({
-        declaredSize: bytes.length,
-        declaredContentType: "application/pdf",
-      }),
+    expect(
+      mocks.reserveUploadGrantForProcessing.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.processUploadSecurity.mock.invocationCallOrder[0]);
+    expect(
+      mocks.processUploadSecurity.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.writeServerMediatedObject.mock.invocationCallOrder[0]);
+    expect(mocks.validateUploadedObject).toHaveBeenCalledWith(mocks.storedFile);
+    const processingToken = mocks.reserveUploadGrantForProcessing.mock
+      .calls[0]?.[4] as string;
+    expect(mocks.finalizeUploadGrantProcessing).toHaveBeenCalledWith(
+      19,
+      mocks.actor.id,
+      `/objects/uploads/${uploadId}`,
+      processingToken,
+      processedBytes.length,
+      "image/jpeg",
+      expectedSha256,
     );
   });
 
@@ -227,8 +297,8 @@ describe("server-mediated private object upload route", () => {
     expect(response.status).toBe(204);
     expect(mocks.writeServerMediatedObject).toHaveBeenCalledWith(
       `/objects/uploads/${uploadId}`,
-      bytes,
-      "application/pdf",
+      processedBytes,
+      "image/jpeg",
       expectedSha256,
     );
   });
@@ -243,8 +313,8 @@ describe("server-mediated private object upload route", () => {
       error: "Document uploads are disabled",
       code: "DOCUMENT_UPLOADS_DISABLED",
     });
-    expect(mocks.findActiveUploadGrant).not.toHaveBeenCalled();
-    expect(mocks.scanUploadForMalware).not.toHaveBeenCalled();
+    expect(mocks.reserveUploadGrantForProcessing).not.toHaveBeenCalled();
+    expect(mocks.processUploadSecurity).not.toHaveBeenCalled();
   });
 
   it("disables upload grants as well as the byte-ingress route", async () => {
@@ -259,9 +329,9 @@ describe("server-mediated private object upload route", () => {
         "x-requested-with": "HealthCredentialHub",
       },
       body: JSON.stringify({
-        name: "credential.pdf",
+        name: "credential.png",
         size: bytes.length,
-        contentType: "application/pdf",
+        contentType: "image/png",
       }),
     });
 
@@ -280,21 +350,51 @@ describe("server-mediated private object upload route", () => {
     const response = await put();
 
     expect(response.status).toBe(500);
+    expect(mocks.reserveUploadGrantFailureCleanup).toHaveBeenCalledOnce();
     expect(mocks.deleteObject).toHaveBeenCalledWith(mocks.storedFile);
+    expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
   });
 
   it("removes an object whose provider bytes differ from the screened bytes", async () => {
     mocks.validateUploadedObject.mockResolvedValueOnce({
-      contentType: "application/pdf",
-      size: bytes.length,
+      contentType: "image/jpeg",
+      size: processedBytes.length,
       sha256: "0".repeat(64),
-      bytes: Buffer.from(bytes),
+      bytes: Buffer.from(processedBytes),
     });
 
     const response = await put();
 
     expect(response.status).toBe(500);
+    expect(mocks.reserveUploadGrantFailureCleanup).toHaveBeenCalledOnce();
     expect(mocks.deleteObject).toHaveBeenCalledWith(mocks.storedFile);
+    expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
+  });
+
+  it("deletes the processed object only after reserving cleanup when finalization loses its CAS", async () => {
+    mocks.finalizeUploadGrantProcessing.mockResolvedValueOnce(false);
+
+    const response = await put();
+
+    expect(response.status).toBe(500);
+    expect(mocks.finalizeUploadGrantProcessing).toHaveBeenCalledOnce();
+    expect(mocks.reserveUploadGrantFailureCleanup).toHaveBeenCalledOnce();
+    expect(mocks.deleteObject).toHaveBeenCalledWith(mocks.storedFile);
+    expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
+  });
+
+  it("does not delete a linkable object when an ambiguous finalization already won", async () => {
+    mocks.finalizeUploadGrantProcessing.mockRejectedValueOnce(
+      new Error("database response lost"),
+    );
+    mocks.reserveUploadGrantFailureCleanup.mockResolvedValueOnce(false);
+
+    const response = await put();
+
+    expect(response.status).toBe(500);
+    expect(mocks.reserveUploadGrantFailureCleanup).toHaveBeenCalledOnce();
+    expect(mocks.deleteObject).not.toHaveBeenCalled();
+    expect(mocks.rollbackUploadGrantProcessing).not.toHaveBeenCalled();
   });
 
   it("preserves an existing object when the create-only write conflicts", async () => {
@@ -307,11 +407,25 @@ describe("server-mediated private object upload route", () => {
     expect(response.status).toBe(409);
     expect(mocks.getObjectEntityFile).not.toHaveBeenCalled();
     expect(mocks.deleteObject).not.toHaveBeenCalled();
+    expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
   });
 
-  it("rejects infected bytes before writing an object", async () => {
-    mocks.scanUploadForMalware.mockRejectedValue(
-      new mocks.MalwareDetectedError(),
+  it("preserves an existing filesystem object on an EEXIST conflict", async () => {
+    mocks.writeServerMediatedObject.mockRejectedValueOnce(
+      Object.assign(new Error("exists"), { code: "EEXIST" }),
+    );
+
+    const response = await put();
+
+    expect(response.status).toBe(409);
+    expect(mocks.getObjectEntityFile).not.toHaveBeenCalled();
+    expect(mocks.deleteObject).not.toHaveBeenCalled();
+    expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
+  });
+
+  it("rejects unsafe input before writing any durable object", async () => {
+    mocks.processUploadSecurity.mockRejectedValue(
+      new mocks.UploadSecurityRejectedError(),
     );
 
     const response = await put();
@@ -321,25 +435,27 @@ describe("server-mediated private object upload route", () => {
       error: "Uploaded file failed security checks",
     });
     expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
+    expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
   });
 
-  it("fails closed when the malware scanner is unavailable", async () => {
-    mocks.scanUploadForMalware.mockRejectedValue(
-      new mocks.MalwareScanUnavailableError(),
+  it("fails closed when upload security processing is unavailable", async () => {
+    mocks.processUploadSecurity.mockRejectedValue(
+      new mocks.UploadSecurityUnavailableError(),
     );
 
     const response = await put();
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
-      error: "Upload security scanning is unavailable",
+      error: "Upload security processing is unavailable",
     });
     expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
+    expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
   });
 
-  it("returns a retryable busy response if the scanner slot races after disconnect", async () => {
-    mocks.scanUploadForMalware.mockRejectedValue(
-      new mocks.MalwareScanBusyError(),
+  it("returns a retryable busy response if the processor slot races after disconnect", async () => {
+    mocks.processUploadSecurity.mockRejectedValue(
+      new mocks.UploadSecurityBusyError(),
     );
 
     const response = await put();
@@ -347,12 +463,13 @@ describe("server-mediated private object upload route", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("retry-after")).toBe("1");
     await expect(response.json()).resolves.toEqual({
-      error: "Upload security scanning is busy",
+      error: "Upload security processing is busy",
     });
     expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
+    expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
   });
 
-  it("fails fast before buffering another upload when the scanner slot is occupied", async () => {
+  it("fails fast before buffering another upload when the processor slot is occupied", async () => {
     let notifyScanStarted: () => void = () => {};
     let releaseScan: () => void = () => {};
     const scanStarted = new Promise<void>((resolve) => {
@@ -361,21 +478,28 @@ describe("server-mediated private object upload route", () => {
     const scanRelease = new Promise<void>((resolve) => {
       releaseScan = resolve;
     });
-    mocks.scanUploadForMalware.mockImplementationOnce(async () => {
+    mocks.processUploadSecurity.mockImplementationOnce(async () => {
       notifyScanStarted();
       await scanRelease;
+      return {
+        bytes: processedBytes,
+        contentType: "image/jpeg",
+        sha256: expectedSha256,
+      };
     });
 
     const first = put();
     await scanStarted;
+    expect(mocks.reserveUploadGrantForProcessing).toHaveBeenCalledOnce();
+    expect(mocks.finalizeUploadGrantProcessing).not.toHaveBeenCalled();
     const saturated = await put();
 
     expect(saturated.status).toBe(503);
     expect(saturated.headers.get("retry-after")).toBe("1");
     await expect(saturated.json()).resolves.toEqual({
-      error: "Upload security scanning is busy",
+      error: "Upload security processing is busy",
     });
-    expect(mocks.scanUploadForMalware).toHaveBeenCalledTimes(1);
+    expect(mocks.processUploadSecurity).toHaveBeenCalledTimes(1);
     expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
 
     releaseScan();
@@ -384,10 +508,10 @@ describe("server-mediated private object upload route", () => {
   });
 
   it("rejects uploads without the create-only precondition", async () => {
-    const response = await put(bytes, { "content-type": "application/pdf" });
+    const response = await put(bytes, { "content-type": "image/png" });
 
     expect(response.status).toBe(428);
-    expect(mocks.findActiveUploadGrant).not.toHaveBeenCalled();
+    expect(mocks.reserveUploadGrantForProcessing).not.toHaveBeenCalled();
     expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
   });
 
@@ -395,7 +519,7 @@ describe("server-mediated private object upload route", () => {
     const response = await put(
       bytes,
       {
-        "content-type": "application/pdf",
+        "content-type": "image/png",
         "if-none-match": "*",
       },
       false,
@@ -405,12 +529,12 @@ describe("server-mediated private object upload route", () => {
     await expect(response.json()).resolves.toEqual({
       message: "Request verification failed",
     });
-    expect(mocks.findActiveUploadGrant).not.toHaveBeenCalled();
+    expect(mocks.reserveUploadGrantForProcessing).not.toHaveBeenCalled();
     expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
   });
 
   it("rejects an expired or cross-user upload grant", async () => {
-    mocks.findActiveUploadGrant.mockResolvedValue(null);
+    mocks.reserveUploadGrantForProcessing.mockResolvedValueOnce(null);
 
     const response = await put();
 
@@ -418,15 +542,12 @@ describe("server-mediated private object upload route", () => {
     expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
   });
 
-  it("rejects bytes that do not match the declared grant", async () => {
-    mocks.findActiveUploadGrant.mockResolvedValue({
-      declaredSize: bytes.length + 1,
-      declaredContentType: "application/pdf",
-    });
+  it("rejects bytes that do not atomically match the declared grant", async () => {
+    mocks.reserveUploadGrantForProcessing.mockResolvedValueOnce(null);
 
     const response = await put();
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(403);
     expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
   });
 
@@ -436,6 +557,34 @@ describe("server-mediated private object upload route", () => {
     const response = await put();
 
     expect(response.status).toBe(404);
-    expect(mocks.findActiveUploadGrant).not.toHaveBeenCalled();
+    expect(mocks.reserveUploadGrantForProcessing).not.toHaveBeenCalled();
   });
+
+  it.each(["gcs", "oci"])(
+    "does not mint a direct %s upload capability that bypasses processing",
+    async (provider) => {
+      mocks.provider = provider;
+
+      const response = await fetch(
+        `${origin}/api/storage/uploads/request-url`,
+        {
+          method: "POST",
+          headers: {
+            cookie: "healthdocs_session=test-session",
+            origin,
+            "content-type": "application/json",
+            "x-requested-with": "HealthCredentialHub",
+          },
+          body: JSON.stringify({
+            name: "credential.png",
+            size: bytes.length,
+            contentType: "image/png",
+          }),
+        },
+      );
+
+      expect(response.status).toBe(404);
+      expect(mocks.processUploadSecurity).not.toHaveBeenCalled();
+    },
+  );
 });

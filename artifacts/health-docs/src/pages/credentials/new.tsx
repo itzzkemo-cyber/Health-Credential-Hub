@@ -39,7 +39,10 @@ import { getAuthUser } from "@/lib/auth";
 import { useLanguage } from "@/lib/language-context";
 import {
   buildUploadRequestHeaders,
+  isSupportedUploadFile,
   prepareUploadFile,
+  UnsupportedUploadTypeError,
+  UPLOAD_ACCEPT_ATTRIBUTE,
   UploadTooLargeError,
 } from "@/lib/upload";
 import { cn } from "@/lib/utils";
@@ -53,9 +56,6 @@ import {
   type CredentialSubmissionStage,
 } from "./deferred-credential-submission";
 import { getCredentialOwnerState } from "./credential-owner-state";
-
-const FILE_ACCEPT =
-  "image/png,image/jpeg,image/webp,image/gif,image/avif,image/heic,image/heif,application/pdf";
 
 export default function CredentialNew() {
   const { t, isRTL } = useLanguage();
@@ -143,6 +143,10 @@ export default function CredentialNew() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
+    if (!isSupportedUploadFile(file)) {
+      toast.error(t("credential.file_type_unsupported"));
+      return;
+    }
     setSelectedFile(file);
   };
 
@@ -238,6 +242,11 @@ export default function CredentialNew() {
         underlyingError instanceof UploadTooLargeError
       ) {
         toast.error(t("credential.file_too_large"));
+      } else if (
+        submissionError?.stage === "upload" &&
+        underlyingError instanceof UnsupportedUploadTypeError
+      ) {
+        toast.error(t("credential.file_type_unsupported"));
       } else if (submissionError?.stage === "upload") {
         toast.error(t("credential.upload_failed"));
       } else if (submissionError?.stage === "cleanup") {
@@ -617,7 +626,7 @@ function DocumentPicker({
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"
-        accept={FILE_ACCEPT}
+        accept={UPLOAD_ACCEPT_ATTRIBUTE}
         onChange={onChange}
         disabled={busy || disabled}
       />

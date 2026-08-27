@@ -14,6 +14,7 @@ Every enabled integration below must use the reviewed production controls.
 
 | Integration                        | Implemented in the repository                                                                                                          | Provisioned by supplied infrastructure                                                                                                                                                                                  | Production status                                                                                                                                                                                                                                                                                                     |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Supabase private Storage (S3 API)  | Server-mediated JPEG/PNG intake with bounded ingress, server-side decode/rebuild to a metadata-free JPEG, private reads, and application ACL checks. | The operator configures the existing private bucket and injects server-only S3 keys into Render. | **Controlled pilot only.** Original bytes are never persisted and PDF/general files are blocked. Image rewriting is not general malware scanning; Frankfurt transfer, free-tier SLA, backup, retention, orphan cleanup, and incident controls remain approval gates. |
 | Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                   | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | **No-go for real documents in this release.** Signed direct PUT has no provider-ingress byte cap and no malware quarantine. Keep synthetic-only until bounded ingress, AV/quarantine, orphan cleanup, and restore drills are accepted.                                                                                |
 | Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.         | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | **No-go for real documents in this release.** Keep disabled until the same bounded-ingress, AV/quarantine, lifecycle, tenancy, IAM/CORS, and synthetic restore gates pass.                                                                                                                                            |
 | Gemini OCR                         | Authenticated users can send an authorized stored file to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields. | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                        |
@@ -24,7 +25,56 @@ Every enabled integration below must use the reviewed production controls.
 environment. No FHIR, HL7, SMART on FHIR, regulator API, or other health-data
 standard integration is implemented or claimed here.
 
-## 1. Private object storage (GCS or OCI Riyadh)
+## 1. Controlled Supabase image intake
+
+### Current data flow
+
+1. An authenticated browser sends only a JPEG/PNG filename, byte size, and MIME
+   type to `POST /api/storage/uploads/request-url`. The server enforces the
+   8 MiB cap, allocates an opaque random path, and records a caller-bound grant
+   that expires after 15 minutes.
+2. The browser PUTs the original image to the guarded same-origin endpoint with
+   its session, CSRF protections, exact content type, byte count, and
+   create-only header. The request body is retained only in bounded process
+   memory; it is not written to Supabase or a local quarantine file.
+3. The server verifies the signature, decodes with strict warning, pixel,
+   channel, frame, dimension, concurrency, and timeout limits, corrects
+   orientation, and rebuilds a new JPEG without EXIF, GPS, ICC, XMP, comments,
+   animation, or bytes appended to the original container.
+4. Only the rebuilt JPEG is written to the private bucket. The server reads it
+   back, checks type, size, signature, and SHA-256, then atomically updates the
+   still-unclaimed grant to the rebuilt metadata. A failed write, verification,
+   or grant update triggers object deletion and a fail-closed response.
+5. Credential linkage revalidates the stored object and consumes the grant.
+   Private reads and later OCR use the existing owner and server-side
+   facility/team scope checks. The browser never receives Supabase S3 keys.
+
+This path accepts only `image/jpeg` and `image/png`. PDF, SVG, GIF, WebP, AVIF,
+HEIC/HEIF, animated/multi-page images, malformed containers, and
+provider-direct upload modes are rejected. Image rewriting removes common
+metadata and appended-container payloads, but it is not a general malware
+scanner and does not make the free Frankfurt deployment approved healthcare
+production. An approved malware service is required before PDF or arbitrary
+file intake.
+
+### Destination, retention, and failure handling
+
+- The active bucket is private and reached through Supabase's S3-compatible
+  HTTPS endpoint in Frankfurt. S3 keys are server-only and bypass Storage RLS;
+  rotate them after suspected exposure and never place them in frontend code,
+  screenshots, logs, CI, or chat.
+- The original browser filename stays only in the short-lived PostgreSQL grant;
+  it is never an object key or log field. Object names are random UUIDs.
+- The controlled release has no automated orphan lifecycle or tested object
+  restore. The owner-only cleanup endpoint covers failed form completion, but
+  scheduled retention, backup/restore evidence, capacity alerts, and incident
+  response are still required before real regulated data.
+- `DOCUMENT_UPLOADS_ENABLED=true` requires
+  `UPLOAD_SECURITY_PROVIDER=raster-sanitizer`; `/api/readyz` performs a
+  processor self-test and proves the private bucket is reachable. Unknown,
+  busy, timeout, decode, storage, or integrity outcomes fail closed.
+
+## 2. Private object storage (GCS or OCI Riyadh)
 
 ### Current data flow
 
@@ -175,7 +225,7 @@ no-store, max-age=0`; only explicitly public objects may use cacheable
    retention, restoration, budget alert, and cross-tenant tests required for
    GCS. Provider selection alone is not production acceptance.
 
-## 2. Gemini OCR
+## 3. Gemini OCR
 
 ### Current data flow
 
@@ -254,7 +304,7 @@ there is no redaction or page selection before transmission.
    outage. Confirm that the UI leaves fields reviewable and never treats OCR as
    authoritative verification.
 
-## 3. Resend email
+## 4. Resend email
 
 ### Current data flow
 
@@ -333,7 +383,7 @@ this ledger.
    duplicate scheduler execution, backlog catch-up, reset-token expiry and
    single use, bounce/complaint response, and log redaction.
 
-## 4. Durable workflow automation / n8n-compatible webhook
+## 5. Durable workflow automation / n8n-compatible webhook
 
 ### Scope and safe defaults
 

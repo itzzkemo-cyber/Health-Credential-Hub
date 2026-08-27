@@ -12,7 +12,7 @@ import {
   type CredentialType,
   type User,
 } from "@workspace/db";
-import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { requireAuth, getUser, MANAGER_ROLES } from "../lib/auth";
 import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
 import {
@@ -381,10 +381,7 @@ router.post("/credentials/ocr", async (req, res) => {
   } catch (error) {
     // SDK errors are deliberately not serialized: provider request objects can
     // contain the inline Base64 document or authorization metadata.
-    req.log.error(
-      safeErrorLogFields(error),
-      "OCR: AI extraction failed",
-    );
+    req.log.error(safeErrorLogFields(error), "OCR: AI extraction failed");
     res.status(502).json({ message: "AI document reading failed" });
   }
 });
@@ -582,6 +579,9 @@ router.post("/credentials", async (req, res) => {
               and(
                 eq(uploadGrantsTable.objectPath, requestedFileUrl),
                 eq(uploadGrantsTable.requestedBy, actor.id),
+                eq(uploadGrantsTable.status, "processed"),
+                isNotNull(uploadGrantsTable.processedAt),
+                isNotNull(uploadGrantsTable.processedSha256),
                 isNull(uploadGrantsTable.claimedAt),
                 gt(uploadGrantsTable.expiresAt, new Date()),
               ),
@@ -608,6 +608,14 @@ router.post("/credentials", async (req, res) => {
             .where(
               and(
                 eq(uploadGrantsTable.id, grant.id),
+                eq(uploadGrantsTable.requestedBy, actor.id),
+                eq(uploadGrantsTable.objectPath, requestedFileUrl),
+                eq(uploadGrantsTable.status, "processed"),
+                isNotNull(uploadGrantsTable.processedAt),
+                eq(
+                  uploadGrantsTable.processedSha256,
+                  grant.processedSha256 as string,
+                ),
                 isNull(uploadGrantsTable.claimedAt),
                 gt(uploadGrantsTable.expiresAt, new Date()),
               ),
@@ -921,6 +929,9 @@ router.patch("/credentials/:id", async (req, res) => {
               and(
                 eq(uploadGrantsTable.objectPath, rawUrl),
                 eq(uploadGrantsTable.requestedBy, actor.id),
+                eq(uploadGrantsTable.status, "processed"),
+                isNotNull(uploadGrantsTable.processedAt),
+                isNotNull(uploadGrantsTable.processedSha256),
                 isNull(uploadGrantsTable.claimedAt),
                 gt(uploadGrantsTable.expiresAt, new Date()),
               ),
@@ -948,6 +959,14 @@ router.patch("/credentials/:id", async (req, res) => {
             .where(
               and(
                 eq(uploadGrantsTable.id, grant.id),
+                eq(uploadGrantsTable.requestedBy, actor.id),
+                eq(uploadGrantsTable.objectPath, rawUrl),
+                eq(uploadGrantsTable.status, "processed"),
+                isNotNull(uploadGrantsTable.processedAt),
+                eq(
+                  uploadGrantsTable.processedSha256,
+                  grant.processedSha256 as string,
+                ),
                 isNull(uploadGrantsTable.claimedAt),
                 gt(uploadGrantsTable.expiresAt, new Date()),
               ),

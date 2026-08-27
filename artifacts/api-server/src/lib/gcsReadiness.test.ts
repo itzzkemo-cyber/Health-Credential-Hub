@@ -198,10 +198,34 @@ describe("GCS production readiness", () => {
     ).rejects.toThrow("bucket denied");
   });
 
-  it("verifies S3 configuration, bucket reachability, and scanner readiness", async () => {
+  it.each(["gcs", "oci"])(
+    "rejects enabled document uploads for the direct %s provider",
+    async (provider) => {
+      const readBucketMetadata = vi.fn();
+      const probeOciBucket = vi.fn();
+
+      await expect(
+        checkObjectStorageReadiness({
+          env: {
+            ...productionEnv,
+            OBJECT_STORAGE_PROVIDER: provider,
+            DOCUMENT_UPLOADS_ENABLED: "true",
+          },
+          readBucketMetadata,
+          probeOciBucket,
+        }),
+      ).rejects.toThrow(
+        "Document uploads require the server-mediated filesystem or S3 provider",
+      );
+      expect(readBucketMetadata).not.toHaveBeenCalled();
+      expect(probeOciBucket).not.toHaveBeenCalled();
+    },
+  );
+
+  it("verifies S3 configuration, bucket reachability, and upload-security readiness", async () => {
     const readBucketMetadata = vi.fn();
     const probeS3Bucket = vi.fn().mockResolvedValue(undefined);
-    const probeMalwareScanner = vi.fn().mockResolvedValue(undefined);
+    const probeUploadSecurity = vi.fn().mockResolvedValue(undefined);
     const s3Env = {
       ...productionEnv,
       OBJECT_STORAGE_PROVIDER: "s3",
@@ -211,9 +235,7 @@ describe("GCS production readiness", () => {
       S3_OBJECT_STORAGE_REGION: "eu-central-1",
       S3_OBJECT_STORAGE_ACCESS_KEY_ID: "test-access-key",
       S3_OBJECT_STORAGE_SECRET_ACCESS_KEY: "test-secret-key",
-      MALWARE_SCAN_PROVIDER: "windows-defender",
-      MALWARE_QUARANTINE_DIR: absoluteFilesystemRoot,
-      WINDOWS_DEFENDER_MPCMDRUN_PATH: "C:\\Defender\\MpCmdRun.exe",
+      UPLOAD_SECURITY_PROVIDER: "raster-sanitizer",
     } satisfies NodeJS.ProcessEnv;
 
     await expect(
@@ -221,19 +243,19 @@ describe("GCS production readiness", () => {
         env: s3Env,
         readBucketMetadata,
         probeS3Bucket,
-        probeMalwareScanner,
+        probeUploadSecurity,
       }),
     ).resolves.toBe("verified");
     expect(readBucketMetadata).not.toHaveBeenCalled();
     expect(probeS3Bucket).toHaveBeenCalledWith("health-private");
-    expect(probeMalwareScanner).toHaveBeenCalledWith(s3Env);
+    expect(probeUploadSecurity).toHaveBeenCalledWith(s3Env);
   });
 
-  it("fails readiness when S3 uploads have no operational scanner", async () => {
+  it("fails readiness when S3 uploads have no operational security processor", async () => {
     const probeS3Bucket = vi.fn().mockResolvedValue(undefined);
-    const probeMalwareScanner = vi
+    const probeUploadSecurity = vi
       .fn()
-      .mockRejectedValue(new Error("scanner unavailable"));
+      .mockRejectedValue(new Error("processor unavailable"));
 
     await expect(
       checkObjectStorageReadiness({
@@ -248,16 +270,16 @@ describe("GCS production readiness", () => {
           S3_OBJECT_STORAGE_SECRET_ACCESS_KEY: "test-secret-key",
         },
         probeS3Bucket,
-        probeMalwareScanner,
+        probeUploadSecurity,
       }),
-    ).rejects.toThrow("scanner unavailable");
+    ).rejects.toThrow("processor unavailable");
     expect(probeS3Bucket).toHaveBeenCalledOnce();
-    expect(probeMalwareScanner).toHaveBeenCalledOnce();
+    expect(probeUploadSecurity).toHaveBeenCalledOnce();
   });
 
-  it("keeps S3 storage ready without a scanner when document intake is disabled", async () => {
+  it("keeps S3 storage ready without a processor when document intake is disabled", async () => {
     const probeS3Bucket = vi.fn().mockResolvedValue(undefined);
-    const probeMalwareScanner = vi.fn();
+    const probeUploadSecurity = vi.fn();
 
     await expect(
       checkObjectStorageReadiness({
@@ -272,16 +294,16 @@ describe("GCS production readiness", () => {
           S3_OBJECT_STORAGE_SECRET_ACCESS_KEY: "test-secret-key",
         },
         probeS3Bucket,
-        probeMalwareScanner,
+        probeUploadSecurity,
       }),
     ).resolves.toBe("verified");
     expect(probeS3Bucket).toHaveBeenCalledWith("health-private");
-    expect(probeMalwareScanner).not.toHaveBeenCalled();
+    expect(probeUploadSecurity).not.toHaveBeenCalled();
   });
 
   it("rejects unsafe S3 configuration before probing dependencies", async () => {
     const probeS3Bucket = vi.fn();
-    const probeMalwareScanner = vi.fn();
+    const probeUploadSecurity = vi.fn();
 
     await expect(
       checkObjectStorageReadiness({
@@ -295,16 +317,16 @@ describe("GCS production readiness", () => {
           S3_OBJECT_STORAGE_SECRET_ACCESS_KEY: "test-secret-key",
         },
         probeS3Bucket,
-        probeMalwareScanner,
+        probeUploadSecurity,
       }),
     ).rejects.toBeInstanceOf(ObjectStorageReadinessError);
     expect(probeS3Bucket).not.toHaveBeenCalled();
-    expect(probeMalwareScanner).not.toHaveBeenCalled();
+    expect(probeUploadSecurity).not.toHaveBeenCalled();
   });
 
   it("verifies the single-host filesystem directory", async () => {
     const probeFilesystemStorage = vi.fn().mockResolvedValue(undefined);
-    const probeMalwareScanner = vi.fn().mockResolvedValue(undefined);
+    const probeUploadSecurity = vi.fn().mockResolvedValue(undefined);
 
     await expect(
       checkObjectStorageReadiness({
@@ -316,16 +338,16 @@ describe("GCS production readiness", () => {
           PUBLIC_APP_URL: "https://app.wathaiqihealth.com",
         },
         probeFilesystemStorage,
-        probeMalwareScanner,
+        probeUploadSecurity,
       }),
     ).resolves.toBe("verified");
     expect(probeFilesystemStorage).toHaveBeenCalledOnce();
-    expect(probeMalwareScanner).toHaveBeenCalledOnce();
+    expect(probeUploadSecurity).toHaveBeenCalledOnce();
   });
 
   it("fails closed before probing a relative filesystem directory", async () => {
     const probeFilesystemStorage = vi.fn();
-    const probeMalwareScanner = vi.fn();
+    const probeUploadSecurity = vi.fn();
 
     await expect(
       checkObjectStorageReadiness({
@@ -336,10 +358,10 @@ describe("GCS production readiness", () => {
           PUBLIC_APP_URL: "https://app.wathaiqihealth.com",
         },
         probeFilesystemStorage,
-        probeMalwareScanner,
+        probeUploadSecurity,
       }),
     ).rejects.toBeInstanceOf(ObjectStorageReadinessError);
     expect(probeFilesystemStorage).not.toHaveBeenCalled();
-    expect(probeMalwareScanner).not.toHaveBeenCalled();
+    expect(probeUploadSecurity).not.toHaveBeenCalled();
   });
 });

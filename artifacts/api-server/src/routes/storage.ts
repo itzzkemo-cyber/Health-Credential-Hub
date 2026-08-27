@@ -1,5 +1,5 @@
 import { Readable } from "stream";
-import { createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { pipeline } from "node:stream/promises";
 import {
   RequestUploadUrlBody,
@@ -48,8 +48,15 @@ import {
   MalwareScanBusyError,
   MalwareScanUnavailableError,
   MAX_UPLOAD_BYTES,
-  scanUploadForMalware,
+  processUploadSecurity,
+  finalizeUploadGrantProcessing,
+  reserveUploadGrantFailureCleanup,
+  reserveUploadGrantForProcessing,
+  rollbackUploadGrantProcessing,
   UPLOAD_GRANT_TTL_MS,
+  UploadSecurityBusyError,
+  UploadSecurityRejectedError,
+  UploadSecurityUnavailableError,
   validateUploadedObject,
 } from "../lib/uploadSecurity";
 
@@ -97,7 +104,7 @@ function requireDocumentUploadsEnabled(
 }
 
 /**
- * Acquire the single local Defender/upload slot before express.raw retains an
+ * Acquire the single server-mediated upload slot before express.raw retains an
  * up-to-8MB body. Concurrent callers fail fast instead of building an
  * in-process queue of sensitive document buffers.
  */
@@ -108,7 +115,7 @@ function requireLocalUploadSlot(
 ): void {
   if (activeLocalUploads >= MAX_ACTIVE_LOCAL_UPLOADS) {
     res.setHeader("Retry-After", "1");
-    res.status(503).json({ error: "Upload security scanning is busy" });
+    res.status(503).json({ error: "Upload security processing is busy" });
     return;
   }
 
@@ -129,8 +136,8 @@ function requireLocalUploadSlot(
  *
  * The filesystem and generic S3 profiles use this same-origin endpoint. It is
  * session-authenticated, CSRF-guarded, and backed by a short-lived database
- * grant. Bytes are checked and scanned before becoming durable; if the runtime
- * has no supported malware scanner, the upload fails closed.
+ * grant. Bytes pass the configured fail-closed security processor before any
+ * sanitized result becomes durable.
  */
 router.put(
   "/storage/uploads/local/:uploadId",
@@ -151,23 +158,14 @@ router.put(
       return;
     }
 
-    const objectPath = `/objects/uploads/${uploadId}`;
-    const user = getUser(req);
-    const grant = await findActiveUploadGrant(objectPath, user.id);
-    if (!grant) {
-      res.status(403).json({ error: "Upload grant is missing or expired" });
-      return;
-    }
     const bytes = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     const contentType = (req.get("content-type") ?? "")
       .split(";", 1)[0]
       .trim()
       .toLowerCase();
     if (
-      bytes.length !== grant.declaredSize ||
       bytes.length <= 0 ||
       bytes.length > MAX_UPLOAD_BYTES ||
-      contentType !== grant.declaredContentType.toLowerCase() ||
       !ALLOWED_UPLOAD_CONTENT_TYPE.test(contentType) ||
       !hasAllowedUploadSignature(bytes, contentType)
     ) {
@@ -175,78 +173,203 @@ router.put(
       return;
     }
 
-    let createdObject = false;
+    const objectPath = `/objects/uploads/${uploadId}`;
+    const user = getUser(req);
+    const processingToken = randomUUID();
+    const grant = await reserveUploadGrantForProcessing(
+      objectPath,
+      user.id,
+      bytes.length,
+      contentType as "image/jpeg" | "image/png",
+      processingToken,
+    );
+    if (!grant) {
+      res.status(403).json({ error: "Upload grant is missing or expired" });
+      return;
+    }
+
+    let writeAttempted = false;
+    let finalized = false;
     let storedObjectFile: StoredObjectFile | undefined;
     try {
-      // Stage the exact in-memory bytes under a random quarantine name and
-      // require a clean configured scanner verdict before making the object
-      // durable. A missing scanner is an availability failure, never a bypass.
-      await scanUploadForMalware(bytes);
-      const scannedSha256 = createHash("sha256").update(bytes).digest("hex");
+      // The raster provider returns a freshly encoded JPEG; the legacy Windows
+      // provider returns only bytes that received its configured verdict.
+      // Persist only the processor result, never the browser-supplied buffer.
+      const processed = await processUploadSecurity(bytes, contentType);
+      writeAttempted = true;
       await objectStorageService.writeServerMediatedObject(
         objectPath,
-        bytes,
-        contentType,
-        scannedSha256,
+        processed.bytes,
+        processed.contentType,
+        processed.sha256,
       );
-      createdObject = true;
       storedObjectFile =
         await objectStorageService.getObjectEntityFile(objectPath);
-      // Re-read provider-observed metadata and bytes, enforce the grant again,
-      // verify the signature, and record the SHA-256 integrity hash.
-      const storedObject = await validateUploadedObject(
-        storedObjectFile,
-        grant,
-      );
-      if (storedObject.sha256 !== scannedSha256) {
-        throw new Error("Stored object differs from the screened upload");
+      // Re-read provider-observed metadata and bytes, verify the signature and
+      // SHA-256, then atomically replace the original grant declaration with
+      // the processed object metadata while it is still owned and active.
+      const storedObject = await validateUploadedObject(storedObjectFile);
+      if (
+        storedObject.sha256 !== processed.sha256 ||
+        storedObject.contentType !== processed.contentType ||
+        storedObject.size !== processed.bytes.length
+      ) {
+        throw new Error("Stored object differs from the processed upload");
       }
+      const grantUpdated = await finalizeUploadGrantProcessing(
+        grant.id,
+        user.id,
+        objectPath,
+        processingToken,
+        storedObject.size,
+        storedObject.contentType as "image/jpeg" | "image/png",
+        storedObject.sha256,
+      );
+      if (!grantUpdated) {
+        throw new Error("Upload grant expired before processing completed");
+      }
+      finalized = true;
       res.status(204).end();
     } catch (error) {
-      if (error instanceof ObjectAlreadyExistsError) {
+      if (
+        error instanceof ObjectAlreadyExistsError ||
+        (error as NodeJS.ErrnoException).code === "EEXIST"
+      ) {
+        try {
+          const rolledBack = await rollbackUploadGrantProcessing(
+            grant.id,
+            user.id,
+            objectPath,
+            processingToken,
+          );
+          if (!rolledBack) {
+            throw new Error("Conflicting upload grant rollback lost ownership");
+          }
+        } catch (cleanupError) {
+          req.log.error(
+            safeErrorLogFields(cleanupError),
+            "Failed to release conflicting upload grant",
+          );
+          res.status(500).json({ error: "Failed to store object" });
+          return;
+        }
         res.status(409).json({ error: "Object already exists" });
         return;
       }
 
-      if (createdObject) {
+      if (!finalized && writeAttempted) {
+        // Claim exclusive cleanup ownership before touching a possibly durable
+        // object. A failed CAS can mean finalization committed despite an
+        // ambiguous database response; deleting in that case could corrupt a
+        // credential that has already linked the processed object.
+        const cleanupToken = randomUUID();
+        let ownsCleanup = false;
+        try {
+          ownsCleanup = await reserveUploadGrantFailureCleanup(
+            grant.id,
+            user.id,
+            objectPath,
+            processingToken,
+            cleanupToken,
+          );
+        } catch (cleanupError) {
+          req.log.error(
+            safeErrorLogFields(cleanupError),
+            "Failed to reserve rejected upload cleanup",
+          );
+          res.status(500).json({ error: "Failed to store object" });
+          return;
+        }
+        if (!ownsCleanup) {
+          req.log.error(
+            { errorName: "UploadCleanupOwnershipLost" },
+            "Rejected upload cleanup did not own the grant",
+          );
+          res.status(500).json({ error: "Failed to store object" });
+          return;
+        }
+
         try {
           storedObjectFile ??=
             await objectStorageService.getObjectEntityFile(objectPath);
           await objectStorageService.deleteObject(storedObjectFile);
         } catch (cleanupError) {
+          if (!(cleanupError instanceof ObjectNotFoundError)) {
+            req.log.error(
+              safeErrorLogFields(cleanupError),
+              "Failed to remove rejected server-mediated upload",
+            );
+            res.status(500).json({ error: "Failed to store object" });
+            return;
+          }
+        }
+
+        try {
+          const rolledBack = await rollbackUploadGrantProcessing(
+            grant.id,
+            user.id,
+            objectPath,
+            cleanupToken,
+          );
+          if (!rolledBack) {
+            throw new Error("Rejected upload grant cleanup lost ownership");
+          }
+        } catch (cleanupError) {
           req.log.error(
             safeErrorLogFields(cleanupError),
-            "Failed to remove rejected server-mediated upload",
+            "Failed to release rejected upload grant",
+          );
+          res.status(500).json({ error: "Failed to store object" });
+          return;
+        }
+      } else if (!finalized) {
+        try {
+          const rolledBack = await rollbackUploadGrantProcessing(
+            grant.id,
+            user.id,
+            objectPath,
+            processingToken,
+          );
+          if (!rolledBack) {
+            throw new Error("Rejected upload grant rollback lost ownership");
+          }
+        } catch (cleanupError) {
+          req.log.error(
+            safeErrorLogFields(cleanupError),
+            "Failed to release rejected upload grant",
           );
           res.status(500).json({ error: "Failed to store object" });
           return;
         }
       }
 
-      if (error instanceof MalwareDetectedError) {
+      if (
+        error instanceof UploadSecurityRejectedError ||
+        error instanceof MalwareDetectedError
+      ) {
         res.status(422).json({ error: "Uploaded file failed security checks" });
         return;
       }
-      if (error instanceof MalwareScanBusyError) {
+      if (
+        error instanceof UploadSecurityBusyError ||
+        error instanceof MalwareScanBusyError
+      ) {
         res.setHeader("Retry-After", "1");
-        res.status(503).json({ error: "Upload security scanning is busy" });
+        res.status(503).json({ error: "Upload security processing is busy" });
         return;
       }
       if (
+        error instanceof UploadSecurityUnavailableError ||
         error instanceof MalwareScanUnavailableError ||
         error instanceof MalwareQuarantineCleanupError
       ) {
         req.log.error(
           safeErrorLogFields(error),
-          "Server-mediated upload security scan failed closed",
+          "Server-mediated upload security processing failed closed",
         );
         res
           .status(503)
-          .json({ error: "Upload security scanning is unavailable" });
-        return;
-      }
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        res.status(409).json({ error: "Object already exists" });
+          .json({ error: "Upload security processing is unavailable" });
         return;
       }
       req.log.error(
@@ -278,15 +401,16 @@ function hardenServedObjectHeaders(res: Response): void {
  *
  * Request a controlled URL for file upload.
  * The client sends JSON metadata (name, size, contentType) — NOT the file.
- * GCS/OCI return a short-lived provider URL; filesystem/S3 return the guarded
- * same-origin endpoint above. Authentication prevents public callers from
- * minting either kind of write capability.
+ * Only filesystem/S3 may mint the guarded same-origin endpoint above. Direct
+ * provider upload URLs are deliberately disabled because they would bypass
+ * the server-side sanitizer.
  */
 router.post(
   "/storage/uploads/request-url",
   requireAuth,
   uploadUrlRateLimit,
   requireDocumentUploadsEnabled,
+  requireServerMediatedUploadProvider,
   async (req: Request, res: Response) => {
     const parsed = RequestUploadUrlBody.safeParse(req.body);
     if (!parsed.success) {
@@ -294,10 +418,9 @@ router.post(
       return;
     }
 
-    // Server-side upload policy, mirroring the client cap: credential
-    // documents are images or PDFs, at most 8 MB (the OCR provider cap).
-    // Explicit subtype allowlist: image/svg+xml is deliberately excluded —
-    // SVG can carry scripts, and stored documents are viewable in-browser.
+    // Server-side upload policy: credential documents are JPEG/PNG raster
+    // images at most 8 MB. Every accepted image is decoded and re-encoded by
+    // the guarded byte-ingress route before it becomes durable.
     if (
       parsed.data.size <= 0 ||
       parsed.data.size > MAX_UPLOAD_BYTES ||
@@ -398,6 +521,12 @@ router.delete(
             .for("update")
         )[0];
         if (!grant) return { kind: "not_found" as const };
+        // The sanitizer owns both the grant and its object while processing.
+        // Returning the same 404 avoids an existence/state oracle and ensures
+        // cleanup cannot delete bytes underneath an active processing attempt.
+        if (grant.status === "processing") {
+          return { kind: "not_found" as const };
+        }
 
         // Deliberately include soft-deleted credentials. Their retained audit
         // history still owns the private object until the approved retention

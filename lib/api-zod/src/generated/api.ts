@@ -11,15 +11,17 @@ import * as zod from 'zod';
 /**
  * Returns a short-lived private upload capability. The client sends JSON
  * metadata here, then uploads the file with every returned required
- * header. GCS/OCI deployments can return a provider URL; filesystem/S3
- * deployments return a guarded same-origin endpoint that validates the
- * grant, byte count, signature, and configured malware scanner before the
- * object becomes durable. Each capability is scoped to a newly allocated
- * object identifier and the authenticated caller; the server rejects a
- * known pre-existing object and verifies the stored bytes after write.
+ * header. Enabled document intake is restricted to server-mediated
+ * filesystem/S3 deployments and JPEG/PNG input of at most 8 MiB. The
+ * guarded same-origin endpoint validates the grant and byte count, then
+ * decodes and rebuilds the image as a metadata-free JPEG before the
+ * private object becomes durable. Each capability is scoped to a newly
+ * allocated object identifier and the authenticated caller; the server
+ * rejects a known pre-existing object and verifies the rebuilt bytes and
+ * integrity hash after write. PDF and provider-direct uploads are not
+ * accepted by this controlled-release flow.
  * @summary Request a controlled URL for private file upload
  */
-
 
 
 
@@ -27,9 +29,8 @@ import * as zod from 'zod';
 export const RequestUploadUrlBody = zod.object({
   "name": zod.string().min(1).describe('Original file name.'),
   "size": zod.number().min(1).describe('File size in bytes.'),
-  "contentType": zod.string().min(1).describe('MIME type of the file (e.g. `image\/jpeg`).')
+  "contentType": zod.enum(['image/jpeg', 'image/png']).describe('JPEG or PNG input MIME type. Stored output is rebuilt as JPEG.')
 })
-
 
 
 
@@ -42,7 +43,7 @@ export const RequestUploadUrlResponse = zod.object({
   "metadata": zod.object({
   "name": zod.string().min(1).describe('Original file name.'),
   "size": zod.number().min(1).describe('File size in bytes.'),
-  "contentType": zod.string().min(1).describe('MIME type of the file (e.g. `image\/jpeg`).')
+  "contentType": zod.enum(['image/jpeg', 'image/png']).describe('JPEG or PNG input MIME type. Stored output is rebuilt as JPEG.')
 }).optional()
 })
 

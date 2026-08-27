@@ -5,6 +5,17 @@
  * HealthDocs - Healthcare Credential Management Platform API
  * OpenAPI spec version: 0.1.0
  */
+/**
+ * JPEG or PNG input MIME type. Stored output is rebuilt as JPEG.
+ */
+export type UploadUrlRequestContentType = typeof UploadUrlRequestContentType[keyof typeof UploadUrlRequestContentType];
+
+
+export const UploadUrlRequestContentType = {
+  'image/jpeg': 'image/jpeg',
+  'image/png': 'image/png',
+} as const;
+
 export interface UploadUrlRequest {
   /**
      * Original file name.
@@ -16,11 +27,8 @@ export interface UploadUrlRequest {
      * @minimum 1
      */
   size: number;
-  /**
-     * MIME type of the file (e.g. `image/jpeg`).
-     * @minLength 1
-     */
-  contentType: string;
+  /** JPEG or PNG input MIME type. Stored output is rebuilt as JPEG. */
+  contentType: UploadUrlRequestContentType;
 }
 
 /**

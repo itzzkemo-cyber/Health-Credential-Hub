@@ -2,7 +2,7 @@
 
 منصة عربية/إنجليزية لإدارة وثائق واعتمادات الكوادر الصحية، مع موقع متجاوب، API آمن، تخزين ملفات خاص، قراءة OCR اختيارية، تنبيهات، وتقارير امتثال.
 
-> **هدف الإصدار الحالي:** الموقع المتجاوب هو واجهة المنتج الوحيدة التي تُنشر. يستطيع الموظف من الجوال إدخال بياناته، ويستطيع المدير مراجعة الموظفين والوثائق الواقعة ضمن نطاق صلاحياته. لا يحتوي إصدار الإطلاق على دخول تجريبي أو بيانات صناعية. مسار Render المجاني هو قبول مضبوط وليس إنتاجًا صحيًا معتمدًا؛ يبقي رفع الملفات معطلًا حتى اعتماد ماسح Linux، بينما تعمل الحسابات وبيانات الموظفين بقاعدة Supabase الدائمة.
+> **هدف الإصدار الحالي:** الموقع المتجاوب هو واجهة المنتج الوحيدة التي تُنشر. يستطيع الموظف من الجوال إدخال بياناته ورفع صورة وثيقة بصيغة JPEG/PNG، ويستطيع المدير مراجعة الموظفين والوثائق الواقعة ضمن نطاق صلاحياته. يعيد الخادم بناء الصورة ويحذف بياناتها الوصفية قبل حفظها في Supabase الخاص؛ ملفات PDF وبقية الصيغ غير مقبولة في هذا الإصدار. لا يحتوي إصدار الإطلاق على دخول تجريبي أو بيانات صناعية. مسار Render المجاني هو تجربة تشغيل مضبوطة وليس إنتاجًا صحيًا معتمدًا.
 
 ## Workspace
 
@@ -20,9 +20,10 @@
 - pnpm 11.19.0 (Corepack is fine)
 - PostgreSQL for API runtime
 - Private document storage: the encrypted single-host filesystem acceptance
-  profile or a server-mediated private S3-compatible provider. Document intake
-  stays fail-closed until bounded ingress, malware quarantine, and auditable
-  orphan cleanup are implemented and accepted for the selected host.
+  profile or a server-mediated private S3-compatible provider. The controlled
+  image path accepts only JPEG/PNG up to 8 MiB and rebuilds every input as a
+  metadata-free JPEG before persistence. PDF/general-file intake stays
+  fail-closed until an approved malware scanner and lifecycle controls exist.
 
 ## Local setup
 
@@ -46,7 +47,7 @@ Run the web app separately:
 pnpm --filter @workspace/health-docs run dev
 ```
 
-اختبر مسار الموظف على عرض جوال أيضًا: تسجيل الدخول، فتح «وثائقي»، رفع ملف، تعبئة البيانات، ومراجعة حالة الوثيقة. مسار الرفع الحالي لا يرسل الملف إلى OCR؛ لا تُفعّل المعالجة الخارجية إلا بعد اعتماد إعداداتها وتدفق الخصوصية الموثق.
+اختبر مسار الموظف على عرض جوال أيضًا: تسجيل الدخول، فتح «وثائقي»، رفع صورة JPEG/PNG، تعبئة البيانات، ومراجعة حالة الوثيقة. مسار الرفع يعيد بناء الصورة على الخادم ولا يرسلها إلى OCR؛ لا تُفعّل المعالجة الخارجية إلا بعد اعتماد إعداداتها وتدفق الخصوصية الموثق.
 
 The API reads the root `.env` only in its `dev` command. Production `start` expects environment variables from the deployment platform.
 
@@ -106,15 +107,15 @@ and the existing Supabase project only through the guarded runbook in
 [docs/RENDER_SUPABASE_DEPLOYMENT.md](docs/RENDER_SUPABASE_DEPLOYMENT.md).
 The checked-in `render.yaml` deliberately keeps deploys manual: migrations run
 with a separate database identity before the web service is released, and the
-web service never receives bootstrap or migration credentials. It sets
-`DOCUMENT_UPLOADS_ENABLED=false`: account, employee, dashboard, and scoped
-administration data persist in Supabase, but file intake is intentionally
-unavailable until an approved Linux scanner passes readiness. This is not a
-production-ready healthcare deployment.
+web service never receives bootstrap or migration credentials. It enables the
+bounded `raster-sanitizer` profile: account, employee, dashboard, scoped
+administration data, and rebuilt JPEG document images persist in Supabase.
+PDFs and other general files remain unavailable until an approved malware
+scanner passes readiness. This is not a production-ready healthcare deployment.
 
 - Use a secret manager and a random `SESSION_SECRET` of at least 32 characters.
 - Apply reviewed Drizzle migrations; do not use `push-force` in production.
-- Provision private object storage and verify retention, malware scanning, file-size quotas, and orphan cleanup.
+- Provision private object storage and verify retention, image sanitization, file-size quotas, and orphan cleanup. Add approved malware scanning before accepting PDF or general files.
 - Attach a least-privilege runtime identity. GCS uses Google Application Default Credentials; OCI customer secret keys must come from OCI Vault and never from a committed file.
 - Configure Gemini only after approving the privacy/data-processing terms for uploaded workforce documents.
 - Configure and verify the email provider before enabling outbound messages.

@@ -19,15 +19,16 @@ type BucketMetadataReader = (bucketName: string) => Promise<BucketMetadata>;
 type OciBucketProbe = (bucketName: string) => Promise<void>;
 type S3BucketProbe = (bucketName: string) => Promise<void>;
 type FilesystemProbe = () => Promise<void>;
-type MalwareScannerProbe = (env: NodeJS.ProcessEnv) => Promise<void>;
+type UploadSecurityProbe = (env: NodeJS.ProcessEnv) => Promise<void>;
 
-async function probeConfiguredMalwareScanner(
+async function probeConfiguredUploadSecurity(
   env: NodeJS.ProcessEnv,
 ): Promise<void> {
-  // Keep the scanner and its database-backed upload helpers lazy so storage
-  // readiness unit tests and unused cloud providers do not initialize them.
-  const { checkMalwareScannerReadiness } = await import("./uploadSecurity");
-  await checkMalwareScannerReadiness({ env });
+  // Keep native raster processing lazy. uploadSecurity dynamically imports its
+  // database helpers only in grant operations, so this self-test initializes no
+  // database connection and uses only embedded non-user fixtures.
+  const { checkUploadSecurityReadiness } = await import("./uploadSecurity");
+  await checkUploadSecurityReadiness({ env });
 }
 
 interface StorageReadinessOptions {
@@ -36,7 +37,7 @@ interface StorageReadinessOptions {
   probeOciBucket?: OciBucketProbe;
   probeS3Bucket?: S3BucketProbe;
   probeFilesystemStorage?: FilesystemProbe;
-  probeMalwareScanner?: MalwareScannerProbe;
+  probeUploadSecurity?: UploadSecurityProbe;
 }
 
 export class ObjectStorageReadinessError extends Error {
@@ -108,6 +109,12 @@ export async function checkObjectStorageReadiness(
       "Object storage provider is not supported",
     );
   }
+  const uploadsEnabled = areDocumentUploadsEnabled(env);
+  if (uploadsEnabled && (provider === "gcs" || provider === "oci")) {
+    throw new ObjectStorageReadinessError(
+      "Document uploads require the server-mediated filesystem or S3 provider",
+    );
+  }
 
   if (provider === "oci") {
     try {
@@ -135,8 +142,8 @@ export async function checkObjectStorageReadiness(
     }
     const bucketName = getConfiguredBucketName(privateObjectDir);
     await (options.probeS3Bucket ?? headS3Bucket)(bucketName);
-    if (areDocumentUploadsEnabled(env)) {
-      await (options.probeMalwareScanner ?? probeConfiguredMalwareScanner)(env);
+    if (uploadsEnabled) {
+      await (options.probeUploadSecurity ?? probeConfiguredUploadSecurity)(env);
     }
     // Generic S3 credentials can prove bucket reachability, not that a vendor
     // bucket is private. Bucket privacy, retention, region, and key scope remain
@@ -154,8 +161,8 @@ export async function checkObjectStorageReadiness(
       );
     }
     await (options.probeFilesystemStorage ?? probeFilesystemObjectStorage)();
-    if (areDocumentUploadsEnabled(env)) {
-      await (options.probeMalwareScanner ?? probeConfiguredMalwareScanner)(env);
+    if (uploadsEnabled) {
+      await (options.probeUploadSecurity ?? probeConfiguredUploadSecurity)(env);
     }
     // Directory ACLs, volume encryption, backup posture, and restore drills are
     // enforced by the local production preflight.

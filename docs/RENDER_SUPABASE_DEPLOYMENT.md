@@ -20,18 +20,19 @@ health-document production:
 - Frankfurt is outside Saudi Arabia. A documented PDPL transfer assessment,
   provider agreements, retention schedule, and incident process are required
   before real workforce or health data is entered.
-- The object-ingress malware/quarantine release gate in
-  [`INTEGRATIONS.md`](INTEGRATIONS.md) must be closed before real documents are
-  accepted.
+- The controlled raster-rebuild path is not a general malware scanner. PDF and
+  general-file intake remain blocked until the object-ingress malware,
+  quarantine, and lifecycle gates in [`INTEGRATIONS.md`](INTEGRATIONS.md) are
+  closed.
 
-The Blueprint explicitly sets `DOCUMENT_UPLOADS_ENABLED=false`. Authentication,
-employee records, the dashboard, and scoped administrative workflows can use
-the persistent database, while every document-upload attempt is rejected
-fail-closed and no file is created. In this controlled-acceptance mode,
-`/api/readyz` verifies the dependencies required by that mode without pretending
-a scanner exists. When document intake is later enabled, readiness must also
-prove the approved Linux scanner is available, and a clean end-to-end upload
-must pass before the change is released.
+The Blueprint enables `DOCUMENT_UPLOADS_ENABLED=true` together with
+`UPLOAD_SECURITY_PROVIDER=raster-sanitizer`. Only authenticated, bounded JPEG
+and PNG inputs are accepted. The API decodes each input, rejects animated or
+oversized images, rebuilds it as a fresh metadata-free JPEG, and writes only
+that result to the private bucket. PDF, SVG, GIF, WebP, AVIF, HEIC, and
+provider-direct uploads fail closed. `/api/readyz` verifies the database,
+private storage, and the configured upload-security processor; a clean
+end-to-end synthetic upload must pass before release.
 
 Do not weaken a failing readiness or database-role check to make this profile
 start. A `503` from `/api/readyz` is a release blocker, not a warning.
@@ -59,8 +60,8 @@ node --enable-source-maps dist/index.mjs
 
 Render probes `GET /api/readyz`. That endpoint verifies the dependencies needed
 for the configured mode. With document intake enabled this includes PostgreSQL,
-private storage, and the server-mediated scanner; `GET /api/healthz` is only
-process liveness.
+private storage, and the server-mediated upload-security processor;
+`GET /api/healthz` is only process liveness.
 
 ## 1. Prepare Supabase
 
@@ -69,7 +70,8 @@ Use the existing project in `eu-central-1` (Frankfurt):
 1. Keep the Data API disabled. The application uses PostgreSQL directly.
 2. Enable SSL enforcement for database connections.
 3. Create one private Storage bucket. Set an 8 MB file limit and allow only
-   `application/pdf`, `image/jpeg`, and `image/png`.
+   `image/jpeg` and `image/png`. The current server stores rebuilt JPEG output;
+   keeping PNG allows a controlled rollback without widening to general files.
 4. Create an S3 access-key pair for the private bucket. Store it only in the
    Render secret environment. Supabase S3 access keys bypass Storage RLS and
    must never be placed in browser code, Git, screenshots, CI output, or chat.
@@ -250,7 +252,8 @@ The non-secret runtime boundary must remain exactly:
 NODE_EXTRA_CA_CERTS=/app/certs/supabase-prod-ca-2021.crt
 DATABASE_OWNERSHIP_MODE=managed
 DATABASE_BLOCKED_ROLES=anon,authenticated,service_role
-DOCUMENT_UPLOADS_ENABLED=false
+DOCUMENT_UPLOADS_ENABLED=true
+UPLOAD_SECURITY_PROVIDER=raster-sanitizer
 ```
 
 The Blueprint generates independent 256-bit `SESSION_SECRET` and
@@ -280,11 +283,11 @@ At a 390 px viewport, check both Arabic RTL and English LTR:
 1. Sign in with the changed administrator password and TOTP.
 2. Create a scoped manager and a scoped employee through authenticated admin
    workflows; confirm there is no public sign-up path.
-3. Confirm document controls show intake as unavailable, a direct upload attempt
-   is rejected fail-closed, and no object is created. After an approved Linux
-   scanner is configured in a later release, set `DOCUMENT_UPLOADS_ENABLED=true`,
-   require `/api/readyz` to pass, then upload an allowed file, inspect its status,
-   and delete it when authorized.
+3. Upload a synthetic JPEG or PNG below 8 MiB. Confirm the stored response is a
+   rebuilt JPEG, does not retain EXIF/GPS metadata, is visible only to the owner
+   and in-scope manager, and can be deleted when authorized. Confirm PDF, SVG,
+   GIF, WebP, AVIF, HEIC, malformed images, and direct provider uploads are
+   rejected fail-closed without creating an object.
 4. As the manager, confirm only employees and documents in the assigned
    facility are visible.
 5. Confirm an employee cannot verify their own credential or change facility.
@@ -301,11 +304,20 @@ wait for certificate issuance, and update `PUBLIC_APP_URL` to
 `https://app.wathaiqihealth.com`. Same-origin CSRF checks do not require a CORS
 exception; add `APP_ORIGINS` only for a separately approved HTTPS frontend.
 
+UptimeRobot may monitor only the public `GET /api/readyz` endpoint at the free
+five-minute interval. Do not add credentials, query parameters, document paths,
+or user identifiers to the monitor. A successful check proves the configured
+database, private bucket, and upload-security processor are reachable; it is
+not a production SLA. Its traffic can also delay Render Free idle sleep and
+consume the workspace's monthly free-instance hours, so usage and suspension
+alerts still require operator review.
+
 Before real use, complete all of the following:
 
 - a paid production service with availability commitments and no idle sleep;
 - automated encrypted database and object backups plus a tested restore drill;
-- malware quarantine/scanning and orphan-object cleanup;
+- an approved malware quarantine/scanner before PDF or general-file intake,
+  plus auditable orphan-object cleanup for the image path;
 - PDPL transfer, provider-contract, retention, and breach-response approval;
 - rate limiting, monitoring, alerting, and audit-log retention;
 - storage-key, session-secret, TOTP-key, and database-credential rotation

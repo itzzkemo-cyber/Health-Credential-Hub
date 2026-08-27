@@ -39,6 +39,7 @@ const state = vi.hoisted(() => {
       id: number;
       objectPath: string;
       requestedBy: number;
+      status: "pending" | "processing" | "processed";
       expiresAt: Date;
       claimedAt: Date | null;
     },
@@ -210,6 +211,7 @@ describe("unlinked private upload deletion", () => {
       id: 91,
       objectPath,
       requestedBy: state.actor.id,
+      status: "pending",
       // Cleanup remains available after the short-lived link capability ends.
       expiresAt: new Date("2026-01-01T00:00:00.000Z"),
       claimedAt: null,
@@ -268,6 +270,21 @@ describe("unlinked private upload deletion", () => {
       }),
     );
     expect(JSON.stringify(state.audit)).not.toContain(uploadId);
+  });
+
+  it("does not delete a grant or object while the sanitizer owns it", async () => {
+    state.grant = { ...state.grant!, status: "processing" };
+
+    const response = await remove();
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Upload not found",
+    });
+    expect(state.getObjectEntityFile).not.toHaveBeenCalled();
+    expect(state.deleteObject).not.toHaveBeenCalled();
+    expect(state.deletedGrant).toBe(false);
+    expect(state.audit).toBeNull();
   });
 
   it("continues to recognize the owner after a facility reassignment", async () => {

@@ -10,13 +10,13 @@ import {
   type PreparedCredentialFile,
 } from "./deferred-credential-submission";
 
-const file = new File(["document"], "license.pdf", {
-  type: "application/pdf",
+const file = new File(["document"], "license.png", {
+  type: "image/png",
 });
 const prepared: PreparedCredentialFile = {
-  blob: new Blob(["prepared"], { type: "application/pdf" }),
-  contentType: "application/pdf",
-  kind: "pdf",
+  blob: new Blob(["prepared"], { type: "image/png" }),
+  contentType: "image/png",
+  kind: "image",
 };
 const grant: CredentialUploadGrant = {
   uploadURL: "/api/storage/uploads/local/opaque-token",
@@ -94,7 +94,7 @@ describe("deferred credential submission", () => {
     expect(dependencies.putUpload).toHaveBeenCalledWith(grant, prepared);
     expect(dependencies.createCredential).toHaveBeenCalledWith({
       objectPath: grant.objectPath,
-      kind: "pdf",
+      kind: "image",
     });
     expect(dependencies.cleanupUpload).not.toHaveBeenCalled();
     expect(dependencies.onStage.mock.calls).toEqual([

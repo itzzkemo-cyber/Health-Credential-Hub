@@ -83,6 +83,7 @@ export * from './totpVerifySetupInput';
 export * from './twoFactorPending';
 export * from './unreadCount';
 export * from './uploadUrlRequest';
+export * from './uploadUrlRequestContentType';
 export * from './uploadUrlResponse';
 export * from './uploadUrlResponseRequiredHeaders';
 export * from './user';

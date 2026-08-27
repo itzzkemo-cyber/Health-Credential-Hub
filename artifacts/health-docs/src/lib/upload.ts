@@ -1,14 +1,23 @@
 // Prepares user-selected files for upload to object storage.
 //
-// Phone photos are routinely 5–20 MB; certificates stay perfectly readable
-// for document review at 2000px, so images are downscaled/re-encoded in the browser
-// before the direct-to-storage upload. PDFs (and images the browser cannot
-// decode, e.g. HEIC outside Safari) are uploaded as-is, subject to the size
-// cap below. The prepared bytes are PUT straight to the storage presigned
-// URL — they never pass through the API server as JSON.
+// Phone photos are routinely 5–20 MB; certificates stay readable for review
+// at 2000px, so supported images are downscaled/re-encoded in the browser
+// before the controlled private-object upload. This release accepts JPEG/PNG
+// only. The server independently verifies type, signature, and size, then
+// rebuilds the raster image before storing any bytes.
 
 /** Max prepared file size accepted by private document storage (8 MB). */
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+export const ACCEPTED_UPLOAD_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+] as const;
+
+export type AcceptedUploadMimeType =
+  (typeof ACCEPTED_UPLOAD_MIME_TYPES)[number];
+
+export const UPLOAD_ACCEPT_ATTRIBUTE = ACCEPTED_UPLOAD_MIME_TYPES.join(",");
 
 /** Longest edge of re-encoded document images, in pixels. */
 const MAX_IMAGE_EDGE = 2000;
@@ -21,11 +30,24 @@ export class UploadTooLargeError extends Error {
   }
 }
 
+export class UnsupportedUploadTypeError extends Error {
+  constructor() {
+    super("Upload type is not supported");
+    this.name = "UnsupportedUploadTypeError";
+  }
+}
+
 export interface PreparedUpload {
   blob: Blob;
-  contentType: string;
-  /** Matches the credential fileType field convention. */
-  kind: "pdf" | "image";
+  contentType: AcceptedUploadMimeType;
+  /** Controlled intake stores document images only in this release. */
+  kind: "image";
+}
+
+export function isSupportedUploadFile(file: Pick<File, "type">): boolean {
+  return ACCEPTED_UPLOAD_MIME_TYPES.includes(
+    file.type as (typeof ACCEPTED_UPLOAD_MIME_TYPES)[number],
+  );
 }
 
 /**
@@ -87,29 +109,27 @@ async function downscaleImage(file: File): Promise<Blob> {
 }
 
 /**
- * Convert a selected file into upload-ready bytes. Images are downscaled and
- * re-encoded as JPEG (falling back to the original bytes when the browser
- * cannot decode the format); other files pass through unchanged. Throws
- * UploadTooLargeError when the result still exceeds the size cap.
+ * Convert a selected JPEG/PNG into upload-ready bytes. Images are downscaled
+ * and re-encoded as JPEG (falling back to the original allowed bytes when the
+ * browser cannot decode them). Unsupported types fail before any processing;
+ * UploadTooLargeError is thrown when the prepared image exceeds the size cap.
  */
 export async function prepareUploadFile(file: File): Promise<PreparedUpload> {
-  let blob: Blob | null = null;
-  let contentType = file.type || "application/octet-stream";
+  if (!isSupportedUploadFile(file)) throw new UnsupportedUploadTypeError();
 
-  if (file.type.startsWith("image/")) {
-    try {
-      blob = await downscaleImage(file);
-      contentType = "image/jpeg";
-    } catch {
-      blob = null;
-      contentType = file.type;
-    }
+  let blob: Blob | null = null;
+  let contentType = file.type as AcceptedUploadMimeType;
+
+  try {
+    blob = await downscaleImage(file);
+    contentType = "image/jpeg";
+  } catch {
+    blob = null;
+    contentType = file.type as AcceptedUploadMimeType;
   }
   blob ??= file;
 
   if (blob.size > MAX_UPLOAD_BYTES) throw new UploadTooLargeError();
 
-  const isPdf =
-    contentType === "application/pdf" || /\.pdf$/i.test(file.name);
-  return { blob, contentType, kind: isPdf ? "pdf" : "image" };
+  return { blob, contentType, kind: "image" };
 }
