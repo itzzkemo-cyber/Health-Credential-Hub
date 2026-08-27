@@ -10,6 +10,7 @@ vi.mock("@workspace/db", () => ({
 }));
 
 import {
+  checkMalwareScannerReadiness,
   CONTENT_SHA256_METADATA_KEY,
   hasAllowedUploadSignature,
   MalwareDetectedError,
@@ -194,6 +195,45 @@ describe("local upload malware quarantine", () => {
     await expect(readdir(quarantineDir)).resolves.toEqual([]);
   });
 
+  it("verifies an explicitly configured Defender executable and quarantine", async () => {
+    const quarantineDir = await createQuarantine();
+    const executableDir = await createQuarantine();
+    const executablePath = path.join(executableDir, "MpCmdRun.exe");
+    await writeFile(executablePath, "readiness-test-placeholder", {
+      flag: "wx",
+    });
+
+    await expect(
+      checkMalwareScannerReadiness({
+        env: {
+          MALWARE_SCAN_PROVIDER: "windows-defender",
+          MALWARE_QUARANTINE_DIR: quarantineDir,
+          MALWARE_SCAN_TIMEOUT_MS: "5000",
+          WINDOWS_DEFENDER_MPCMDRUN_PATH: executablePath,
+        },
+        platform: "win32",
+      }),
+    ).resolves.toBeUndefined();
+    await expect(readdir(quarantineDir)).resolves.toEqual([]);
+  });
+
+  it("rejects a Windows-only scanner on a Linux production host", async () => {
+    const quarantineDir = await createQuarantine();
+
+    await expect(
+      checkMalwareScannerReadiness({
+        env: {
+          NODE_ENV: "production",
+          MALWARE_SCAN_PROVIDER: "windows-defender",
+          MALWARE_QUARANTINE_DIR: quarantineDir,
+          MALWARE_SCAN_TIMEOUT_MS: "5000",
+          WINDOWS_DEFENDER_MPCMDRUN_PATH: "/opt/scanner/MpCmdRun.exe",
+        },
+        platform: "linux",
+      }),
+    ).rejects.toBeInstanceOf(MalwareScanUnavailableError);
+  });
+
   it("fails closed on a prior remnant without deleting it", async () => {
     const quarantineDir = await createQuarantine();
     const remnantPath = path.join(quarantineDir, "prior-remnant");
@@ -218,6 +258,11 @@ describe("local upload malware quarantine", () => {
 
   it("rejects a concurrent scan instead of creating an unbounded queue", async () => {
     const quarantineDir = await createQuarantine();
+    const executableDir = await createQuarantine();
+    const executablePath = path.join(executableDir, "MpCmdRun.exe");
+    await writeFile(executablePath, "readiness-test-placeholder", {
+      flag: "wx",
+    });
     let activeScans = 0;
     let maximumActiveScans = 0;
     let releaseFirstScan: () => void = () => {};
@@ -250,6 +295,17 @@ describe("local upload malware quarantine", () => {
         scanner,
       }),
     ).rejects.toBeInstanceOf(MalwareScanBusyError);
+    await expect(
+      checkMalwareScannerReadiness({
+        env: {
+          MALWARE_SCAN_PROVIDER: "windows-defender",
+          MALWARE_QUARANTINE_DIR: quarantineDir,
+          MALWARE_SCAN_TIMEOUT_MS: "5000",
+          WINDOWS_DEFENDER_MPCMDRUN_PATH: executablePath,
+        },
+        platform: "win32",
+      }),
+    ).resolves.toBeUndefined();
 
     expect(scanner).toHaveBeenCalledTimes(1);
     releaseFirstScan();

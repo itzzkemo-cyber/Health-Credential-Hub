@@ -22,6 +22,8 @@ export interface DatabaseRoleBoundaryConfig {
   migratorLogin: string;
   migratorDdlRole: string;
   verifyLeastPrivilege: boolean;
+  ownershipMode: "dedicated" | "managed";
+  blockedRoles: string[];
 }
 
 interface RoleState {
@@ -98,12 +100,42 @@ export function readDatabaseRoleBoundaryConfig(
     );
   }
 
+  const ownershipMode = env.DATABASE_OWNERSHIP_MODE?.trim() || "dedicated";
+  if (ownershipMode !== "dedicated" && ownershipMode !== "managed") {
+    throw new DatabaseRoleBoundaryError(
+      "DATABASE_OWNERSHIP_MODE must be dedicated or managed",
+    );
+  }
+  const blockedRoles = (env.DATABASE_BLOCKED_ROLES ?? "")
+    .split(",")
+    .map((role) => role.trim())
+    .filter(Boolean)
+    .map((role) => requireRoleIdentifier(role, "DATABASE_BLOCKED_ROLES"));
+  if (new Set(blockedRoles).size !== blockedRoles.length) {
+    throw new DatabaseRoleBoundaryError(
+      "DATABASE_BLOCKED_ROLES must not contain duplicates",
+    );
+  }
+  const boundaryRoles = new Set([
+    appLogin,
+    appDmlRole,
+    migratorLogin,
+    migratorDdlRole,
+  ]);
+  if (blockedRoles.some((role) => boundaryRoles.has(role))) {
+    throw new DatabaseRoleBoundaryError(
+      "DATABASE_BLOCKED_ROLES must not include an application or migration role",
+    );
+  }
+
   return {
     appLogin,
     appDmlRole,
     migratorLogin,
     migratorDdlRole,
     verifyLeastPrivilege: verifyBoundary === "true",
+    ownershipMode,
+    blockedRoles,
   };
 }
 
@@ -122,12 +154,6 @@ export function buildApplicationDmlStatements(
   const database = quotePostgresIdentifier(databaseName);
 
   const statements = [
-    `REVOKE CREATE, TEMPORARY ON DATABASE ${database} FROM PUBLIC`,
-    `REVOKE ALL PRIVILEGES ON DATABASE ${database} FROM ${appLogin}, ${appDmlRole}`,
-    `GRANT CONNECT ON DATABASE ${database} TO ${appDmlRole}`,
-    "REVOKE CREATE ON SCHEMA public FROM PUBLIC",
-    `REVOKE ALL PRIVILEGES ON SCHEMA public FROM ${appLogin}, ${appDmlRole}`,
-    `GRANT USAGE ON SCHEMA public TO ${appDmlRole}`,
     `REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM ${appLogin}, ${appDmlRole}`,
     `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${appDmlRole}`,
     `REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM ${appLogin}, ${appDmlRole}`,
@@ -139,6 +165,27 @@ export function buildApplicationDmlStatements(
     `ALTER DEFAULT PRIVILEGES FOR ROLE ${migratorLogin} IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO ${appDmlRole}`,
     `ALTER DEFAULT PRIVILEGES FOR ROLE ${migratorLogin} IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC`,
   ];
+  if (config.ownershipMode === "dedicated") {
+    statements.unshift(
+      `REVOKE CREATE, TEMPORARY ON DATABASE ${database} FROM PUBLIC`,
+      `REVOKE ALL PRIVILEGES ON DATABASE ${database} FROM ${appLogin}, ${appDmlRole}`,
+      `GRANT CONNECT ON DATABASE ${database} TO ${appDmlRole}`,
+      "REVOKE CREATE ON SCHEMA public FROM PUBLIC",
+      `REVOKE ALL PRIVILEGES ON SCHEMA public FROM ${appLogin}, ${appDmlRole}`,
+      `GRANT USAGE ON SCHEMA public TO ${appDmlRole}`,
+    );
+  }
+  for (const blockedRole of config.blockedRoles) {
+    const role = quotePostgresIdentifier(blockedRole);
+    statements.push(
+      `REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM ${role}`,
+      `REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM ${role}`,
+      `REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM ${role}`,
+      `ALTER DEFAULT PRIVILEGES FOR ROLE ${migratorLogin} IN SCHEMA public REVOKE ALL PRIVILEGES ON TABLES FROM ${role}`,
+      `ALTER DEFAULT PRIVILEGES FOR ROLE ${migratorLogin} IN SCHEMA public REVOKE ALL PRIVILEGES ON SEQUENCES FROM ${role}`,
+      `ALTER DEFAULT PRIVILEGES FOR ROLE ${migratorLogin} IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM ${role}`,
+    );
+  }
   if (includeAuditTable) {
     statements.push(
       `REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.audit_logs FROM ${appLogin}, ${appDmlRole}`,
@@ -230,6 +277,52 @@ async function ensureNoLoginBoundaryRole(
   }
   const role = existing.rows[0];
   if (
+    role.canLogin ||
+    role.isSuperuser ||
+    role.canCreateDatabase ||
+    role.canCreateRole ||
+    role.bypassesRowLevelSecurity ||
+    role.isReplicationRole ||
+    role.hasParentRole
+  ) {
+    throw new DatabaseRoleBoundaryError(
+      `PostgreSQL boundary role ${roleName} has unsafe attributes`,
+    );
+  }
+}
+
+async function assertSafeNoLoginBoundaryRole(
+  client: DatabaseClient,
+  roleName: string,
+): Promise<void> {
+  const existing = await client.query<{
+    canLogin: boolean;
+    isSuperuser: boolean;
+    canCreateDatabase: boolean;
+    canCreateRole: boolean;
+    bypassesRowLevelSecurity: boolean;
+    isReplicationRole: boolean;
+    hasParentRole: boolean;
+  }>(
+    `SELECT
+       rolcanlogin AS "canLogin",
+       rolsuper AS "isSuperuser",
+       rolcreatedb AS "canCreateDatabase",
+       rolcreaterole AS "canCreateRole",
+       rolbypassrls AS "bypassesRowLevelSecurity",
+       rolreplication AS "isReplicationRole",
+       EXISTS (
+         SELECT 1
+         FROM pg_auth_members membership
+         WHERE membership.member = pg_roles.oid
+       ) AS "hasParentRole"
+     FROM pg_roles
+     WHERE rolname = $1`,
+    [roleName],
+  );
+  const role = existing.rows[0];
+  if (
+    !role ||
     role.canLogin ||
     role.isSuperuser ||
     role.canCreateDatabase ||
@@ -356,6 +449,34 @@ export async function verifyApplicationDatabaseRoleBoundary(
       config.appLogin,
       config.appDmlRole,
     );
+    // The login can inherit everything granted to its DML role. Checking only
+    // the login's direct memberships misses a later provider/admin role grant
+    // to that boundary role, so verify the no-login role itself on every
+    // production start as well as during migrations.
+    await assertSafeNoLoginBoundaryRole(client, config.appDmlRole);
+
+    // Object owners can re-grant privileges or alter/drop their objects even
+    // after an ordinary REVOKE. Neither the login nor its inherited DML role
+    // may own any database-local object.
+    const ownership = await client.query<{ ownsObjects: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1
+         FROM pg_shdepend dependency
+         JOIN pg_roles owner ON owner.oid = dependency.refobjid
+         JOIN pg_database current_database_row
+           ON current_database_row.datname = current_database()
+         WHERE dependency.refclassid = 'pg_authid'::regclass
+           AND dependency.deptype = 'o'
+           AND owner.rolname = ANY($1::text[])
+           AND dependency.dbid = current_database_row.oid
+       ) AS "ownsObjects"`,
+      [[config.appLogin, config.appDmlRole]],
+    );
+    if (ownership.rows[0]?.ownsObjects) {
+      throw new DatabaseRoleBoundaryError(
+        "Application database roles must not own database objects",
+      );
+    }
 
     const privileges = await client.query<{
       canConnect: boolean;
@@ -505,7 +626,18 @@ async function configureRoleOwnership(
      FROM pg_database database
      WHERE database.datname = current_database()`,
   );
-  if (databaseOwner.rows[0]?.owner !== config.migratorLogin) {
+  if (
+    config.ownershipMode === "managed" &&
+    databaseOwner.rows[0]?.owner === config.appLogin
+  ) {
+    throw new DatabaseRoleBoundaryError(
+      "The application login must not own the managed PostgreSQL database",
+    );
+  }
+  if (
+    config.ownershipMode === "dedicated" &&
+    databaseOwner.rows[0]?.owner !== config.migratorLogin
+  ) {
     await client.query(`ALTER DATABASE ${database} OWNER TO ${migratorLogin}`);
   }
 
@@ -514,7 +646,18 @@ async function configureRoleOwnership(
      FROM pg_namespace schema
      WHERE schema.nspname = 'public'`,
   );
-  if (publicSchemaOwner.rows[0]?.owner !== config.migratorLogin) {
+  if (
+    config.ownershipMode === "managed" &&
+    publicSchemaOwner.rows[0]?.owner === config.appLogin
+  ) {
+    throw new DatabaseRoleBoundaryError(
+      "The application login must not own the managed public schema",
+    );
+  }
+  if (
+    config.ownershipMode === "dedicated" &&
+    publicSchemaOwner.rows[0]?.owner !== config.migratorLogin
+  ) {
     await client.query(`ALTER SCHEMA public OWNER TO ${migratorLogin}`);
   }
 
@@ -530,6 +673,11 @@ async function configureRoleOwnership(
     drizzleSchema.rows[0] &&
     drizzleSchema.rows[0].owner !== config.migratorLogin
   ) {
+    if (config.ownershipMode === "managed") {
+      throw new DatabaseRoleBoundaryError(
+        "The managed drizzle schema must be owned by MIGRATOR_DATABASE_USER",
+      );
+    }
     await client.query(`ALTER SCHEMA drizzle OWNER TO ${migratorLogin}`);
   }
   const drizzleMigrationTable = await client.query<{ owner: string }>(
@@ -544,17 +692,48 @@ async function configureRoleOwnership(
     drizzleMigrationTable.rows[0] &&
     drizzleMigrationTable.rows[0].owner !== config.migratorLogin
   ) {
+    if (config.ownershipMode === "managed") {
+      throw new DatabaseRoleBoundaryError(
+        "The managed migration table must be owned by MIGRATOR_DATABASE_USER",
+      );
+    }
     await client.query(
       `ALTER TABLE drizzle.__drizzle_migrations OWNER TO ${migratorLogin}`,
     );
   }
 
-  await client.query(
-    `GRANT CONNECT, CREATE ON DATABASE ${database} TO ${migratorDdlRole}`,
-  );
-  await client.query(
-    "GRANT USAGE, CREATE ON SCHEMA public TO " + migratorDdlRole,
-  );
+  if (config.ownershipMode === "managed") {
+    const managedPrivileges = await client.query<{
+      canConnect: boolean;
+      canCreateDatabaseObjects: boolean;
+      canUsePublicSchema: boolean;
+      canCreateInPublicSchema: boolean;
+    }>(
+      `SELECT
+         has_database_privilege(current_user, current_database(), 'CONNECT') AS "canConnect",
+         has_database_privilege(current_user, current_database(), 'CREATE') AS "canCreateDatabaseObjects",
+         has_schema_privilege(current_user, 'public', 'USAGE') AS "canUsePublicSchema",
+         has_schema_privilege(current_user, 'public', 'CREATE') AS "canCreateInPublicSchema"`,
+    );
+    const privileges = managedPrivileges.rows[0];
+    if (
+      !privileges?.canConnect ||
+      !privileges.canCreateDatabaseObjects ||
+      !privileges.canUsePublicSchema ||
+      !privileges.canCreateInPublicSchema
+    ) {
+      throw new DatabaseRoleBoundaryError(
+        "Managed PostgreSQL must pre-provision migration database and schema privileges",
+      );
+    }
+  } else {
+    await client.query(
+      `GRANT CONNECT, CREATE ON DATABASE ${database} TO ${migratorDdlRole}`,
+    );
+    await client.query(
+      "GRANT USAGE, CREATE ON SCHEMA public TO " + migratorDdlRole,
+    );
+  }
   if (drizzleSchema.rows[0]) {
     await client.query(
       "GRANT USAGE, CREATE ON SCHEMA drizzle TO " + migratorDdlRole,

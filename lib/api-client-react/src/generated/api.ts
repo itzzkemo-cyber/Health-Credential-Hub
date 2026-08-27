@@ -117,11 +117,15 @@ export const getRequestUploadUrlUrl = () => {
 }
 
 /**
- * Returns a presigned private-object-storage URL for direct upload. The client sends JSON
- * metadata here, then uploads the file directly to the returned URL with
- * every returned required header. The overwrite precondition makes each
- * URL create one new object generation only.
- * @summary Request a presigned URL for file upload
+ * Returns a short-lived private upload capability. The client sends JSON
+ * metadata here, then uploads the file with every returned required
+ * header. GCS/OCI deployments can return a provider URL; filesystem/S3
+ * deployments return a guarded same-origin endpoint that validates the
+ * grant, byte count, signature, and configured malware scanner before the
+ * object becomes durable. Each capability is scoped to a newly allocated
+ * object identifier and the authenticated caller; the server rejects a
+ * known pre-existing object and verifies the stored bytes after write.
+ * @summary Request a controlled URL for private file upload
  */
 export const requestUploadUrl = async (uploadUrlRequest: UploadUrlRequest, options?: Parameters<typeof customFetch>[1]): Promise<UploadUrlResponse> => {
 
@@ -170,7 +174,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RequestUploadUrlMutationError = ErrorType<ErrorEnvelope>
 
     /**
- * @summary Request a presigned URL for file upload
+ * @summary Request a controlled URL for private file upload
  */
 export const useRequestUploadUrl = <TError = ErrorType<ErrorEnvelope>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestUploadUrl>>, TError,{data: BodyType<UploadUrlRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}

@@ -88,6 +88,13 @@ export const en = {
     password_required_card_desc:
       "Enter the temporary password you received, then create a new password known only to you.",
     password_required_success: "Password replaced. Your account is ready.",
+    password_required_mfa_next:
+      "Password replaced. Now finish setting up two-factor authentication.",
+    mfa_required_title: "Finish securing your administrator account",
+    mfa_required_desc:
+      "Two-factor authentication is required before you can access employee records or documents. Management features remain locked until setup is complete.",
+    mfa_required_hint:
+      "Use an authenticator app on your phone, then keep the backup codes in a private and secure place.",
     save_password: "Save new password",
     show_password: "Show password",
     hide_password: "Hide password",
@@ -406,7 +413,8 @@ export const en = {
       'Inline PDF preview isn\'t supported in this browser — use "Open File" to view it',
     upload_failed:
       "Could not upload the file — check your connection and try again",
-    add_subtitle: "Upload a new professional certificate or license.",
+    add_subtitle:
+      "Enter a new professional certificate or license; attach a file when secure uploads are available.",
     uploading_title: "Uploading document…",
     uploading_hint: "Keep this page open until the upload is complete",
     saving_title: "Saving document…",
@@ -423,6 +431,14 @@ export const en = {
     private_upload_notice:
       "The selected file stays on this device until you save. After upload, it remains private and can be viewed only by you and authorized staff within your facility.",
     manual_upload_hint: "Optional: attach an image or PDF (maximum 8 MB).",
+    upload_checking_title: "Checking secure file upload availability",
+    upload_checking_desc:
+      "You can continue entering the details; file selection will appear when the check is complete.",
+    upload_unavailable_title: "File attachments are temporarily unavailable",
+    upload_unavailable_desc:
+      "You can save the credential record without a file. File selection remains disabled until secure scanning and storage are enabled by an administrator.",
+    record_without_attachment_hint:
+      "Optional: save the credential record without an attachment now, then add the file after uploads are enabled.",
     select_type: "Select document type",
     english: "English",
     arabic: "Arabic",

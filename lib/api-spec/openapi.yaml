@@ -36,12 +36,16 @@ paths:
     post:
       tags: [Storage]
       operationId: requestUploadUrl
-      summary: Request a presigned URL for file upload
+      summary: Request a controlled URL for private file upload
       description: |
-        Returns a presigned private-object-storage URL for direct upload. The client sends JSON
-        metadata here, then uploads the file directly to the returned URL with
-        every returned required header. The overwrite precondition makes each
-        URL create one new object generation only.
+        Returns a short-lived private upload capability. The client sends JSON
+        metadata here, then uploads the file with every returned required
+        header. GCS/OCI deployments can return a provider URL; filesystem/S3
+        deployments return a guarded same-origin endpoint that validates the
+        grant, byte count, signature, and configured malware scanner before the
+        object becomes durable. Each capability is scoped to a newly allocated
+        object identifier and the authenticated caller; the server rejects a
+        known pre-existing object and verifies the stored bytes after write.
       requestBody:
         required: true
         content:
@@ -50,13 +54,19 @@ paths:
               $ref: "#/components/schemas/UploadUrlRequest"
       responses:
         "200":
-          description: Presigned upload URL generated.
+          description: Controlled upload capability generated.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/UploadUrlResponse"
         "400":
           description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Document uploads are disabled or security scanning is unavailable.
           content:
             application/json:
               schema:
@@ -1230,13 +1240,16 @@ components:
       properties:
         uploadURL:
           type: string
-          description: Presigned private-object-storage URL for PUT upload.
+          description: >-
+            Short-lived PUT destination. This is either a presigned provider
+            URL or a guarded same-origin API path, depending on the configured
+            private-storage provider.
         objectPath:
           type: string
           description: Normalized object path (e.g. `/objects/uploads/uuid`). Store this in your database.
         requiredHeaders:
           type: object
-          description: Headers that must be included verbatim in the signed PUT request.
+          description: Headers that must be included verbatim in the PUT request.
           additionalProperties:
             type: string
         metadata:
@@ -1246,6 +1259,8 @@ components:
       required: [error]
       properties:
         error:
+          type: string
+        code:
           type: string
     HealthStatus:
       type: object
@@ -1262,7 +1277,10 @@ components:
           type: string
         objectStorage:
           type: string
-      required: [status, database, objectStorage]
+        documentUploads:
+          type: string
+          enum: [enabled, disabled]
+      required: [status, database, objectStorage, documentUploads]
 
     # Auth
     LoginInput:

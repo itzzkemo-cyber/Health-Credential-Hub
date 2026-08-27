@@ -166,12 +166,37 @@ const PASSWORD_CHANGE_ALLOWED_PATHS = new Set([
   "/api/auth/logout",
 ]);
 
+const PRIVILEGED_MFA_ENROLLMENT_ALLOWED_REQUESTS = new Set([
+  "GET /api/auth/me",
+  "POST /api/auth/change-password",
+  "POST /api/auth/logout",
+  "POST /api/auth/totp/setup",
+  "POST /api/auth/totp/verify-setup",
+]);
+
+export const MANAGER_ROLES: User["role"][] = [
+  "supervisor",
+  "department_manager",
+  "hospital_admin",
+  "system_admin",
+];
+
 function canAccessWhilePasswordChangeRequired(req: Request): boolean {
   // originalUrl retains the app-level /api mount point. Remove only the query
   // string and require an exact path match so suffixes/trailing slashes cannot
   // expand this narrow recovery allowlist.
   const requestPath = req.originalUrl.split("?", 1)[0];
   return PASSWORD_CHANGE_ALLOWED_PATHS.has(requestPath);
+}
+
+function canAccessWhilePrivilegedMfaEnrollmentRequired(req: Request): boolean {
+  // Bind the exception to both the method and the exact mounted API path.
+  // This prevents a future route with a similar suffix from accidentally
+  // inheriting the enrollment exception.
+  const requestPath = req.originalUrl.split("?", 1)[0];
+  return PRIVILEGED_MFA_ENROLLMENT_ALLOWED_REQUESTS.has(
+    `${req.method.toUpperCase()} ${requestPath}`,
+  );
 }
 
 export async function requireAuth(
@@ -229,6 +254,20 @@ export async function requireAuth(
       });
       return;
     }
+    if (
+      MANAGER_ROLES.includes(user.role) &&
+      (!user.totpEnabled || !user.totpSecret) &&
+      !canAccessWhilePrivilegedMfaEnrollmentRequired(req)
+    ) {
+      res.status(403).json({
+        code: "MFA_ENROLLMENT_REQUIRED",
+        message:
+          "Enable two-factor authentication before accessing privileged features",
+        messageAr:
+          "يجب تفعيل المصادقة الثنائية قبل الوصول إلى الوظائف الإشرافية والإدارية",
+      });
+      return;
+    }
     next();
   } catch {
     res.status(401).json({ message: "Unauthorized" });
@@ -245,12 +284,5 @@ export function requireRole(...roles: User["role"][]) {
     next();
   };
 }
-
-export const MANAGER_ROLES: User["role"][] = [
-  "supervisor",
-  "department_manager",
-  "hospital_admin",
-  "system_admin",
-];
 
 export const ADMIN_ROLES: User["role"][] = ["hospital_admin", "system_admin"];

@@ -1,11 +1,14 @@
 import type { BucketMetadata } from "@google-cloud/storage";
 
+import { areDocumentUploadsEnabled } from "./documentUploads";
 import {
   headOciBucket,
+  headS3Bucket,
   objectStorageClient,
   probeFilesystemObjectStorage,
   validateFilesystemObjectStorageEnvironment,
   validateOciObjectStorageEnvironment,
+  validateS3ObjectStorageEnvironment,
 } from "./objectStorage";
 
 const PRODUCTION_GCS_LOCATION = "ME-CENTRAL2";
@@ -14,13 +17,26 @@ type ObjectStorageReadiness = "configured" | "verified";
 
 type BucketMetadataReader = (bucketName: string) => Promise<BucketMetadata>;
 type OciBucketProbe = (bucketName: string) => Promise<void>;
+type S3BucketProbe = (bucketName: string) => Promise<void>;
 type FilesystemProbe = () => Promise<void>;
+type MalwareScannerProbe = (env: NodeJS.ProcessEnv) => Promise<void>;
+
+async function probeConfiguredMalwareScanner(
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  // Keep the scanner and its database-backed upload helpers lazy so storage
+  // readiness unit tests and unused cloud providers do not initialize them.
+  const { checkMalwareScannerReadiness } = await import("./uploadSecurity");
+  await checkMalwareScannerReadiness({ env });
+}
 
 interface StorageReadinessOptions {
   env?: NodeJS.ProcessEnv;
   readBucketMetadata?: BucketMetadataReader;
   probeOciBucket?: OciBucketProbe;
+  probeS3Bucket?: S3BucketProbe;
   probeFilesystemStorage?: FilesystemProbe;
+  probeMalwareScanner?: MalwareScannerProbe;
 }
 
 export class ObjectStorageReadinessError extends Error {
@@ -50,9 +66,7 @@ function getConfiguredBucketName(privateObjectDir: string): string {
 async function readBucketMetadata(bucketName: string): Promise<BucketMetadata> {
   // Bucket metadata is a read-only request. It verifies both that the bucket
   // exists and that the runtime identity can inspect its security posture.
-  const [metadata] = await objectStorageClient
-    .bucket(bucketName)
-    .getMetadata();
+  const [metadata] = await objectStorageClient.bucket(bucketName).getMetadata();
   return metadata;
 }
 
@@ -84,7 +98,12 @@ export async function checkObjectStorageReadiness(
       "Object storage provider is not configured",
     );
   }
-  if (provider !== "gcs" && provider !== "oci" && provider !== "filesystem") {
+  if (
+    provider !== "gcs" &&
+    provider !== "oci" &&
+    provider !== "s3" &&
+    provider !== "filesystem"
+  ) {
     throw new ObjectStorageReadinessError(
       "Object storage provider is not supported",
     );
@@ -106,6 +125,25 @@ export async function checkObjectStorageReadiness(
     return "verified";
   }
 
+  if (provider === "s3") {
+    try {
+      validateS3ObjectStorageEnvironment(env);
+    } catch {
+      throw new ObjectStorageReadinessError(
+        "S3 object storage is not configured with a safe HTTPS endpoint",
+      );
+    }
+    const bucketName = getConfiguredBucketName(privateObjectDir);
+    await (options.probeS3Bucket ?? headS3Bucket)(bucketName);
+    if (areDocumentUploadsEnabled(env)) {
+      await (options.probeMalwareScanner ?? probeConfiguredMalwareScanner)(env);
+    }
+    // Generic S3 credentials can prove bucket reachability, not that a vendor
+    // bucket is private. Bucket privacy, retention, region, and key scope remain
+    // explicit deployment checks; browser access is blocked by architecture.
+    return "verified";
+  }
+
   if (provider === "filesystem") {
     try {
       validateFilesystemObjectStorageEnvironment(env);
@@ -116,6 +154,9 @@ export async function checkObjectStorageReadiness(
       );
     }
     await (options.probeFilesystemStorage ?? probeFilesystemObjectStorage)();
+    if (areDocumentUploadsEnabled(env)) {
+      await (options.probeMalwareScanner ?? probeConfiguredMalwareScanner)(env);
+    }
     // Directory ACLs, volume encryption, backup posture, and restore drills are
     // enforced by the local production preflight.
     return "verified";
@@ -150,9 +191,7 @@ export async function checkObjectStorageReadiness(
       "Configured GCS bucket does not enforce public access prevention",
     );
   }
-  if (
-    metadata.iamConfiguration?.uniformBucketLevelAccess?.enabled !== true
-  ) {
+  if (metadata.iamConfiguration?.uniformBucketLevelAccess?.enabled !== true) {
     throw new ObjectStorageReadinessError(
       "Configured GCS bucket does not enforce uniform bucket-level access",
     );

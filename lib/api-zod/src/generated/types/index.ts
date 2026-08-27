@@ -71,6 +71,7 @@ export * from './ocrConfidence';
 export * from './ocrInput';
 export * from './ocrResult';
 export * from './readinessStatus';
+export * from './readinessStatusDocumentUploads';
 export * from './resetPasswordInput';
 export * from './totpActivation';
 export * from './totpAdminDisableInput';

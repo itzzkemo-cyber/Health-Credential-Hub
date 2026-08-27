@@ -16,6 +16,9 @@ coverage/
 .local/
 .turbo/
 .vite/
+# A Windows cache writer can expose an unexpanded drive placeholder when run
+# from the workspace; never track those operating-system cache databases.
+%SystemDrive%/
 
 # Local environment and secrets
 .env

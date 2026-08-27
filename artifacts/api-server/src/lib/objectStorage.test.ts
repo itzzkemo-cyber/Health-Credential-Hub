@@ -1,16 +1,27 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  type S3Client,
+} from "@aws-sdk/client-s3";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   FILESYSTEM_UPLOAD_REQUIRED_HEADERS,
   getObjectStorageProvider,
   getStorageConnectSources,
   getUploadRequiredHeaders,
   ObjectNotFoundError,
+  ObjectAlreadyExistsError,
   ObjectStorageService,
   OCI_UPLOAD_REQUIRED_HEADERS,
+  S3_UPLOAD_REQUIRED_HEADERS,
   type StoredObjectFile,
   UPLOAD_REQUIRED_HEADERS,
   validateObjectStorageConfiguration,
@@ -22,6 +33,10 @@ const originalOciEndpoint = process.env.OCI_OBJECT_STORAGE_ENDPOINT;
 const originalOciRegion = process.env.OCI_OBJECT_STORAGE_REGION;
 const originalOciAccessKey = process.env.OCI_OBJECT_STORAGE_ACCESS_KEY_ID;
 const originalOciSecret = process.env.OCI_OBJECT_STORAGE_SECRET_ACCESS_KEY;
+const originalS3Endpoint = process.env.S3_OBJECT_STORAGE_ENDPOINT;
+const originalS3Region = process.env.S3_OBJECT_STORAGE_REGION;
+const originalS3AccessKey = process.env.S3_OBJECT_STORAGE_ACCESS_KEY_ID;
+const originalS3Secret = process.env.S3_OBJECT_STORAGE_SECRET_ACCESS_KEY;
 const originalLocalStorageDir = process.env.LOCAL_OBJECT_STORAGE_DIR;
 const originalPublicAppUrl = process.env.PUBLIC_APP_URL;
 const originalNodeEnv = process.env.NODE_ENV;
@@ -34,6 +49,10 @@ beforeEach(() => {
   delete process.env.OCI_OBJECT_STORAGE_REGION;
   delete process.env.OCI_OBJECT_STORAGE_ACCESS_KEY_ID;
   delete process.env.OCI_OBJECT_STORAGE_SECRET_ACCESS_KEY;
+  delete process.env.S3_OBJECT_STORAGE_ENDPOINT;
+  delete process.env.S3_OBJECT_STORAGE_REGION;
+  delete process.env.S3_OBJECT_STORAGE_ACCESS_KEY_ID;
+  delete process.env.S3_OBJECT_STORAGE_SECRET_ACCESS_KEY;
   delete process.env.LOCAL_OBJECT_STORAGE_DIR;
   delete process.env.PUBLIC_APP_URL;
   process.env.NODE_ENV = "test";
@@ -61,6 +80,18 @@ afterEach(async () => {
   if (originalOciSecret === undefined)
     delete process.env.OCI_OBJECT_STORAGE_SECRET_ACCESS_KEY;
   else process.env.OCI_OBJECT_STORAGE_SECRET_ACCESS_KEY = originalOciSecret;
+  if (originalS3Endpoint === undefined)
+    delete process.env.S3_OBJECT_STORAGE_ENDPOINT;
+  else process.env.S3_OBJECT_STORAGE_ENDPOINT = originalS3Endpoint;
+  if (originalS3Region === undefined)
+    delete process.env.S3_OBJECT_STORAGE_REGION;
+  else process.env.S3_OBJECT_STORAGE_REGION = originalS3Region;
+  if (originalS3AccessKey === undefined)
+    delete process.env.S3_OBJECT_STORAGE_ACCESS_KEY_ID;
+  else process.env.S3_OBJECT_STORAGE_ACCESS_KEY_ID = originalS3AccessKey;
+  if (originalS3Secret === undefined)
+    delete process.env.S3_OBJECT_STORAGE_SECRET_ACCESS_KEY;
+  else process.env.S3_OBJECT_STORAGE_SECRET_ACCESS_KEY = originalS3Secret;
   if (originalLocalStorageDir === undefined)
     delete process.env.LOCAL_OBJECT_STORAGE_DIR;
   else process.env.LOCAL_OBJECT_STORAGE_DIR = originalLocalStorageDir;
@@ -218,6 +249,189 @@ describe("OCI Riyadh object storage configuration", () => {
     process.env.OCI_OBJECT_STORAGE_ENDPOINT =
       "https://tenantns.compat.objectstorage.me-riyadh-1.oraclecloud.com.attacker.example";
     expect(() => validateObjectStorageConfiguration()).toThrow(/me-riyadh-1/);
+  });
+});
+
+describe("server-mediated S3 object storage configuration", () => {
+  const configureS3 = () => {
+    process.env.OBJECT_STORAGE_PROVIDER = "s3";
+    process.env.S3_OBJECT_STORAGE_ENDPOINT =
+      "https://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3";
+    process.env.S3_OBJECT_STORAGE_REGION = "eu-central-1";
+    process.env.S3_OBJECT_STORAGE_ACCESS_KEY_ID = "test-access-key";
+    process.env.S3_OBJECT_STORAGE_SECRET_ACCESS_KEY = "test-secret-key";
+  };
+
+  it("requires complete server-only S3 configuration", () => {
+    configureS3();
+    expect(getObjectStorageProvider()).toBe("s3");
+    expect(() => validateObjectStorageConfiguration()).not.toThrow();
+
+    delete process.env.S3_OBJECT_STORAGE_SECRET_ACCESS_KEY;
+    expect(() => validateObjectStorageConfiguration()).toThrow(
+      /S3_OBJECT_STORAGE_SECRET_ACCESS_KEY must be set/,
+    );
+  });
+
+  it("returns a same-origin upload URL and no browser CSP source", async () => {
+    configureS3();
+    const service = new ObjectStorageService();
+
+    const granted = await service.getObjectEntityUploadURL("application/pdf");
+
+    expect(granted.uploadURL).toMatch(
+      /^\/api\/storage\/uploads\/local\/[0-9a-f-]{36}$/,
+    );
+    expect(service.normalizeObjectEntityPath(granted.uploadURL)).toMatch(
+      /^\/objects\/uploads\/[0-9a-f-]{36}$/,
+    );
+    expect(granted.requiredHeaders).toEqual(S3_UPLOAD_REQUIRED_HEADERS);
+    expect(getStorageConnectSources()).toEqual([]);
+  });
+
+  it.each([
+    "http://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3",
+    "https://user@abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3",
+    "https://127.0.0.1/storage/v1/s3",
+    "https://[::1]/storage/v1/s3",
+    "https://abcdefghijklmnopqrst.storage.supabase.co:8443/storage/v1/s3",
+    "https://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3?token=secret",
+    "https://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3#fragment",
+    "https://s3.example.com/storage/v1/s3",
+    "https://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3/",
+    "https://abcdefghijklmnopqrst.storage.supabase.co/wrong/path",
+  ])("rejects an unsafe endpoint: %s", (endpoint) => {
+    configureS3();
+    process.env.S3_OBJECT_STORAGE_ENDPOINT = endpoint;
+
+    expect(() => validateObjectStorageConfiguration()).toThrow(
+      /exact HTTPS endpoint for one Supabase project/,
+    );
+  });
+
+  it("uses a collision-resistant key, HEAD-before-PUT, and a screened hash", async () => {
+    configureS3();
+    const send = vi.fn(async (command: unknown) => {
+      if (command instanceof HeadObjectCommand) {
+        throw { name: "NotFound", $metadata: { httpStatusCode: 404 } };
+      }
+      if (command instanceof PutObjectCommand) return {};
+      throw new Error("Unexpected S3 command");
+    });
+    const service = new ObjectStorageService(
+      () => ({ send }) as unknown as S3Client,
+    );
+    const objectPath = "/objects/uploads/f3fddc5a-9315-4b7b-8e7c-8ac98bc9f6c5";
+    const sha256 = "a".repeat(64);
+
+    await service.writeServerMediatedObject(
+      objectPath,
+      Buffer.from("screened"),
+      "application/pdf",
+      sha256,
+    );
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0]?.[0]).toBeInstanceOf(HeadObjectCommand);
+    const put = send.mock.calls[1]?.[0] as PutObjectCommand;
+    expect(put).toBeInstanceOf(PutObjectCommand);
+    expect(put.input.Key).toBe(
+      "private/uploads/f3fddc5a-9315-4b7b-8e7c-8ac98bc9f6c5",
+    );
+    expect(put.input.IfNoneMatch).toBeUndefined();
+    expect(put.input.Metadata).toEqual({ "content-sha256": sha256 });
+  });
+
+  it("refuses to replace an object observed by the preflight HEAD", async () => {
+    configureS3();
+    const send = vi.fn(async (command: unknown) => {
+      if (command instanceof HeadObjectCommand) return {};
+      throw new Error("Unexpected S3 command");
+    });
+    const service = new ObjectStorageService(
+      () => ({ send }) as unknown as S3Client,
+    );
+
+    await expect(
+      service.writeServerMediatedObject(
+        "/objects/uploads/f3fddc5a-9315-4b7b-8e7c-8ac98bc9f6c5",
+        Buffer.from("screened"),
+        "application/pdf",
+        "a".repeat(64),
+      ),
+    ).rejects.toBeInstanceOf(ObjectAlreadyExistsError);
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it("reconciles an ambiguous failed PUT with an idempotent delete", async () => {
+    configureS3();
+    const send = vi.fn(async (command: unknown) => {
+      if (command instanceof HeadObjectCommand) {
+        throw { name: "NotFound", $metadata: { httpStatusCode: 404 } };
+      }
+      if (command instanceof PutObjectCommand) throw new Error("timeout");
+      if (command instanceof DeleteObjectCommand) return {};
+      throw new Error("Unexpected S3 command");
+    });
+    const service = new ObjectStorageService(
+      () => ({ send }) as unknown as S3Client,
+    );
+
+    await expect(
+      service.writeServerMediatedObject(
+        "/objects/uploads/f3fddc5a-9315-4b7b-8e7c-8ac98bc9f6c5",
+        Buffer.from("screened"),
+        "application/pdf",
+        "a".repeat(64),
+      ),
+    ).rejects.toThrow("timeout");
+    expect(send.mock.calls[2]?.[0]).toBeInstanceOf(DeleteObjectCommand);
+  });
+
+  it("updates Supabase metadata with an ETag-guarded same-object copy", async () => {
+    configureS3();
+    const bytes = Buffer.from("screened");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    let getCount = 0;
+    const send = vi.fn(async (command: unknown) => {
+      if (command instanceof HeadObjectCommand) return {};
+      if (command instanceof GetObjectCommand) {
+        getCount += 1;
+        return {
+          Body: {
+            transformToByteArray: async () => Uint8Array.from(bytes),
+          },
+          ETag: '"etag-1"',
+          ContentType: "application/pdf",
+          CacheControl: "private, no-store, max-age=0",
+          Metadata: { "content-sha256": sha256 },
+        };
+      }
+      if (command instanceof CopyObjectCommand) return {};
+      throw new Error("Unexpected S3 command");
+    });
+    const service = new ObjectStorageService(
+      () => ({ send }) as unknown as S3Client,
+    );
+    const file = await service.getObjectEntityFile(
+      "/objects/uploads/f3fddc5a-9315-4b7b-8e7c-8ac98bc9f6c5",
+    );
+
+    await file.setMetadata({
+      metadata: {
+        "content-sha256": sha256,
+        "acl-policy": '{"owner":"7","visibility":"private"}',
+      },
+    });
+
+    const copy = send.mock.calls.find(
+      ([command]) => command instanceof CopyObjectCommand,
+    )?.[0] as CopyObjectCommand;
+    expect(copy).toBeInstanceOf(CopyObjectCommand);
+    expect(copy.input.CopySourceIfMatch).toBe('"etag-1"');
+    expect(copy.input.MetadataDirective).toBe("REPLACE");
+    expect(copy.input.Metadata?.["content-sha256"]).toBe(sha256);
+    expect(getCount).toBe(2);
   });
 });
 

@@ -14,6 +14,10 @@ import { AppShell } from '@/components/layout/Shell';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { withPasswordChangeState } from '@/lib/password-change-state';
+import {
+  isMfaEnrollmentRequiredApiError,
+  withMfaEnrollmentState,
+} from '@/lib/account-security-state';
 
 // Split route bundles so mobile employees do not download management screens up front.
 const Login = lazy(() => import('@/pages/login'));
@@ -137,6 +141,13 @@ function handleAuthError(error: unknown) {
   if (error.status === 401 && isAuthenticated()) {
     clearAuthSession();
     window.location.assign(`${import.meta.env.BASE_URL}login`);
+    return;
+  }
+
+  if (isMfaEnrollmentRequiredApiError(error)) {
+    const user = getAuthUser() as Record<string, unknown> | null;
+    if (user) setAuthSession(withMfaEnrollmentState(user, true));
+    window.location.assign(`${import.meta.env.BASE_URL}settings`);
     return;
   }
 

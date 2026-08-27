@@ -1,6 +1,13 @@
+import {
+  mustEnrollPrivilegedMfa,
+  type PrivilegedMfaUser,
+} from "./account-security-state";
+
 export type PasswordChangeUser = {
   mustChangePassword?: boolean;
 };
+
+export type AccountSetupUser = PasswordChangeUser & PrivilegedMfaUser;
 
 export function mustReplaceTemporaryPassword(
   user: PasswordChangeUser | null | undefined,
@@ -9,9 +16,11 @@ export function mustReplaceTemporaryPassword(
 }
 
 export function authenticatedLandingPath(
-  user: PasswordChangeUser | null | undefined,
+  user: AccountSetupUser | null | undefined,
 ): "/" | "/settings" {
-  return mustReplaceTemporaryPassword(user) ? "/settings" : "/";
+  return mustReplaceTemporaryPassword(user) || mustEnrollPrivilegedMfa(user)
+    ? "/settings"
+    : "/";
 }
 
 export function withPasswordChangeState<T extends object>(

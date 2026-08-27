@@ -2,7 +2,7 @@
 
 منصة عربية/إنجليزية لإدارة وثائق واعتمادات الكوادر الصحية، مع موقع متجاوب، API آمن، تخزين ملفات خاص، قراءة OCR اختيارية، تنبيهات، وتقارير امتثال.
 
-> **هدف الإصدار الحالي:** الموقع المتجاوب هو واجهة المنتج الوحيدة التي تُنشر. يستطيع الموظف من الجوال إدخال بياناته ورفع وثائقه، ويستطيع المدير مراجعة الموظفين والوثائق الواقعة ضمن نطاق صلاحياته. لا يحتوي إصدار الإطلاق على دخول تجريبي أو بيانات صناعية.
+> **هدف الإصدار الحالي:** الموقع المتجاوب هو واجهة المنتج الوحيدة التي تُنشر. يستطيع الموظف من الجوال إدخال بياناته، ويستطيع المدير مراجعة الموظفين والوثائق الواقعة ضمن نطاق صلاحياته. لا يحتوي إصدار الإطلاق على دخول تجريبي أو بيانات صناعية. مسار Render المجاني هو قبول مضبوط وليس إنتاجًا صحيًا معتمدًا؛ يبقي رفع الملفات معطلًا حتى اعتماد ماسح Linux، بينما تعمل الحسابات وبيانات الموظفين بقاعدة Supabase الدائمة.
 
 ## Workspace
 
@@ -20,9 +20,9 @@
 - pnpm 11.19.0 (Corepack is fine)
 - PostgreSQL for API runtime
 - Private document storage: the encrypted single-host filesystem acceptance
-  profile described below. GCS and Oracle Object Storage drivers are present,
-  but must stay disabled for real documents until bounded ingress, malware
-  quarantine, and auditable orphan cleanup are implemented and accepted.
+  profile or a server-mediated private S3-compatible provider. Document intake
+  stays fail-closed until bounded ingress, malware quarantine, and auditable
+  orphan cleanup are implemented and accepted for the selected host.
 
 ## Local setup
 
@@ -100,6 +100,17 @@ outbox وعاملًا منفصلًا يوقع أحداثًا مصغرة قبل �
 اجتياز بوابات النشر والأمان. لا يُعد شراء الدومين موافقة على العلامة التجارية؛ خطوات فحص
 SaudiNIC وSAIP موثقة في
 [docs/BRAND_AND_DOMAIN.md](docs/BRAND_AND_DOMAIN.md).
+
+For the no-card external acceptance path, use the Docker-based Render service
+and the existing Supabase project only through the guarded runbook in
+[docs/RENDER_SUPABASE_DEPLOYMENT.md](docs/RENDER_SUPABASE_DEPLOYMENT.md).
+The checked-in `render.yaml` deliberately keeps deploys manual: migrations run
+with a separate database identity before the web service is released, and the
+web service never receives bootstrap or migration credentials. It sets
+`DOCUMENT_UPLOADS_ENABLED=false`: account, employee, dashboard, and scoped
+administration data persist in Supabase, but file intake is intentionally
+unavailable until an approved Linux scanner passes readiness. This is not a
+production-ready healthcare deployment.
 
 - Use a secret manager and a random `SESSION_SECRET` of at least 32 characters.
 - Apply reviewed Drizzle migrations; do not use `push-force` in production.

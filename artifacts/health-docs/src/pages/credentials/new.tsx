@@ -5,15 +5,18 @@ import {
   Check,
   FileCheck2,
   Loader2,
+  ShieldAlert,
   ShieldCheck,
   UploadCloud,
 } from "lucide-react";
 import {
   CredentialInputType,
   getGetEmployeeQueryKey,
+  getReadinessCheckQueryKey,
   useCreateCredential,
   useDeleteUnlinkedUpload,
   useGetEmployee,
+  useReadinessCheck,
   useRequestUploadUrl,
 } from "@workspace/api-client-react";
 import { useLocation } from "wouter";
@@ -40,6 +43,7 @@ import {
   UploadTooLargeError,
 } from "@/lib/upload";
 import { cn } from "@/lib/utils";
+import { getDocumentUploadAvailability } from "@/lib/document-upload-availability";
 import {
   claimCredentialSubmission,
   CredentialSubmissionError,
@@ -77,6 +81,19 @@ export default function CredentialNew() {
     },
   });
   const targetEmployee = targetEmployeeQuery.data;
+  const readinessQuery = useReadinessCheck({
+    query: {
+      queryKey: getReadinessCheckQueryKey(),
+      retry: false,
+      staleTime: 60_000,
+    },
+  });
+  const documentUploadAvailability = getDocumentUploadAvailability({
+    readiness: readinessQuery.data,
+    isLoading: readinessQuery.isLoading,
+    isError: readinessQuery.isError,
+  });
+  const documentUploadsEnabled = documentUploadAvailability === "enabled";
   const ownerState = getCredentialOwnerState({
     employeeId,
     currentUserId: user?.id,
@@ -122,6 +139,7 @@ export default function CredentialNew() {
   const handleFileSelection = (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
+    if (!documentUploadsEnabled) return;
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
@@ -156,6 +174,11 @@ export default function CredentialNew() {
     }
     if (cleanupUnconfirmed) {
       toast.error(t("credential.cleanup_failed"));
+      return;
+    }
+    if (selectedFile && !documentUploadsEnabled) {
+      clearSelectedFile();
+      toast.error(t("credential.upload_unavailable_desc"));
       return;
     }
     if (!claimCredentialSubmission(submissionLock.current)) return;
@@ -297,15 +320,51 @@ export default function CredentialNew() {
 
       {ownerState === "ready" && (
         <>
-          <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-            <ShieldCheck
-              className="mt-0.5 h-5 w-5 shrink-0 text-primary"
-              aria-hidden="true"
-            />
-            <p className="leading-6">
-              {t("credential.private_upload_notice")}
-            </p>
-          </div>
+          {documentUploadsEnabled ? (
+            <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+              <ShieldCheck
+                className="mt-0.5 h-5 w-5 shrink-0 text-primary"
+                aria-hidden="true"
+              />
+              <p className="leading-6">
+                {t("credential.private_upload_notice")}
+              </p>
+            </div>
+          ) : (
+            <div
+              className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+              role="status"
+              aria-live="polite"
+            >
+              {documentUploadAvailability === "checking" ? (
+                <Loader2
+                  className="mt-0.5 h-5 w-5 shrink-0 animate-spin"
+                  aria-hidden="true"
+                />
+              ) : (
+                <ShieldAlert
+                  className="mt-0.5 h-5 w-5 shrink-0"
+                  aria-hidden="true"
+                />
+              )}
+              <div className="space-y-1">
+                <p className="font-semibold">
+                  {t(
+                    documentUploadAvailability === "checking"
+                      ? "credential.upload_checking_title"
+                      : "credential.upload_unavailable_title",
+                  )}
+                </p>
+                <p className="leading-6">
+                  {t(
+                    documentUploadAvailability === "checking"
+                      ? "credential.upload_checking_desc"
+                      : "credential.upload_unavailable_desc",
+                  )}
+                </p>
+              </div>
+            </div>
+          )}
 
           <Card>
             <CardContent className="p-4 sm:p-6">
@@ -338,13 +397,17 @@ export default function CredentialNew() {
                       {t("credential.file")}
                     </h2>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {t("credential.manual_upload_hint")}
+                      {t(
+                        documentUploadsEnabled
+                          ? "credential.manual_upload_hint"
+                          : "credential.record_without_attachment_hint",
+                      )}
                     </p>
                   </div>
                   <DocumentPicker
                     id="manual-document-upload"
                     busy={submissionStage === "upload"}
-                    disabled={controlsDisabled}
+                    disabled={controlsDisabled || !documentUploadsEnabled}
                     fileName={selectedFile?.name ?? ""}
                     compact
                     onChange={handleFileSelection}

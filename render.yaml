@@ -1,0 +1,73 @@
+services:
+  - type: web
+    name: wathaiqi-health
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/readyz
+    # The free plan has no isolated pre-deploy job. Keep deploys manual so the
+    # reviewed migration command can finish before a new image is released.
+    autoDeployTrigger: off
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: BIND_HOST
+        value: 0.0.0.0
+      - key: LOG_LEVEL
+        value: info
+      - key: DB_POOL_MAX
+        value: "5"
+      - key: NODE_EXTRA_CA_CERTS
+        value: /app/certs/supabase-prod-ca-2021.crt
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_DATABASE_USER
+        value: healthdocs_app
+      - key: APP_DATABASE_ROLE
+        value: healthdocs_app_dml
+      - key: MIGRATOR_DATABASE_USER
+        value: healthdocs_migrator
+      - key: MIGRATOR_DATABASE_ROLE
+        value: healthdocs_migrator_ddl
+      - key: VERIFY_DATABASE_ROLE_BOUNDARY
+        value: "true"
+      - key: DATABASE_OWNERSHIP_MODE
+        value: managed
+      - key: DATABASE_BLOCKED_ROLES
+        value: anon,authenticated,service_role
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: TOTP_ENCRYPTION_KEY
+        generateValue: true
+      - key: SESSION_COOKIE_SAME_SITE
+        value: lax
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: OBJECT_STORAGE_PROVIDER
+        value: s3
+      # Controlled acceptance keeps document intake fail-closed. Set true only
+      # after an approved Linux malware scanner passes /api/readyz.
+      - key: DOCUMENT_UPLOADS_ENABLED
+        value: "false"
+      - key: PRIVATE_OBJECT_DIR
+        sync: false
+      - key: S3_OBJECT_STORAGE_ENDPOINT
+        sync: false
+      - key: S3_OBJECT_STORAGE_REGION
+        value: eu-central-1
+      - key: S3_OBJECT_STORAGE_ACCESS_KEY_ID
+        sync: false
+      - key: S3_OBJECT_STORAGE_SECRET_ACCESS_KEY
+        sync: false
+      - key: EMAIL_ALERTS_DISABLED
+        value: "1"
+      - key: AUTOMATION_OUTBOX_ENABLED
+        value: "false"
+      - key: AUTOMATION_WEBHOOK_ENABLED
+        value: "false"

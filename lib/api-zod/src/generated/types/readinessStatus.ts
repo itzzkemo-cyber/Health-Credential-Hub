@@ -5,9 +5,11 @@
  * HealthDocs - Healthcare Credential Management Platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { ReadinessStatusDocumentUploads } from './readinessStatusDocumentUploads';
 
 export interface ReadinessStatus {
   status: string;
   database: string;
   objectStorage: string;
+  documentUploads: ReadinessStatusDocumentUploads;
 }

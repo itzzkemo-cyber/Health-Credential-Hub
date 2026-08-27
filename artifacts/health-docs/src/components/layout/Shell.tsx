@@ -7,16 +7,18 @@ import { Redirect, useLocation } from "wouter";
 import {
   authenticatedLandingPath,
   mustReplaceTemporaryPassword,
-  type PasswordChangeUser,
+  type AccountSetupUser,
 } from "@/lib/password-change-state";
+import { mustEnrollPrivilegedMfa } from "@/lib/account-security-state";
 
 export function AppShell({ children }: { children: ReactNode }) {
   // The session itself is an httpOnly cookie the JS cannot read; this only
   // checks the cached profile. If the cookie is gone the API answers 401 and
   // the global handler in App.tsx clears the cache and redirects to login.
   const authed = isAuthenticated();
-  const user = getAuthUser() as PasswordChangeUser | null;
+  const user = getAuthUser() as AccountSetupUser | null;
   const passwordChangeRequired = mustReplaceTemporaryPassword(user);
+  const mfaEnrollmentRequired = mustEnrollPrivilegedMfa(user);
   const [location] = useLocation();
 
   // If not logged in and not on a public route, redirect to login
@@ -36,7 +38,17 @@ export function AppShell({ children }: { children: ReactNode }) {
     return <Redirect to="/settings" />;
   }
 
-  if (passwordChangeRequired && location === "/settings") {
+  // Privileged accounts remain limited to security settings until the API-
+  // confirmed profile reports TOTP enabled. Server middleware enforces the
+  // same boundary for every protected request.
+  if (mfaEnrollmentRequired && location !== "/settings") {
+    return <Redirect to="/settings" />;
+  }
+
+  if (
+    (passwordChangeRequired || mfaEnrollmentRequired) &&
+    location === "/settings"
+  ) {
     return (
       <main className="flex min-h-[100dvh] w-full items-center justify-center bg-slate-50 p-4 dark:bg-slate-950 sm:p-6">
         <div className="w-full max-w-2xl">{children}</div>

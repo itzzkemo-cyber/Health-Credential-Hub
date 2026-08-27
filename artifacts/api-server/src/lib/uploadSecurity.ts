@@ -49,6 +49,11 @@ export interface ScanUploadForMalwareOptions {
   platform?: NodeJS.Platform;
 }
 
+export interface MalwareScannerReadinessOptions {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+}
+
 export class MalwareDetectedError extends Error {
   constructor() {
     super("The uploaded file failed malware screening");
@@ -89,9 +94,7 @@ export class MalwareScanBusyError extends MalwareScanUnavailableError {
 // of retaining upload buffers in an unbounded Promise chain.
 let activeMalwareScans = 0;
 
-async function withMalwareScanSlot<T>(
-  action: () => Promise<T>,
-): Promise<T> {
+async function withMalwareScanSlot<T>(action: () => Promise<T>): Promise<T> {
   if (activeMalwareScans >= MAX_CONCURRENT_MALWARE_SCANS) {
     throw new MalwareScanBusyError();
   }
@@ -189,10 +192,9 @@ function scannerOutputIndicatesThreat(output: Buffer): boolean {
   );
 }
 
-async function runWindowsDefenderScan(
+async function validateWindowsDefenderExecutable(
   executablePath: string,
-  request: MalwareScanRequest,
-): Promise<MalwareScanVerdict> {
+): Promise<void> {
   if (
     !path.isAbsolute(executablePath) ||
     path.basename(executablePath).toLowerCase() !== "mpcmdrun.exe"
@@ -206,6 +208,13 @@ async function runWindowsDefenderScan(
     if (error instanceof MalwareScanUnavailableError) throw error;
     throw new MalwareScanUnavailableError();
   }
+}
+
+async function runWindowsDefenderScan(
+  executablePath: string,
+  request: MalwareScanRequest,
+): Promise<MalwareScanVerdict> {
+  await validateWindowsDefenderExecutable(executablePath);
 
   return new Promise<MalwareScanVerdict>((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -302,6 +311,37 @@ async function getConfiguredMalwareScanner(
   }
   const executablePath = env.WINDOWS_DEFENDER_MPCMDRUN_PATH;
   return (request) => runWindowsDefenderScan(executablePath, request);
+}
+
+/**
+ * Verify that the fail-closed server-mediated upload path has a supported
+ * scanner executable and a clean, isolated quarantine directory. This probe
+ * intentionally does not expose the executable path or scanner output.
+ */
+export async function checkMalwareScannerReadiness(
+  options: MalwareScannerReadinessOptions = {},
+): Promise<void> {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  readMalwareScanTimeout(env.MALWARE_SCAN_TIMEOUT_MS);
+  await getConfiguredMalwareScanner(env, platform);
+  await validateWindowsDefenderExecutable(
+    env.WINDOWS_DEFENDER_MPCMDRUN_PATH ?? "",
+  );
+  try {
+    await withMalwareScanSlot(async () => {
+      const quarantineDir = await prepareQuarantineDirectory(
+        env.MALWARE_QUARANTINE_DIR ?? "",
+      );
+      await assertQuarantineHasNoRemnants(quarantineDir);
+    });
+  } catch (error) {
+    // An in-flight upload already owns the same bounded slot and proves the
+    // scanner path is actively in use. Do not make orchestration restart the
+    // service in the middle of that upload; the next idle probe checks cleanup.
+    if (error instanceof MalwareScanBusyError) return;
+    throw error;
+  }
 }
 
 async function removeQuarantinedFile(filePath: string): Promise<void> {

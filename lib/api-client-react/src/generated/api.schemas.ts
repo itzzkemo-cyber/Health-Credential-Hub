@@ -24,32 +24,42 @@ export interface UploadUrlRequest {
 }
 
 /**
- * Headers that must be included verbatim in the signed PUT request.
+ * Headers that must be included verbatim in the PUT request.
  */
 export type UploadUrlResponseRequiredHeaders = {[key: string]: string};
 
 export interface UploadUrlResponse {
-  /** Presigned private-object-storage URL for PUT upload. */
+  /** Short-lived PUT destination. This is either a presigned provider URL or a guarded same-origin API path, depending on the configured private-storage provider. */
   uploadURL: string;
   /** Normalized object path (e.g. `/objects/uploads/uuid`). Store this in your database. */
   objectPath: string;
-  /** Headers that must be included verbatim in the signed PUT request. */
+  /** Headers that must be included verbatim in the PUT request. */
   requiredHeaders: UploadUrlResponseRequiredHeaders;
   metadata?: UploadUrlRequest;
 }
 
 export interface ErrorEnvelope {
   error: string;
+  code?: string;
 }
 
 export interface HealthStatus {
   status: string;
 }
 
+export type ReadinessStatusDocumentUploads = typeof ReadinessStatusDocumentUploads[keyof typeof ReadinessStatusDocumentUploads];
+
+
+export const ReadinessStatusDocumentUploads = {
+  enabled: 'enabled',
+  disabled: 'disabled',
+} as const;
+
 export interface ReadinessStatus {
   status: string;
   database: string;
   objectStorage: string;
+  documentUploads: ReadinessStatusDocumentUploads;
 }
 
 export interface LoginInput {

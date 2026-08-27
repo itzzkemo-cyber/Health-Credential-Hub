@@ -19,6 +19,23 @@ describe("temporary password state", () => {
     expect(authenticatedLandingPath({ id: 7 })).toBe("/");
   });
 
+  it("keeps a privileged account in settings until TOTP is enabled", () => {
+    expect(
+      authenticatedLandingPath({
+        mustChangePassword: false,
+        role: "hospital_admin",
+        totpEnabled: false,
+      }),
+    ).toBe("/settings");
+    expect(
+      authenticatedLandingPath({
+        mustChangePassword: false,
+        role: "hospital_admin",
+        totpEnabled: true,
+      }),
+    ).toBe("/");
+  });
+
   it("updates only the local profile flag after a server-confirmed change", () => {
     expect(withPasswordChangeState({ id: 7, role: "employee" }, false)).toEqual({
       id: 7,

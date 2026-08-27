@@ -9,11 +9,15 @@ import * as zod from 'zod';
 
 
 /**
- * Returns a presigned private-object-storage URL for direct upload. The client sends JSON
- * metadata here, then uploads the file directly to the returned URL with
- * every returned required header. The overwrite precondition makes each
- * URL create one new object generation only.
- * @summary Request a presigned URL for file upload
+ * Returns a short-lived private upload capability. The client sends JSON
+ * metadata here, then uploads the file with every returned required
+ * header. GCS/OCI deployments can return a provider URL; filesystem/S3
+ * deployments return a guarded same-origin endpoint that validates the
+ * grant, byte count, signature, and configured malware scanner before the
+ * object becomes durable. Each capability is scoped to a newly allocated
+ * object identifier and the authenticated caller; the server rejects a
+ * known pre-existing object and verifies the stored bytes after write.
+ * @summary Request a controlled URL for private file upload
  */
 
 
@@ -32,9 +36,9 @@ export const RequestUploadUrlBody = zod.object({
 
 
 export const RequestUploadUrlResponse = zod.object({
-  "uploadURL": zod.string().describe('Presigned private-object-storage URL for PUT upload.'),
+  "uploadURL": zod.string().describe('Short-lived PUT destination. This is either a presigned provider URL or a guarded same-origin API path, depending on the configured private-storage provider.'),
   "objectPath": zod.string().describe('Normalized object path (e.g. `\/objects\/uploads\/uuid`). Store this in your database.'),
-  "requiredHeaders": zod.record(zod.string(), zod.string()).describe('Headers that must be included verbatim in the signed PUT request.'),
+  "requiredHeaders": zod.record(zod.string(), zod.string()).describe('Headers that must be included verbatim in the PUT request.'),
   "metadata": zod.object({
   "name": zod.string().min(1).describe('Original file name.'),
   "size": zod.number().min(1).describe('File size in bytes.'),
@@ -87,7 +91,8 @@ export const HealthCheckResponse = zod.object({
 export const ReadinessCheckResponse = zod.object({
   "status": zod.string(),
   "database": zod.string(),
-  "objectStorage": zod.string()
+  "objectStorage": zod.string(),
+  "documentUploads": zod.enum(['enabled', 'disabled'])
 })
 
 

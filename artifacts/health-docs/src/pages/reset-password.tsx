@@ -8,6 +8,7 @@ import {
 import { useLanguage } from "@/lib/language-context";
 import { setAuthSession } from "@/lib/auth";
 import { consumeResetToken } from "@/lib/reset-token";
+import { authenticatedLandingPath } from "@/lib/password-change-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,7 +47,7 @@ export default function ResetPassword() {
           }
           setAuthSession(res.user);
           toast.success(t("reset_password.success"));
-          setLocation("/");
+          setLocation(authenticatedLandingPath(res.user));
         },
         onError: (err) => {
           const code =

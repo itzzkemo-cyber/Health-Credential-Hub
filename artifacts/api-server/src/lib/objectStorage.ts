@@ -1,10 +1,12 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { isIP } from "node:net";
 import path from "node:path";
 import { Readable } from "node:stream";
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
@@ -24,7 +26,7 @@ import {
 } from "./objectAcl";
 import { getPublicAppUrl } from "./publicUrl";
 
-export type ObjectStorageProvider = "gcs" | "oci" | "filesystem";
+export type ObjectStorageProvider = "gcs" | "oci" | "s3" | "filesystem";
 
 export interface StoredObjectMetadata {
   contentType?: string;
@@ -62,6 +64,7 @@ export const OCI_UPLOAD_REQUIRED_HEADERS: Readonly<Record<string, string>> =
     "if-none-match": "*",
   });
 
+export const S3_UPLOAD_REQUIRED_HEADERS = OCI_UPLOAD_REQUIRED_HEADERS;
 export const FILESYSTEM_UPLOAD_REQUIRED_HEADERS = OCI_UPLOAD_REQUIRED_HEADERS;
 
 // Kept for source compatibility with the default Google driver.
@@ -73,6 +76,8 @@ const OCI_RIYADH_ENDPOINT =
 
 let ociClient: S3Client | undefined;
 let ociClientKey = "";
+let s3Client: S3Client | undefined;
+let s3ClientKey = "";
 
 function requiredEnv(
   name: string,
@@ -85,10 +90,62 @@ function requiredEnv(
 
 export function getObjectStorageProvider(): ObjectStorageProvider {
   const provider = requiredEnv("OBJECT_STORAGE_PROVIDER").toLowerCase();
-  if (provider !== "gcs" && provider !== "oci" && provider !== "filesystem") {
-    throw new Error("OBJECT_STORAGE_PROVIDER must be gcs, oci, or filesystem");
+  if (
+    provider !== "gcs" &&
+    provider !== "oci" &&
+    provider !== "s3" &&
+    provider !== "filesystem"
+  ) {
+    throw new Error(
+      "OBJECT_STORAGE_PROVIDER must be gcs, oci, s3, or filesystem",
+    );
   }
   return provider;
+}
+
+function getValidatedS3Endpoint(env: NodeJS.ProcessEnv = process.env): URL {
+  const raw = requiredEnv("S3_OBJECT_STORAGE_ENDPOINT", env);
+  let endpoint: URL;
+  try {
+    endpoint = new URL(raw);
+  } catch {
+    throw new Error("S3_OBJECT_STORAGE_ENDPOINT must be a valid URL");
+  }
+
+  const hostname = endpoint.hostname.toLowerCase();
+  const unbracketedHostname = hostname.replace(/^\[|\]$/g, "");
+  const isSupabaseProjectEndpoint =
+    /^[a-z0-9]{20}\.storage\.supabase\.co$/.test(hostname) &&
+    endpoint.pathname === "/storage/v1/s3";
+  if (
+    endpoint.protocol !== "https:" ||
+    endpoint.username ||
+    endpoint.password ||
+    endpoint.port ||
+    endpoint.search ||
+    endpoint.hash ||
+    !hostname ||
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") ||
+    isIP(unbracketedHostname) !== 0 ||
+    /[\\\u0000-\u001f\u007f]/.test(endpoint.pathname) ||
+    !isSupabaseProjectEndpoint
+  ) {
+    throw new Error(
+      "S3_OBJECT_STORAGE_ENDPOINT must be the exact HTTPS endpoint for one Supabase project at /storage/v1/s3",
+    );
+  }
+  return endpoint;
+}
+
+export function validateS3ObjectStorageEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  getValidatedS3Endpoint(env);
+  requiredEnv("S3_OBJECT_STORAGE_REGION", env);
+  requiredEnv("S3_OBJECT_STORAGE_ACCESS_KEY_ID", env);
+  requiredEnv("S3_OBJECT_STORAGE_SECRET_ACCESS_KEY", env);
 }
 
 function getValidatedOciEndpoint(env: NodeJS.ProcessEnv = process.env): URL {
@@ -202,15 +259,47 @@ function getOciClient(): S3Client {
   return ociClient;
 }
 
+function getS3Client(): S3Client {
+  const endpoint = getValidatedS3Endpoint();
+  const region = requiredEnv("S3_OBJECT_STORAGE_REGION");
+  const accessKeyId = requiredEnv("S3_OBJECT_STORAGE_ACCESS_KEY_ID");
+  const secretAccessKey = requiredEnv("S3_OBJECT_STORAGE_SECRET_ACCESS_KEY");
+  // Deliberately exclude the secret from the cache key so it can never appear
+  // in diagnostics or an accidentally stringified client identifier.
+  const clientKey = `${endpoint.href}|${region}|${accessKeyId}`;
+  if (!s3Client || s3ClientKey !== clientKey) {
+    s3Client = new S3Client({
+      endpoint: endpoint.href,
+      region,
+      forcePathStyle: true,
+      maxAttempts: 2,
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
+      credentials: { accessKeyId, secretAccessKey },
+    });
+    s3ClientKey = clientKey;
+  }
+  return s3Client;
+}
+
 /** Read-only reachability probe for the configured private OCI bucket. */
 export async function headOciBucket(bucketName: string): Promise<void> {
   await getOciClient().send(new HeadBucketCommand({ Bucket: bucketName }));
+}
+
+/** Read-only reachability probe for a configured private S3 bucket. */
+export async function headS3Bucket(bucketName: string): Promise<void> {
+  await getS3Client().send(new HeadBucketCommand({ Bucket: bucketName }));
 }
 
 export function validateObjectStorageConfiguration(): void {
   const provider = getObjectStorageProvider();
   if (provider === "oci") {
     getOciClient();
+    return;
+  }
+  if (provider === "s3") {
+    getS3Client();
     return;
   }
   if (provider === "filesystem") {
@@ -247,7 +336,9 @@ export function getStorageConnectSources(): string[] {
   if (provider === "oci") {
     return [getValidatedOciEndpoint().origin];
   }
-  if (provider === "filesystem") {
+  if (provider === "s3" || provider === "filesystem") {
+    // These providers use a same-origin, server-mediated upload. Their private
+    // storage endpoints must never be reachable from browser JavaScript.
     return [];
   }
   const sources = new Set(["https://storage.googleapis.com"]);
@@ -270,6 +361,14 @@ export class ObjectNotFoundError extends Error {
     super("Object not found");
     this.name = "ObjectNotFoundError";
     Object.setPrototypeOf(this, ObjectNotFoundError.prototype);
+  }
+}
+
+export class ObjectAlreadyExistsError extends Error {
+  constructor() {
+    super("Object already exists");
+    this.name = "ObjectAlreadyExistsError";
+    Object.setPrototypeOf(this, ObjectAlreadyExistsError.prototype);
   }
 }
 
@@ -406,11 +505,15 @@ class FilesystemStoredObjectFile implements StoredObjectFile {
     });
   }
 
-  async write(bytes: Buffer, contentType: string): Promise<void> {
+  async write(
+    bytes: Buffer,
+    contentType: string,
+    metadata?: Record<string, string>,
+  ): Promise<void> {
     await mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
     await writeFile(this.filePath, bytes, { flag: "wx", mode: 0o600 });
     try {
-      await this.writeMetadata({ contentType });
+      await this.writeMetadata({ contentType, metadata });
     } catch (error) {
       await rm(this.filePath, { force: true });
       throw error;
@@ -477,11 +580,31 @@ function isNotFound(error: unknown): boolean {
   );
 }
 
+function isCreateConflict(error: unknown): boolean {
+  const candidate = error as {
+    name?: string;
+    Code?: string;
+    code?: number | string;
+    $metadata?: { httpStatusCode?: number };
+  };
+  return (
+    candidate?.code === 409 ||
+    candidate?.code === 412 ||
+    candidate?.$metadata?.httpStatusCode === 409 ||
+    candidate?.$metadata?.httpStatusCode === 412 ||
+    candidate?.name === "PreconditionFailed" ||
+    candidate?.name === "ConditionalRequestConflict" ||
+    candidate?.Code === "PreconditionFailed" ||
+    candidate?.Code === "ConditionalRequestConflict"
+  );
+}
+
 class S3StoredObjectFile implements StoredObjectFile {
   constructor(
     private readonly client: S3Client,
     private readonly bucketName: string,
     private readonly objectName: string,
+    private readonly useConditionalMetadataCopy: boolean,
   ) {}
 
   get name(): string {
@@ -527,13 +650,60 @@ class S3StoredObjectFile implements StoredObjectFile {
   async setMetadata(input: {
     metadata?: Record<string, string>;
   }): Promise<void> {
-    // The supported S3-compatible providers avoid CopyObject here. Credential
-    // files are capped at 8 MB, so preserve bytes before replacing metadata.
     const current = await this.client.send(
       new GetObjectCommand({ Bucket: this.bucketName, Key: this.objectName }),
     );
     if (!current.Body) throw new ObjectNotFoundError();
     const bytes = Buffer.from(await current.Body.transformToByteArray());
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const suppliedSha256 = input.metadata?.["content-sha256"];
+    if (suppliedSha256 && suppliedSha256 !== sha256) {
+      throw new Error("Stored object integrity hash mismatch");
+    }
+    const metadata = {
+      ...Object.fromEntries(
+        Object.entries(input.metadata ?? {}).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      ),
+      "content-sha256": sha256,
+    };
+
+    if (this.useConditionalMetadataCopy) {
+      if (!current.ETag) {
+        throw new Error("Stored object version could not be verified");
+      }
+      const encodedCopySource = `${encodeURIComponent(this.bucketName)}/${this.objectName
+        .split("/")
+        .map((segment) => encodeURIComponent(segment))
+        .join("/")}`;
+      await this.client.send(
+        new CopyObjectCommand({
+          Bucket: this.bucketName,
+          Key: this.objectName,
+          CopySource: encodedCopySource,
+          CopySourceIfMatch: current.ETag,
+          MetadataDirective: "REPLACE",
+          ContentType: current.ContentType,
+          CacheControl: current.CacheControl,
+          Metadata: metadata,
+        }),
+      );
+      const verified = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucketName, Key: this.objectName }),
+      );
+      if (!verified.Body) throw new ObjectNotFoundError();
+      const verifiedBytes = Buffer.from(
+        await verified.Body.transformToByteArray(),
+      );
+      if (createHash("sha256").update(verifiedBytes).digest("hex") !== sha256) {
+        throw new Error("Stored object changed during metadata update");
+      }
+      return;
+    }
+
+    // OCI compatibility retains the bounded read-and-replace path. The active
+    // Supabase release uses the conditional same-object copy above.
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucketName,
@@ -542,11 +712,7 @@ class S3StoredObjectFile implements StoredObjectFile {
         ContentLength: bytes.length,
         ContentType: current.ContentType,
         CacheControl: current.CacheControl,
-        Metadata: Object.fromEntries(
-          Object.entries(input.metadata ?? {}).filter(
-            (entry): entry is [string, string] => typeof entry[1] === "string",
-          ),
-        ),
+        Metadata: metadata,
       }),
     );
   }
@@ -593,11 +759,27 @@ class S3StoredObjectFile implements StoredObjectFile {
   }
 }
 
-function getStoredObject(fullPath: string): StoredObjectFile {
+function getStoredObject(
+  fullPath: string,
+  genericS3ClientFactory: () => S3Client = getS3Client,
+): StoredObjectFile {
   const { bucketName, objectName } = parseObjectPath(fullPath);
   const provider = getObjectStorageProvider();
   if (provider === "oci") {
-    return new S3StoredObjectFile(getOciClient(), bucketName, objectName);
+    return new S3StoredObjectFile(
+      getOciClient(),
+      bucketName,
+      objectName,
+      false,
+    );
+  }
+  if (provider === "s3") {
+    return new S3StoredObjectFile(
+      genericS3ClientFactory(),
+      bucketName,
+      objectName,
+      true,
+    );
   }
   if (provider === "filesystem") {
     return new FilesystemStoredObjectFile(bucketName, objectName);
@@ -608,6 +790,10 @@ function getStoredObject(fullPath: string): StoredObjectFile {
 }
 
 export class ObjectStorageService {
+  constructor(
+    private readonly genericS3ClientFactory: () => S3Client = getS3Client,
+  ) {}
+
   getPrivateObjectDir(): string {
     const configured = process.env.PRIVATE_OBJECT_DIR ?? "";
     const parts = configured.split("/");
@@ -672,12 +858,12 @@ export class ObjectStorageService {
       );
       return { uploadURL, requiredHeaders: getUploadRequiredHeaders() };
     }
-    if (provider === "filesystem") {
+    if (provider === "s3" || provider === "filesystem") {
       return {
         // A relative URL deliberately follows the browser's current origin.
-        // PUBLIC_APP_URL remains the canonical HTTPS origin for headers and
-        // links, but must not redirect a loopback acceptance session to a DNS
-        // name that is not live yet.
+        // The generic S3 profile is intentionally server-mediated: storage
+        // credentials and its private endpoint never reach the browser, and
+        // the API can fail closed when malware scanning is unavailable.
         uploadURL: `/api/storage/uploads/local/${uploadId}`,
         requiredHeaders: getUploadRequiredHeaders(),
       };
@@ -698,6 +884,7 @@ export class ObjectStorageService {
     objectPath: string,
     bytes: Buffer,
     contentType: string,
+    expectedSha256?: string,
   ): Promise<void> {
     if (getObjectStorageProvider() !== "filesystem") {
       throw new Error("Filesystem object uploads are not enabled");
@@ -713,7 +900,74 @@ export class ObjectStorageService {
     await new FilesystemStoredObjectFile(bucketName, objectName).write(
       bytes,
       contentType,
+      expectedSha256 ? { "content-sha256": expectedSha256 } : undefined,
     );
+  }
+
+  async writeServerMediatedObject(
+    objectPath: string,
+    bytes: Buffer,
+    contentType: string,
+    expectedSha256: string,
+  ): Promise<void> {
+    const provider = getObjectStorageProvider();
+    if (!/^\/objects\/uploads\/[0-9a-f-]{36}$/.test(objectPath)) {
+      throw new Error("Invalid server-mediated upload path");
+    }
+    if (!/^[a-f0-9]{64}$/.test(expectedSha256)) {
+      throw new Error("Invalid server-mediated upload integrity hash");
+    }
+    if (provider === "filesystem") {
+      await this.writeFilesystemObject(
+        objectPath,
+        bytes,
+        contentType,
+        expectedSha256,
+      );
+      return;
+    }
+    if (provider !== "s3") {
+      throw new Error("Server-mediated object uploads are not enabled");
+    }
+    const entityId = objectPath.slice("/objects/".length);
+    const entityDir = `${this.getPrivateObjectDir().replace(/\/+$/g, "")}/`;
+    const { bucketName, objectName } = parseObjectPath(
+      `${entityDir}${entityId}`,
+    );
+    const client = this.genericS3ClientFactory();
+    const objectFile = new S3StoredObjectFile(
+      client,
+      bucketName,
+      objectName,
+      true,
+    );
+    const [exists] = await objectFile.exists();
+    if (exists) throw new ObjectAlreadyExistsError();
+    try {
+      await client.send(
+        new PutObjectCommand({
+          Bucket: bucketName,
+          Key: objectName,
+          Body: bytes,
+          ContentLength: bytes.length,
+          ContentType: contentType,
+          CacheControl: "private, no-store, max-age=0",
+          Metadata: { "content-sha256": expectedSha256 },
+        }),
+      );
+    } catch (error) {
+      if (isCreateConflict(error)) throw new ObjectAlreadyExistsError();
+      // A provider/network timeout may happen after the remote commit. Make a
+      // best-effort idempotent delete so the failed request cannot leave an
+      // untracked private object. Lifecycle cleanup remains a release control
+      // for the rare case where both write and reconciliation are unavailable.
+      try {
+        await objectFile.delete();
+      } catch {
+        throw new Error("S3 write outcome could not be safely reconciled");
+      }
+      throw error;
+    }
   }
 
   async getObjectEntityFile(objectPath: string): Promise<StoredObjectFile> {
@@ -723,14 +977,20 @@ export class ObjectStorageService {
       throw new ObjectNotFoundError();
     }
     const entityDir = `${this.getPrivateObjectDir().replace(/\/+$/g, "")}/`;
-    const objectFile = getStoredObject(`${entityDir}${entityId}`);
+    const objectFile = getStoredObject(
+      `${entityDir}${entityId}`,
+      this.genericS3ClientFactory,
+    );
     const [exists] = await objectFile.exists();
     if (!exists) throw new ObjectNotFoundError();
     return objectFile;
   }
 
   normalizeObjectEntityPath(rawPath: string): string {
-    if (getObjectStorageProvider() === "filesystem") {
+    if (
+      getObjectStorageProvider() === "filesystem" ||
+      getObjectStorageProvider() === "s3"
+    ) {
       const relativeMatch = rawPath.match(
         /^\/api\/storage\/uploads\/local\/([0-9a-f-]{36})$/,
       );

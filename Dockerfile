@@ -16,12 +16,14 @@ ENV NODE_ENV=production
 ENV PORT=8080
 ENV WEB_DIST_DIR=/app/web
 ENV MIGRATIONS_DIR=/app/migrations
+ENV NODE_EXTRA_CA_CERTS=/app/certs/supabase-prod-ca-2021.crt
 
 WORKDIR /app/api
 COPY --from=build --chown=node:node /opt/healthdocs-api/ /app/api/
 COPY --from=build --chown=node:node /workspace/artifacts/api-server/dist/ /app/api/dist/
 COPY --from=build --chown=node:node /workspace/artifacts/health-docs/dist/public/ /app/web/
 COPY --from=build --chown=node:node /workspace/lib/db/migrations/ /app/migrations/
+COPY --from=build --chown=node:node /workspace/config/supabase-prod-ca-2021.crt /app/certs/supabase-prod-ca-2021.crt
 
 USER node
 EXPOSE 8080

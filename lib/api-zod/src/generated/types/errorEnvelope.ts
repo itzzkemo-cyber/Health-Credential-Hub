@@ -8,4 +8,5 @@
 
 export interface ErrorEnvelope {
   error: string;
+  code?: string;
 }

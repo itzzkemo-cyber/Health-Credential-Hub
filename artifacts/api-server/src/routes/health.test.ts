@@ -21,6 +21,8 @@ vi.mock("../lib/gcsReadiness", () => ({
 
 import router from "./health";
 
+const originalDocumentUploadsEnabled = process.env.DOCUMENT_UPLOADS_ENABLED;
+
 describe("health routes", () => {
   let server: ReturnType<express.Express["listen"]> | undefined;
 
@@ -33,6 +35,11 @@ describe("health routes", () => {
   });
 
   afterEach(async () => {
+    if (originalDocumentUploadsEnabled === undefined) {
+      delete process.env.DOCUMENT_UPLOADS_ENABLED;
+    } else {
+      process.env.DOCUMENT_UPLOADS_ENABLED = originalDocumentUploadsEnabled;
+    }
     if (server) {
       await new Promise<void>((resolve, reject) =>
         server!.close((error) => (error ? reject(error) : resolve())),
@@ -67,6 +74,7 @@ describe("health routes", () => {
   });
 
   it("reports readiness only after database and storage verification", async () => {
+    process.env.DOCUMENT_UPLOADS_ENABLED = "false";
     const response = await request("/readyz");
 
     expect(response.status).toBe(200);
@@ -76,6 +84,7 @@ describe("health routes", () => {
       status: "ready",
       database: "ok",
       objectStorage: "verified",
+      documentUploads: "disabled",
     });
   });
 

@@ -7,6 +7,6 @@
  */
 
 /**
- * Headers that must be included verbatim in the signed PUT request.
+ * Headers that must be included verbatim in the PUT request.
  */
 export type UploadUrlResponseRequiredHeaders = {[key: string]: string};

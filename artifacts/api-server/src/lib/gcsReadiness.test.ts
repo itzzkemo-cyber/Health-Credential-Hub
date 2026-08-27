@@ -92,7 +92,7 @@ describe("GCS production readiness", () => {
   it.each([
     ["a malformed private directory", { PRIVATE_OBJECT_DIR: "/bucket/wrong" }],
     ["a missing project", { GOOGLE_CLOUD_PROJECT: "" }],
-    ["an unsupported provider", { OBJECT_STORAGE_PROVIDER: "filesystem" }],
+    ["an unsupported provider", { OBJECT_STORAGE_PROVIDER: "unknown" }],
   ])("rejects %s", async (_caseName, overrides) => {
     await expect(
       checkObjectStorageReadiness({
@@ -198,25 +198,134 @@ describe("GCS production readiness", () => {
     ).rejects.toThrow("bucket denied");
   });
 
+  it("verifies S3 configuration, bucket reachability, and scanner readiness", async () => {
+    const readBucketMetadata = vi.fn();
+    const probeS3Bucket = vi.fn().mockResolvedValue(undefined);
+    const probeMalwareScanner = vi.fn().mockResolvedValue(undefined);
+    const s3Env = {
+      ...productionEnv,
+      OBJECT_STORAGE_PROVIDER: "s3",
+      DOCUMENT_UPLOADS_ENABLED: "true",
+      S3_OBJECT_STORAGE_ENDPOINT:
+        "https://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3",
+      S3_OBJECT_STORAGE_REGION: "eu-central-1",
+      S3_OBJECT_STORAGE_ACCESS_KEY_ID: "test-access-key",
+      S3_OBJECT_STORAGE_SECRET_ACCESS_KEY: "test-secret-key",
+      MALWARE_SCAN_PROVIDER: "windows-defender",
+      MALWARE_QUARANTINE_DIR: absoluteFilesystemRoot,
+      WINDOWS_DEFENDER_MPCMDRUN_PATH: "C:\\Defender\\MpCmdRun.exe",
+    } satisfies NodeJS.ProcessEnv;
+
+    await expect(
+      checkObjectStorageReadiness({
+        env: s3Env,
+        readBucketMetadata,
+        probeS3Bucket,
+        probeMalwareScanner,
+      }),
+    ).resolves.toBe("verified");
+    expect(readBucketMetadata).not.toHaveBeenCalled();
+    expect(probeS3Bucket).toHaveBeenCalledWith("health-private");
+    expect(probeMalwareScanner).toHaveBeenCalledWith(s3Env);
+  });
+
+  it("fails readiness when S3 uploads have no operational scanner", async () => {
+    const probeS3Bucket = vi.fn().mockResolvedValue(undefined);
+    const probeMalwareScanner = vi
+      .fn()
+      .mockRejectedValue(new Error("scanner unavailable"));
+
+    await expect(
+      checkObjectStorageReadiness({
+        env: {
+          ...productionEnv,
+          OBJECT_STORAGE_PROVIDER: "s3",
+          DOCUMENT_UPLOADS_ENABLED: "true",
+          S3_OBJECT_STORAGE_ENDPOINT:
+            "https://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3",
+          S3_OBJECT_STORAGE_REGION: "eu-central-1",
+          S3_OBJECT_STORAGE_ACCESS_KEY_ID: "test-access-key",
+          S3_OBJECT_STORAGE_SECRET_ACCESS_KEY: "test-secret-key",
+        },
+        probeS3Bucket,
+        probeMalwareScanner,
+      }),
+    ).rejects.toThrow("scanner unavailable");
+    expect(probeS3Bucket).toHaveBeenCalledOnce();
+    expect(probeMalwareScanner).toHaveBeenCalledOnce();
+  });
+
+  it("keeps S3 storage ready without a scanner when document intake is disabled", async () => {
+    const probeS3Bucket = vi.fn().mockResolvedValue(undefined);
+    const probeMalwareScanner = vi.fn();
+
+    await expect(
+      checkObjectStorageReadiness({
+        env: {
+          ...productionEnv,
+          OBJECT_STORAGE_PROVIDER: "s3",
+          DOCUMENT_UPLOADS_ENABLED: "false",
+          S3_OBJECT_STORAGE_ENDPOINT:
+            "https://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3",
+          S3_OBJECT_STORAGE_REGION: "eu-central-1",
+          S3_OBJECT_STORAGE_ACCESS_KEY_ID: "test-access-key",
+          S3_OBJECT_STORAGE_SECRET_ACCESS_KEY: "test-secret-key",
+        },
+        probeS3Bucket,
+        probeMalwareScanner,
+      }),
+    ).resolves.toBe("verified");
+    expect(probeS3Bucket).toHaveBeenCalledWith("health-private");
+    expect(probeMalwareScanner).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsafe S3 configuration before probing dependencies", async () => {
+    const probeS3Bucket = vi.fn();
+    const probeMalwareScanner = vi.fn();
+
+    await expect(
+      checkObjectStorageReadiness({
+        env: {
+          ...productionEnv,
+          OBJECT_STORAGE_PROVIDER: "s3",
+          S3_OBJECT_STORAGE_ENDPOINT:
+            "http://abcdefghijklmnopqrst.storage.supabase.co/storage/v1/s3",
+          S3_OBJECT_STORAGE_REGION: "eu-central-1",
+          S3_OBJECT_STORAGE_ACCESS_KEY_ID: "test-access-key",
+          S3_OBJECT_STORAGE_SECRET_ACCESS_KEY: "test-secret-key",
+        },
+        probeS3Bucket,
+        probeMalwareScanner,
+      }),
+    ).rejects.toBeInstanceOf(ObjectStorageReadinessError);
+    expect(probeS3Bucket).not.toHaveBeenCalled();
+    expect(probeMalwareScanner).not.toHaveBeenCalled();
+  });
+
   it("verifies the single-host filesystem directory", async () => {
     const probeFilesystemStorage = vi.fn().mockResolvedValue(undefined);
+    const probeMalwareScanner = vi.fn().mockResolvedValue(undefined);
 
     await expect(
       checkObjectStorageReadiness({
         env: {
           ...productionEnv,
           OBJECT_STORAGE_PROVIDER: "filesystem",
+          DOCUMENT_UPLOADS_ENABLED: "true",
           LOCAL_OBJECT_STORAGE_DIR: absoluteFilesystemRoot,
           PUBLIC_APP_URL: "https://app.wathaiqihealth.com",
         },
         probeFilesystemStorage,
+        probeMalwareScanner,
       }),
     ).resolves.toBe("verified");
     expect(probeFilesystemStorage).toHaveBeenCalledOnce();
+    expect(probeMalwareScanner).toHaveBeenCalledOnce();
   });
 
   it("fails closed before probing a relative filesystem directory", async () => {
     const probeFilesystemStorage = vi.fn();
+    const probeMalwareScanner = vi.fn();
 
     await expect(
       checkObjectStorageReadiness({
@@ -227,8 +336,10 @@ describe("GCS production readiness", () => {
           PUBLIC_APP_URL: "https://app.wathaiqihealth.com",
         },
         probeFilesystemStorage,
+        probeMalwareScanner,
       }),
     ).rejects.toBeInstanceOf(ObjectStorageReadinessError);
     expect(probeFilesystemStorage).not.toHaveBeenCalled();
+    expect(probeMalwareScanner).not.toHaveBeenCalled();
   });
 });

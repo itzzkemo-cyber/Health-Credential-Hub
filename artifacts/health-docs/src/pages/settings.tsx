@@ -6,10 +6,12 @@ import { toast } from "sonner";
 import { useLanguage } from "@/lib/language-context";
 import { getAuthUser, setAuthSession } from "@/lib/auth";
 import {
+  authenticatedLandingPath,
   mustReplaceTemporaryPassword,
   withPasswordChangeState,
-  type PasswordChangeUser,
+  type AccountSetupUser,
 } from "@/lib/password-change-state";
+import { mustEnrollPrivilegedMfa } from "@/lib/account-security-state";
 import { useTheme } from "@/components/theme-provider";
 import TwoFactorCard from "@/components/settings/TwoFactorCard";
 import { Button } from "@/components/ui/button";
@@ -34,8 +36,9 @@ import { Eye, EyeOff, Globe, KeyRound, Loader2, Moon } from "lucide-react";
 export default function Settings() {
   const { t, language, setLanguage } = useLanguage();
   const { theme, setTheme } = useTheme();
-  const user = getAuthUser() as PasswordChangeUser | null;
+  const user = getAuthUser() as AccountSetupUser | null;
   const mustChangePassword = mustReplaceTemporaryPassword(user);
+  const mfaEnrollmentRequired = mustEnrollPrivilegedMfa(user);
 
   if (mustChangePassword) {
     return (
@@ -49,6 +52,29 @@ export default function Settings() {
           </p>
         </div>
         <ChangePasswordCard forced />
+      </div>
+    );
+  }
+
+  if (mfaEnrollmentRequired) {
+    return (
+      <div className="space-y-6 animate-in fade-in duration-300">
+        <div
+          className="space-y-2 text-center sm:text-start"
+          role="status"
+          aria-live="polite"
+        >
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            {t("settings_page.mfa_required_title")}
+          </h1>
+          <p className="text-sm leading-6 text-muted-foreground sm:text-base">
+            {t("settings_page.mfa_required_desc")}
+          </p>
+        </div>
+        <TwoFactorCard />
+        <p className="text-sm leading-6 text-muted-foreground">
+          {t("settings_page.mfa_required_hint")}
+        </p>
       </div>
     );
   }
@@ -200,12 +226,26 @@ function ChangePasswordCard({ forced = false }: { forced?: boolean }) {
           setNewPassword("");
           setConfirmPassword("");
           setVisiblePasswords({ current: false, next: false, confirm: false });
-          const user = getAuthUser() as Record<string, unknown> | null;
-          if (user) setAuthSession(withPasswordChangeState(user, false));
+          const user = getAuthUser() as AccountSetupUser | null;
+          const updatedUser = user
+            ? withPasswordChangeState(user, false)
+            : null;
+          if (updatedUser) setAuthSession(updatedUser);
+          const needsMfa = mustEnrollPrivilegedMfa(updatedUser);
           toast.success(
-            t(forced ? "settings_page.password_required_success" : "settings_page.password_changed"),
+            t(
+              forced
+                ? needsMfa
+                  ? "settings_page.password_required_mfa_next"
+                  : "settings_page.password_required_success"
+                : "settings_page.password_changed",
+            ),
           );
-          if (forced) setLocation("/");
+          if (forced) {
+            setLocation(
+              updatedUser ? authenticatedLandingPath(updatedUser) : "/settings",
+            );
+          }
         },
       },
     );
