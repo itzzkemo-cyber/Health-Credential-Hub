@@ -230,7 +230,7 @@ build or start command. Provide these prompted secret values:
 
 If the Render workspace is not connected to GitHub, create a **Web Service**
 from the public Git repository
-`https://github.com/itzzkemo-cyber/Health-Credential-Hub.git` instead. Select
+`https://github.com/wathaiqihealth/Health-Credential-Hub.git` instead. Select
 Docker, branch `main`, Frankfurt, and the Free plan; leave Dockerfile as
 `./Dockerfile`, build context as `.`, Docker command empty, health-check path as
 `/api/readyz`, and automatic deploys off. Then copy the non-secret values and
