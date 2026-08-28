@@ -55,7 +55,13 @@ function apiErrorCode(err: unknown): string | undefined {
 }
 
 /** Shown once after activation/regeneration — the only time codes are visible. */
-function BackupCodesView({ codes, onDone }: { codes: string[]; onDone: () => void }) {
+function BackupCodesView({
+  codes,
+  onDone,
+}: {
+  codes: string[];
+  onDone: () => void;
+}) {
   const { t } = useLanguage();
   const copyAll = async () => {
     const copied = await copyTextToClipboard(codes.join("\n"));
@@ -64,7 +70,9 @@ function BackupCodesView({ codes, onDone }: { codes: string[]; onDone: () => voi
   };
   const download = () => {
     const blob = new Blob(
-      [`${t("auth.brand_name")} — Backup codes (${new Date().toISOString().slice(0, 10)})\n\n${codes.join("\n")}\n`],
+      [
+        `${t("auth.brand_name")} — Backup codes (${new Date().toISOString().slice(0, 10)})\n\n${codes.join("\n")}\n`,
+      ],
       { type: "text/plain" },
     );
     const url = URL.createObjectURL(blob);
@@ -133,13 +141,16 @@ export default function TwoFactorCard() {
   const verifyMutation = useTotpVerifySetup({ mutation: { gcTime: 0 } });
 
   // --- Disable / regenerate flows ---
-  const [confirmMode, setConfirmMode] = useState<"disable" | "regen" | null>(null);
+  const [confirmMode, setConfirmMode] = useState<"disable" | "regen" | null>(
+    null,
+  );
   const confirmFormRef = useRef<HTMLFormElement>(null);
   const confirmPasswordRef = useRef<HTMLInputElement>(null);
   const disableMutation = useTotpDisable({ mutation: { gcTime: 0 } });
   const regenMutation = useTotpRegenerateBackup({ mutation: { gcTime: 0 } });
 
-  const refreshMe = () => queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
+  const refreshMe = () =>
+    queryClient.invalidateQueries({ queryKey: getGetMeQueryKey() });
 
   const startEnable = () => {
     setupAuthFormRef.current?.reset();
@@ -321,7 +332,9 @@ export default function TwoFactorCard() {
           <div className="flex flex-wrap items-center justify-between gap-4">
             <Badge
               variant={me.totpEnabled ? "default" : "secondary"}
-              className={me.totpEnabled ? "bg-emerald-600 hover:bg-emerald-600" : ""}
+              className={
+                me.totpEnabled ? "bg-emerald-600 hover:bg-emerald-600" : ""
+              }
             >
               {me.totpEnabled ? t("twofa.status_on") : t("twofa.status_off")}
             </Badge>
@@ -349,7 +362,9 @@ export default function TwoFactorCard() {
                 onClick={startEnable}
                 disabled={setupMutation.isPending}
               >
-                {setupMutation.isPending ? t("common.loading") : t("twofa.enable")}
+                {setupMutation.isPending
+                  ? t("common.loading")
+                  : t("twofa.enable")}
               </Button>
             )}
           </div>
@@ -392,6 +407,7 @@ export default function TwoFactorCard() {
                 name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
                 type="password"
                 dir="ltr"
+                maxLength={1024}
                 autoComplete="current-password"
                 required
                 className="min-h-11"
@@ -441,7 +457,9 @@ export default function TwoFactorCard() {
                 />
               </div>
               <div className="space-y-1">
-                <p className="text-sm text-muted-foreground">{t("twofa.setup_manual")}</p>
+                <p className="text-sm text-muted-foreground">
+                  {t("twofa.setup_manual")}
+                </p>
                 <div className="flex items-stretch gap-2">
                   <code
                     dir="ltr"
@@ -519,13 +537,19 @@ export default function TwoFactorCard() {
       </Dialog>
 
       {/* One-time backup codes display (after enable or regenerate) */}
-      <Dialog open={!!freshCodes} onOpenChange={(open) => !open && setFreshCodes(null)}>
+      <Dialog
+        open={!!freshCodes}
+        onOpenChange={(open) => !open && setFreshCodes(null)}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{t("twofa.codes_title")}</DialogTitle>
           </DialogHeader>
           {freshCodes && (
-            <BackupCodesView codes={freshCodes} onDone={() => setFreshCodes(null)} />
+            <BackupCodesView
+              codes={freshCodes}
+              onDone={() => setFreshCodes(null)}
+            />
           )}
         </DialogContent>
       </Dialog>
@@ -544,10 +568,14 @@ export default function TwoFactorCard() {
         >
           <DialogHeader>
             <DialogTitle>
-              {confirmMode === "disable" ? t("twofa.disable_title") : t("twofa.regen_title")}
+              {confirmMode === "disable"
+                ? t("twofa.disable_title")
+                : t("twofa.regen_title")}
             </DialogTitle>
             <DialogDescription>
-              {confirmMode === "disable" ? t("twofa.disable_hint") : t("twofa.regen_hint")}
+              {confirmMode === "disable"
+                ? t("twofa.disable_hint")
+                : t("twofa.regen_hint")}
             </DialogDescription>
           </DialogHeader>
           <form
@@ -556,13 +584,16 @@ export default function TwoFactorCard() {
             className="space-y-4"
           >
             <div className="space-y-2">
-              <Label htmlFor="twofa-password">{t("twofa.current_password")}</Label>
+              <Label htmlFor="twofa-password">
+                {t("twofa.current_password")}
+              </Label>
               <Input
                 ref={confirmPasswordRef}
                 id="twofa-password"
                 name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
                 type="password"
                 dir="ltr"
+                maxLength={1024}
                 autoComplete="current-password"
                 required
                 className="min-h-11"
@@ -575,6 +606,7 @@ export default function TwoFactorCard() {
                 name={ADMIN_MFA_CODE_FIELD}
                 type="text"
                 dir="ltr"
+                maxLength={128}
                 inputMode="text"
                 autoComplete="one-time-code"
                 autoCapitalize="characters"

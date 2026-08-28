@@ -6,10 +6,11 @@ Supported code is the latest commit on `main`. Security fixes should include ten
 
 Operational requirements include administrator-provisioned accounts, a strong managed `SESSION_SECRET`, private object storage, reviewed database migrations, approved OCR data processing, and secret rotation after any exposure. Public registration and test-only authentication are not part of the release.
 
-Privileged account creation, role/scope changes, and MFA recovery require an
-administrator password plus current TOTP step-up; administrator MFA must be
-enabled before real workforce data is introduced. The encrypted Windows
-filesystem profile is a controlled single-host acceptance path, not a
+Every direct account-provisioning operation, role/scope changes, and MFA
+recovery require an administrator password plus current TOTP step-up;
+invitation onboarding remains the default account-creation path. Administrator
+MFA must be enabled before real workforce data is introduced. The encrypted
+Windows filesystem profile is a controlled single-host acceptance path, not a
 high-availability healthcare production claim. GCS and OCI direct uploads must
 remain synthetic-only until bounded provider ingress, malware quarantine,
 auditable orphan cleanup, and restore testing are approved.

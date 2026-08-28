@@ -33,6 +33,18 @@ export function canManageTarget(actor: User, target: User): boolean {
   );
 }
 
+/** A reporting-line supervisor must be active, co-tenant, and higher-ranked. */
+export function canSuperviseTarget(
+  supervisor: User,
+  target: Pick<User, "facilityId" | "role">,
+): boolean {
+  return (
+    supervisor.isActive &&
+    supervisor.facilityId === target.facilityId &&
+    ROLE_RANK[supervisor.role] > ROLE_RANK[target.role]
+  );
+}
+
 /** Team/facility visibility used before applying operation-specific policy. */
 export function isUserInScope(current: User, target: User): boolean {
   if (!current.isActive) return false;

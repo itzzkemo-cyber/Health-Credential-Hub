@@ -11,6 +11,13 @@ import type { ReadinessStatusOcr } from './readinessStatusOcr';
 
 export interface ReadinessStatus {
   status: string;
+  /**
+     * Public Git commit identifier for the running release, when available.
+     * @minLength 7
+     * @maxLength 40
+     * @pattern ^[0-9a-f]{7,40}$
+     */
+  releaseSha?: string;
   database: string;
   objectStorage: string;
   documentUploads: ReadinessStatusDocumentUploads;

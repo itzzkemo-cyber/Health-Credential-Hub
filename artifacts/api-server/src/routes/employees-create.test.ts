@@ -43,6 +43,7 @@ const testState = vi.hoisted(() => ({
   transactionRolledBack: false,
   failAudit: false,
   uniqueInsert: false,
+  employeeStepUpRateLimitCalls: 0,
   logAudit: vi.fn(async () => undefined),
   consumeSecondFactor: vi.fn(async (_tx: unknown, actor: unknown) => actor),
 }));
@@ -212,7 +213,9 @@ vi.mock("../lib/auth", () => ({
   ],
   getUser: vi.fn(() => testState.actor),
   hashPassword: vi.fn(async () => "hashed-password"),
-  comparePassword: vi.fn(async (password: string) => password === "admin-password"),
+  comparePassword: vi.fn(
+    async (password: string) => password === "admin-password",
+  ),
   requireAuth: (_req: Request, _res: Response, next: NextFunction) => next(),
   requireRole:
     (..._roles: string[]) =>
@@ -224,9 +227,35 @@ vi.mock("../lib/secondFactor", () => ({
   consumeSecondFactor: testState.consumeSecondFactor,
 }));
 
+vi.mock("../lib/rateLimit", () => ({
+  rateLimit: () => (_req: Request, _res: Response, next: NextFunction) => {
+    testState.employeeStepUpRateLimitCalls += 1;
+    next();
+  },
+}));
+
 vi.mock("../lib/roleHierarchy", () => ({
   canAssignRole: vi.fn(() => true),
   canManageTarget: vi.fn(() => true),
+  canSuperviseTarget: vi.fn(
+    (
+      supervisor: { role: string; facilityId: number; isActive: boolean },
+      target: { role: string; facilityId: number },
+    ) => {
+      const rank: Record<string, number> = {
+        employee: 0,
+        supervisor: 1,
+        department_manager: 2,
+        hospital_admin: 3,
+        system_admin: 4,
+      };
+      return (
+        supervisor.isActive &&
+        supervisor.facilityId === target.facilityId &&
+        rank[supervisor.role]! > rank[target.role]!
+      );
+    },
+  ),
   isUserInScope: vi.fn(() => true),
 }));
 
@@ -247,6 +276,7 @@ vi.mock("../lib/helpers", () => ({
 }));
 
 import router from "./employees";
+import { comparePassword, hashPassword } from "../lib/auth";
 
 describe("administrative employee provisioning", () => {
   let server: ReturnType<express.Express["listen"]> | undefined;
@@ -273,8 +303,11 @@ describe("administrative employee provisioning", () => {
     testState.transactionRolledBack = false;
     testState.failAudit = false;
     testState.uniqueInsert = false;
+    testState.employeeStepUpRateLimitCalls = 0;
     testState.logAudit.mockClear();
     testState.consumeSecondFactor.mockClear();
+    vi.mocked(comparePassword).mockClear();
+    vi.mocked(hashPassword).mockClear();
   });
 
   afterEach(async () => {
@@ -316,6 +349,8 @@ describe("administrative employee provisioning", () => {
         jobTitle: "Nurse",
         jobTitleAr: "ممرض",
         employeeNumber: "EMP-2",
+        currentPassword: "admin-password",
+        code: "123456",
         ...overrides,
       }),
     });
@@ -326,6 +361,8 @@ describe("administrative employee provisioning", () => {
 
     expect(response.status).toBe(201);
     expect(testState.transactionCount).toBe(1);
+    expect(testState.employeeStepUpRateLimitCalls).toBe(1);
+    expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
     expect(testState.lockSequence).toEqual(["users:update"]);
     expect(testState.lockedUserIds).toEqual([1]);
     expect(testState.insertValues).toEqual(
@@ -353,6 +390,18 @@ describe("administrative employee provisioning", () => {
     });
   });
 
+  it("rejects an overlong password before bcrypt or database work", async () => {
+    const response = await postEmployee({ password: "x".repeat(1025) });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      message: "Password must contain between 12 and 1024 characters",
+    });
+    expect(hashPassword).not.toHaveBeenCalled();
+    expect(testState.transactionCount).toBe(0);
+    expect(testState.employeeStepUpRateLimitCalls).toBe(1);
+  });
+
   it("requires and consumes MFA step-up before provisioning a manager role", async () => {
     const response = await postEmployee({
       role: "supervisor",
@@ -365,6 +414,70 @@ describe("administrative employee provisioning", () => {
     expect(testState.insertValues).toEqual(
       expect.objectContaining({ role: "supervisor" }),
     );
+  });
+
+  it("requires MFA step-up for direct employee provisioning too", async () => {
+    const response = await postEmployee({ currentPassword: "", code: "" });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "step_up_failed" }),
+    );
+    expect(testState.insertValues).toBeNull();
+  });
+
+  it("rejects a wrong administrator password before consuming the second factor", async () => {
+    const response = await postEmployee({ currentPassword: "wrong-password" });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "step_up_failed" }),
+    );
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+    expect(testState.insertValues).toBeNull();
+    expect(testState.auditValues).toBeNull();
+  });
+
+  it("rejects an invalid or replayed second factor without provisioning the employee", async () => {
+    testState.consumeSecondFactor.mockResolvedValueOnce(null);
+
+    const response = await postEmployee({ code: "replayed-code" });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "step_up_failed" }),
+    );
+    expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
+    expect(testState.insertValues).toBeNull();
+    expect(testState.auditValues).toBeNull();
+  });
+
+  it("rejects an overlong administrator password before password verification", async () => {
+    const response = await postEmployee({
+      currentPassword: "x".repeat(1025),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "step_up_failed" }),
+    );
+    expect(comparePassword).not.toHaveBeenCalled();
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+    expect(testState.insertValues).toBeNull();
+    expect(testState.auditValues).toBeNull();
+  });
+
+  it("rejects an overlong second-factor code without consuming it", async () => {
+    const response = await postEmployee({ code: "1".repeat(129) });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "step_up_failed" }),
+    );
+    expect(comparePassword).toHaveBeenCalledOnce();
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+    expect(testState.insertValues).toBeNull();
+    expect(testState.auditValues).toBeNull();
   });
 
   it("rejects privileged provisioning without administrator MFA", async () => {
@@ -409,28 +522,56 @@ describe("administrative employee provisioning", () => {
   it.each([
     {
       label: "employee",
+      targetRole: "employee",
       supervisor: { id: 3, role: "employee", isActive: true },
     },
     {
       label: "inactive manager",
+      targetRole: "employee",
       supervisor: { id: 3, role: "supervisor", isActive: false },
     },
-  ])("rejects an ineligible $label supervisor", async ({ supervisor }) => {
-    testState.extraUsers = [
-      { ...supervisor, facilityId: 10, sessionVersion: 1 },
-    ];
+    {
+      label: "equal-ranked manager",
+      targetRole: "supervisor",
+      supervisor: { id: 3, role: "supervisor", isActive: true },
+    },
+    {
+      label: "lower-ranked manager",
+      targetRole: "department_manager",
+      supervisor: { id: 3, role: "supervisor", isActive: true },
+    },
+    {
+      label: "cross-facility manager",
+      targetRole: "employee",
+      supervisor: {
+        id: 3,
+        role: "supervisor",
+        isActive: true,
+        facilityId: 99,
+      },
+    },
+  ])(
+    "rejects an ineligible $label supervisor",
+    async ({ supervisor, targetRole }) => {
+      testState.extraUsers = [
+        { facilityId: 10, ...supervisor, sessionVersion: 1 },
+      ];
 
-    const response = await postEmployee({ supervisorId: 3 });
+      const response = await postEmployee({
+        role: targetRole,
+        supervisorId: 3,
+      });
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-      message:
-        "Supervisor must be an active non-employee in the target facility",
-    });
-    expect(testState.transactionCount).toBe(1);
-    expect(testState.insertValues).toBeNull();
-    expect(testState.auditValues).toBeNull();
-  });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        message:
+          "Supervisor must be an active higher-ranked account in the target facility",
+      });
+      expect(testState.transactionCount).toBe(1);
+      expect(testState.insertValues).toBeNull();
+      expect(testState.auditValues).toBeNull();
+    },
+  );
 
   it("locks the target department before actor and supervisor users", async () => {
     testState.departmentRows = [{ id: 7, facilityId: 10 }];

@@ -7,5 +7,9 @@
  */
 
 export interface TotpSetupInput {
+  /**
+     * @minLength 1
+     * @maxLength 1024
+     */
   currentPassword: string;
 }

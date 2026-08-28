@@ -269,10 +269,8 @@ export default function EmployeesList() {
 
     setCreateFeedbackKey(null);
     const form = event.currentTarget;
-    const stepUp = dialogRequiresStepUp
-      ? readAdminMfaStepUpCredentials(new FormData(form))
-      : undefined;
-    if (dialogRequiresStepUp && !stepUp) {
+    const stepUp = readAdminMfaStepUpCredentials(new FormData(form));
+    if (!stepUp) {
       setCreateFeedbackKey("employees_page.step_up_required");
       createStepUpPasswordRef.current?.focus();
       return;
@@ -322,7 +320,7 @@ export default function EmployeesList() {
 
     createEmployee.mutate(
       {
-        data: buildEmployeeInput(employeeForm, stepUp ?? undefined),
+        data: buildEmployeeInput(employeeForm, stepUp),
       },
       {
         onSuccess: () => {
@@ -959,6 +957,7 @@ export default function EmployeesList() {
                         name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
                         type="password"
                         dir="ltr"
+                        maxLength={1024}
                         autoComplete="current-password"
                         aria-describedby="create-step-up-description"
                         required
@@ -975,6 +974,7 @@ export default function EmployeesList() {
                         name={ADMIN_MFA_CODE_FIELD}
                         type="text"
                         dir="ltr"
+                        maxLength={128}
                         inputMode="text"
                         autoComplete="one-time-code"
                         autoCapitalize="characters"
@@ -1012,6 +1012,7 @@ export default function EmployeesList() {
                       id="employee-temporary-password"
                       type={showTemporaryPassword ? "text" : "password"}
                       minLength={12}
+                      maxLength={1024}
                       required
                       autoComplete="new-password"
                       value={employeeForm.password}
@@ -1236,6 +1237,7 @@ export default function EmployeesList() {
                     name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
                     type="password"
                     dir="ltr"
+                    maxLength={1024}
                     autoComplete="current-password"
                     aria-describedby="revoke-step-up-description"
                     required
@@ -1252,6 +1254,7 @@ export default function EmployeesList() {
                     name={ADMIN_MFA_CODE_FIELD}
                     type="text"
                     dir="ltr"
+                    maxLength={128}
                     inputMode="text"
                     autoComplete="one-time-code"
                     autoCapitalize="characters"

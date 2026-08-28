@@ -302,6 +302,25 @@ vi.mock("../lib/logger", () => ({
 vi.mock("../lib/roleHierarchy", () => ({
   canAssignRole: vi.fn(() => true),
   canManageTarget: vi.fn(() => true),
+  canSuperviseTarget: vi.fn(
+    (
+      supervisor: { role: string; facilityId: number; isActive: boolean },
+      target: { role: string; facilityId: number },
+    ) => {
+      const rank: Record<string, number> = {
+        employee: 0,
+        supervisor: 1,
+        department_manager: 2,
+        hospital_admin: 3,
+        system_admin: 4,
+      };
+      return (
+        supervisor.isActive &&
+        supervisor.facilityId === target.facilityId &&
+        rank[supervisor.role]! > rank[target.role]!
+      );
+    },
+  ),
   isUserInScope: vi.fn(() => true),
 }));
 
@@ -497,6 +516,48 @@ describe("invite-only employee registration provisioning", () => {
     expect(state.invitationValues).toBeNull();
   });
 
+  it("rejects an equal-ranked employee as the invited employee supervisor", async () => {
+    state.extraUsers = [
+      {
+        id: 3,
+        role: "employee",
+        facilityId: 10,
+        isActive: true,
+        sessionVersion: 1,
+      },
+    ];
+
+    const response = await invite({ supervisorId: 3 });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      message:
+        "Supervisor must be an active higher-ranked account in the target facility",
+    });
+    expect(state.invitationValues).toBeNull();
+  });
+
+  it("rejects an otherwise eligible supervisor from another facility", async () => {
+    state.extraUsers = [
+      {
+        id: 3,
+        role: "supervisor",
+        facilityId: 99,
+        isActive: true,
+        sessionVersion: 1,
+      },
+    ];
+
+    const response = await invite({ supervisorId: 3 });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      message:
+        "Supervisor must be an active higher-ranked account in the target facility",
+    });
+    expect(state.invitationValues).toBeNull();
+  });
+
   it("revokes the stored invitation when the provider fails", async () => {
     state.sendEmail.mockRejectedValueOnce(new Error("provider failure"));
 
@@ -678,11 +739,11 @@ describe("invite-only employee registration provisioning", () => {
     async (_state, terminal) => {
       state.lockedInvitation = {
         id: 91,
-      facilityId: 10,
-      name: "Worker",
-      nameAr: "موظف",
-      expiresAt: new Date(Date.now() + 60_000),
-      ...terminal,
+        facilityId: 10,
+        name: "Worker",
+        nameAr: "موظف",
+        expiresAt: new Date(Date.now() + 60_000),
+        ...terminal,
       };
 
       const response = await invitationRequest(

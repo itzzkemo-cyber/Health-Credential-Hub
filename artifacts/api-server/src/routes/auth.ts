@@ -37,7 +37,7 @@ import {
   logAudit,
   syncExpiryNotifications,
 } from "../lib/helpers";
-import { canManageTarget } from "../lib/roleHierarchy";
+import { canManageTarget, canSuperviseTarget } from "../lib/roleHierarchy";
 import { sessionIssuanceCsrfGuard } from "../lib/csrf";
 import { encryptTotpSecret } from "../lib/totpSecret";
 import { consumeSecondFactor } from "../lib/secondFactor";
@@ -45,6 +45,10 @@ import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
 import { logger } from "../lib/logger";
 import { safeErrorLogFields } from "../lib/safeError";
 import { rateLimit } from "../lib/rateLimit";
+import {
+  hasAllowedPasswordInputLength,
+  hasAllowedPasswordLength,
+} from "../lib/passwordPolicy";
 import {
   EmailNotConfiguredError,
   createEmailIdempotencyKey,
@@ -58,6 +62,12 @@ import {
 } from "../lib/email/templates";
 
 const router: IRouter = Router();
+
+function readSecondFactorCode(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.length <= 128 ? trimmed : "";
+}
 const loginRateLimit = rateLimit({
   name: "login",
   max: 10,
@@ -158,10 +168,14 @@ router.post(
   loginRateLimit,
   sessionIssuanceCsrfGuard,
   async (req, res) => {
-    const { email, password } = req.body as {
-      email?: string;
-      password?: string;
-    };
+    const body =
+      typeof req.body === "object" && req.body !== null
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const email = typeof body.email === "string" ? body.email : "";
+    const password = hasAllowedPasswordInputLength(body.password)
+      ? body.password
+      : "";
     if (!email || !password) {
       res.status(401).json({ message: "Invalid credentials" });
       return;
@@ -274,10 +288,13 @@ router.post(
       currentPassword?: string;
       newPassword?: string;
     };
-    if (!currentPassword || !newPassword || newPassword.length < 12) {
+    if (
+      !hasAllowedPasswordInputLength(currentPassword) ||
+      !hasAllowedPasswordLength(newPassword)
+    ) {
       res
         .status(400)
-        .json({ message: "Password must be at least 12 characters" });
+        .json({ message: "Password must be between 12 and 1024 characters" });
       return;
     }
     const nextPasswordHash = await hashPassword(newPassword);
@@ -385,8 +402,9 @@ router.post(
   async (req, res) => {
     const user = getUser(req);
     const body = req.body as { currentPassword?: unknown };
-    const currentPassword =
-      typeof body.currentPassword === "string" ? body.currentPassword : "";
+    const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
+      ? body.currentPassword
+      : "";
     const verifiedActor = await db.transaction(async (tx) => {
       const locked = (
         await tx
@@ -455,7 +473,7 @@ router.post(
     const body = req.body as { setupToken?: unknown; code?: unknown };
     const setupToken =
       typeof body.setupToken === "string" ? body.setupToken : "";
-    const code = typeof body.code === "string" ? body.code.trim() : "";
+    const code = readSecondFactorCode(body.code);
     if (user.totpEnabled) {
       res.status(400).json({
         message: "Two-factor authentication is already enabled",
@@ -561,7 +579,7 @@ router.post(
     const body = req.body as { challengeToken?: unknown; code?: unknown };
     const challengeToken =
       typeof body.challengeToken === "string" ? body.challengeToken : "";
-    const code = typeof body.code === "string" ? body.code.trim() : "";
+    const code = readSecondFactorCode(body.code);
     const expired = () =>
       res.status(401).json({
         code: "expired_challenge",
@@ -670,9 +688,10 @@ router.delete(
   async (req, res) => {
     const user = getUser(req);
     const body = req.body as { currentPassword?: unknown; code?: unknown };
-    const currentPassword =
-      typeof body.currentPassword === "string" ? body.currentPassword : "";
-    const code = typeof body.code === "string" ? body.code.trim() : "";
+    const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
+      ? body.currentPassword
+      : "";
+    const code = readSecondFactorCode(body.code);
     const result = await db.transaction(async (tx) => {
       const locked = (
         await tx
@@ -768,9 +787,10 @@ router.post(
   async (req, res) => {
     const user = getUser(req);
     const body = req.body as { currentPassword?: unknown; code?: unknown };
-    const currentPassword =
-      typeof body.currentPassword === "string" ? body.currentPassword : "";
-    const code = typeof body.code === "string" ? body.code.trim() : "";
+    const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
+      ? body.currentPassword
+      : "";
+    const code = readSecondFactorCode(body.code);
     const codes = generateBackupCodes();
     const result = await db.transaction(async (tx) => {
       const locked = (
@@ -863,9 +883,10 @@ router.post(
       currentPassword?: unknown;
       code?: unknown;
     };
-    const currentPassword =
-      typeof body.currentPassword === "string" ? body.currentPassword : "";
-    const code = typeof body.code === "string" ? body.code.trim() : "";
+    const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
+      ? body.currentPassword
+      : "";
+    const code = readSecondFactorCode(body.code);
     const targetId =
       typeof body.userId === "number" &&
       Number.isInteger(body.userId) &&
@@ -1020,7 +1041,7 @@ router.post(
     }
     const token = typeof body.token === "string" ? body.token : "";
     const password = typeof body.password === "string" ? body.password : "";
-    if (!password || password.length < 12 || password.length > 1024) {
+    if (!hasAllowedPasswordLength(password)) {
       res.status(400).json({
         code: "weak_password",
         message: "Password must be between 12 and 1024 characters",
@@ -1151,9 +1172,10 @@ router.post(
           );
           if (
             !supervisor ||
-            !supervisor.isActive ||
-            supervisor.role === "employee" ||
-            supervisor.facilityId !== invitation.facilityId
+            !canSuperviseTarget(supervisor, {
+              facilityId: invitation.facilityId,
+              role: "employee",
+            })
           ) {
             return invalidate();
           }
@@ -1350,12 +1372,12 @@ router.post(
     const token = typeof body.token === "string" ? body.token.trim() : "";
     const newPassword =
       typeof body.newPassword === "string" ? body.newPassword : "";
-    if (!token || !newPassword || newPassword.length < 12) {
+    if (!token || !hasAllowedPasswordLength(newPassword)) {
       res.status(400).json({
         code: "weak_password",
         message:
-          "A reset token and a password of at least 12 characters are required",
-        messageAr: "رمز إعادة التعيين وكلمة مرور لا تقل عن 12 حرفًا مطلوبان",
+          "A reset token and a password between 12 and 1024 characters are required",
+        messageAr: "رمز إعادة التعيين وكلمة مرور بين 12 و1024 حرفًا مطلوبان",
       });
       return;
     }

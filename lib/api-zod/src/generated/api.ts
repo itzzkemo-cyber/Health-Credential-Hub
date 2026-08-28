@@ -81,8 +81,16 @@ export const GetStorageObjectResponse = zod.unknown()
 /**
  * @summary Health check
  */
+export const healthCheckResponseReleaseShaMin = 7;
+export const healthCheckResponseReleaseShaMax = 40;
+
+
+export const healthCheckResponseReleaseShaRegExp = new RegExp('^[0-9a-f]{7,40}$');
+
+
 export const HealthCheckResponse = zod.object({
   "status": zod.string(),
+  "releaseSha": zod.string().min(healthCheckResponseReleaseShaMin).max(healthCheckResponseReleaseShaMax).regex(healthCheckResponseReleaseShaRegExp).optional().describe('Public Git commit identifier for the running release, when available.'),
   "emailDelivery": zod.enum(['configured', 'disabled', 'misconfigured']).optional(),
   "ocr": zod.enum(['configured', 'disabled', 'misconfigured']).optional()
 })
@@ -91,8 +99,16 @@ export const HealthCheckResponse = zod.object({
 /**
  * @summary Check whether persistent dependencies are ready
  */
+export const readinessCheckResponseReleaseShaMin = 7;
+export const readinessCheckResponseReleaseShaMax = 40;
+
+
+export const readinessCheckResponseReleaseShaRegExp = new RegExp('^[0-9a-f]{7,40}$');
+
+
 export const ReadinessCheckResponse = zod.object({
   "status": zod.string(),
+  "releaseSha": zod.string().min(readinessCheckResponseReleaseShaMin).max(readinessCheckResponseReleaseShaMax).regex(readinessCheckResponseReleaseShaRegExp).optional().describe('Public Git commit identifier for the running release, when available.'),
   "database": zod.string(),
   "objectStorage": zod.string(),
   "documentUploads": zod.enum(['enabled', 'disabled']),
@@ -104,9 +120,13 @@ export const ReadinessCheckResponse = zod.object({
 /**
  * @summary Login
  */
+export const loginBodyPasswordMax = 1024;
+
+
+
 export const LoginBody = zod.object({
   "email": zod.string(),
-  "password": zod.string()
+  "password": zod.string().min(1).max(loginBodyPasswordMax)
 })
 
 export const LoginResponse = zod.object({
@@ -177,13 +197,16 @@ export const GetMeResponse = zod.object({
 /**
  * @summary Change password
  */
+export const changePasswordBodyCurrentPasswordMax = 1024;
+
 export const changePasswordBodyNewPasswordMin = 12;
+export const changePasswordBodyNewPasswordMax = 1024;
 
 
 
 export const ChangePasswordBody = zod.object({
-  "currentPassword": zod.string(),
-  "newPassword": zod.string().min(changePasswordBodyNewPasswordMin)
+  "currentPassword": zod.string().min(1).max(changePasswordBodyCurrentPasswordMax),
+  "newPassword": zod.string().min(changePasswordBodyNewPasswordMin).max(changePasswordBodyNewPasswordMax)
 })
 
 export const ChangePasswordResponse = zod.object({
@@ -205,12 +228,13 @@ export const ForgotPasswordResponse = zod.unknown()
  * @summary Set a new password using an emailed reset token
  */
 export const resetPasswordBodyNewPasswordMin = 12;
+export const resetPasswordBodyNewPasswordMax = 1024;
 
 
 
 export const ResetPasswordBody = zod.object({
   "token": zod.string(),
-  "newPassword": zod.string().min(resetPasswordBodyNewPasswordMin)
+  "newPassword": zod.string().min(resetPasswordBodyNewPasswordMin).max(resetPasswordBodyNewPasswordMax)
 })
 
 export const ResetPasswordResponse = zod.object({
@@ -261,8 +285,12 @@ export const AcceptEmployeeInvitationResponse = zod.object({
 /**
  * @summary Begin enabling 2FA — returns the secret, QR image and a signed setup token (nothing persisted yet)
  */
+export const totpSetupBodyCurrentPasswordMax = 1024;
+
+
+
 export const TotpSetupBody = zod.object({
-  "currentPassword": zod.string()
+  "currentPassword": zod.string().min(1).max(totpSetupBodyCurrentPasswordMax)
 })
 
 export const TotpSetupResponse = zod.object({
@@ -276,9 +304,13 @@ export const TotpSetupResponse = zod.object({
 /**
  * @summary Confirm the first OTP to activate 2FA and receive single-use backup codes
  */
+export const totpVerifySetupBodyCodeMax = 128;
+
+
+
 export const TotpVerifySetupBody = zod.object({
   "setupToken": zod.string(),
-  "code": zod.string()
+  "code": zod.string().min(1).max(totpVerifySetupBodyCodeMax)
 })
 
 export const TotpVerifySetupResponse = zod.object({
@@ -289,9 +321,13 @@ export const TotpVerifySetupResponse = zod.object({
 /**
  * @summary Exchange a pending 2FA challenge token plus an OTP or backup code for a full session
  */
+export const totpChallengeBodyCodeMax = 128;
+
+
+
 export const TotpChallengeBody = zod.object({
   "challengeToken": zod.string(),
-  "code": zod.string()
+  "code": zod.string().min(1).max(totpChallengeBodyCodeMax)
 })
 
 export const TotpChallengeResponse = zod.object({
@@ -320,9 +356,15 @@ export const TotpChallengeResponse = zod.object({
 /**
  * @summary Disable 2FA (requires current password AND a valid OTP or backup code)
  */
+export const totpDisableBodyCurrentPasswordMax = 1024;
+
+export const totpDisableBodyCodeMax = 128;
+
+
+
 export const TotpDisableBody = zod.object({
-  "currentPassword": zod.string(),
-  "code": zod.string()
+  "currentPassword": zod.string().min(1).max(totpDisableBodyCurrentPasswordMax),
+  "code": zod.string().min(1).max(totpDisableBodyCodeMax)
 })
 
 export const TotpDisableResponse = zod.unknown()
@@ -331,9 +373,15 @@ export const TotpDisableResponse = zod.unknown()
 /**
  * @summary Generate a fresh batch of backup codes, invalidating all previous ones
  */
+export const totpRegenerateBackupBodyCurrentPasswordMax = 1024;
+
+export const totpRegenerateBackupBodyCodeMax = 128;
+
+
+
 export const TotpRegenerateBackupBody = zod.object({
-  "currentPassword": zod.string(),
-  "code": zod.string()
+  "currentPassword": zod.string().min(1).max(totpRegenerateBackupBodyCurrentPasswordMax),
+  "code": zod.string().min(1).max(totpRegenerateBackupBodyCodeMax)
 })
 
 export const TotpRegenerateBackupResponse = zod.object({
@@ -344,10 +392,16 @@ export const TotpRegenerateBackupResponse = zod.object({
 /**
  * @summary Admin recovery — disable 2FA for a lower-ranked account in scope
  */
+export const totpAdminDisableBodyCurrentPasswordMax = 1024;
+
+export const totpAdminDisableBodyCodeMax = 128;
+
+
+
 export const TotpAdminDisableBody = zod.object({
   "userId": zod.number(),
-  "currentPassword": zod.string(),
-  "code": zod.string()
+  "currentPassword": zod.string().min(1).max(totpAdminDisableBodyCurrentPasswordMax),
+  "code": zod.string().min(1).max(totpAdminDisableBodyCodeMax)
 })
 
 export const TotpAdminDisableResponse = zod.unknown()
@@ -955,6 +1009,12 @@ export const ListEmployeesResponse = zod.array(ListEmployeesResponseItem)
  * @summary Create employee
  */
 export const createEmployeeBodyPasswordMin = 12;
+export const createEmployeeBodyPasswordMax = 1024;
+
+export const createEmployeeBodyCurrentPasswordMin = 12;
+export const createEmployeeBodyCurrentPasswordMax = 1024;
+
+export const createEmployeeBodyCodeMax = 128;
 
 
 
@@ -962,7 +1022,7 @@ export const CreateEmployeeBody = zod.object({
   "name": zod.string(),
   "nameAr": zod.string(),
   "email": zod.string(),
-  "password": zod.string().min(createEmployeeBodyPasswordMin),
+  "password": zod.string().min(createEmployeeBodyPasswordMin).max(createEmployeeBodyPasswordMax),
   "role": zod.string(),
   "departmentId": zod.number().nullish(),
   "supervisorId": zod.number().nullish(),
@@ -971,8 +1031,8 @@ export const CreateEmployeeBody = zod.object({
   "employeeNumber": zod.string(),
   "phone": zod.string().optional(),
   "facilityId": zod.number().optional().describe('Target facility; honored only for system administrators.'),
-  "currentPassword": zod.string().optional().describe('Required with code when provisioning a manager role.'),
-  "code": zod.string().optional().describe('Required with currentPassword when provisioning a manager role; accepts TOTP or a backup code.')
+  "currentPassword": zod.string().min(createEmployeeBodyCurrentPasswordMin).max(createEmployeeBodyCurrentPasswordMax).describe('Required with code for every direct account provisioning operation.'),
+  "code": zod.string().min(1).max(createEmployeeBodyCodeMax).describe('Required with currentPassword for every direct account provisioning operation; accepts TOTP or a backup code.')
 })
 
 export const CreateEmployeeResponse = zod.object({
@@ -1193,18 +1253,24 @@ export const UpdateEmployeeParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateEmployeeBodyCurrentPasswordMax = 1024;
+
+export const updateEmployeeBodyCodeMax = 128;
+
+
+
 export const UpdateEmployeeBody = zod.object({
   "name": zod.string().optional(),
   "nameAr": zod.string().optional(),
   "role": zod.string().optional(),
   "departmentId": zod.number().nullish(),
-  "supervisorId": zod.number().nullish(),
+  "supervisorId": zod.number().nullish().describe('Required when changing the role of an employee who already has a supervisor; send the existing supervisor ID to revalidate it atomically, or null to clear it.'),
   "jobTitle": zod.string().optional(),
   "jobTitleAr": zod.string().optional(),
   "phone": zod.string().optional(),
   "isActive": zod.boolean().optional(),
-  "currentPassword": zod.string().optional().describe('Required with code when role, departmentId, supervisorId, or isActive actually changes.'),
-  "code": zod.string().optional().describe('Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code.')
+  "currentPassword": zod.string().min(1).max(updateEmployeeBodyCurrentPasswordMax).optional().describe('Required with code when role, departmentId, supervisorId, or isActive actually changes.'),
+  "code": zod.string().min(1).max(updateEmployeeBodyCodeMax).optional().describe('Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code.')
 })
 
 export const UpdateEmployeeResponse = zod.object({

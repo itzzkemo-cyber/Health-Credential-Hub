@@ -9,6 +9,7 @@ import {
 import { and, desc, eq, inArray, isNull, notExists, sql } from "drizzle-orm";
 import { logger } from "../logger";
 import { safeErrorLogFields } from "../safeError";
+import { canAccessCredentialOwner } from "../roleHierarchy";
 import {
   computeEmployeeStats,
   getCredentialsFor,
@@ -181,9 +182,24 @@ export async function sendWeeklyDigests(): Promise<void> {
   }
 }
 
+export function filterWeeklyDigestMembers(
+  manager: User,
+  candidates: User[],
+): User[] {
+  if (manager.role !== "supervisor" && manager.role !== "department_manager") {
+    return [];
+  }
+  return candidates.filter(
+    (candidate) =>
+      candidate.isActive &&
+      candidate.id !== manager.id &&
+      canAccessCredentialOwner(manager, candidate),
+  );
+}
+
 async function getTeamMembers(manager: User): Promise<User[]> {
   if (manager.role === "supervisor") {
-    return db
+    const rows = await db
       .select()
       .from(usersTable)
       .where(
@@ -193,6 +209,7 @@ async function getTeamMembers(manager: User): Promise<User[]> {
           eq(usersTable.isActive, true),
         ),
       );
+    return filterWeeklyDigestMembers(manager, rows);
   }
   // department_manager
   if (manager.departmentId == null) return [];
@@ -206,7 +223,7 @@ async function getTeamMembers(manager: User): Promise<User[]> {
         eq(usersTable.isActive, true),
       ),
     );
-  return rows.filter((u) => u.id !== manager.id);
+  return filterWeeklyDigestMembers(manager, rows);
 }
 
 /** Riyadh (UTC+3) calendar date — digests run Sundays, so this is the week key. */

@@ -122,3 +122,9 @@ scanner passes readiness. This is not a production-ready healthcare deployment.
 - Add a distributed rate limiter and production observability before exposing authentication or OCR publicly at scale.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [AGENTS.md](AGENTS.md) before changing the project.
+
+Release identity checks, monitoring ownership, and the database/object backup
+and disposable restore-drill procedure are in
+[docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md). They are operator
+steps and are not evidence that any external backup, alert, or compliance
+control has already been configured.

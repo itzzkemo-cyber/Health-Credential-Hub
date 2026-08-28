@@ -12,14 +12,25 @@ export interface EmployeeUpdate {
   role?: string;
   /** @nullable */
   departmentId?: number | null;
-  /** @nullable */
+  /**
+     * Required when changing the role of an employee who already has a supervisor; send the existing supervisor ID to revalidate it atomically, or null to clear it.
+     * @nullable
+     */
   supervisorId?: number | null;
   jobTitle?: string;
   jobTitleAr?: string;
   phone?: string;
   isActive?: boolean;
-  /** Required with code when role, departmentId, supervisorId, or isActive actually changes. */
+  /**
+     * Required with code when role, departmentId, supervisorId, or isActive actually changes.
+     * @minLength 1
+     * @maxLength 1024
+     */
   currentPassword?: string;
-  /** Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code. */
+  /**
+     * Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code.
+     * @minLength 1
+     * @maxLength 128
+     */
   code?: string;
 }

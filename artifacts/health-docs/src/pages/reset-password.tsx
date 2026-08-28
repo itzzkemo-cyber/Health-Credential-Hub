@@ -40,7 +40,10 @@ export default function ResetPassword() {
         onSuccess: (res) => {
           // 2FA accounts still need the OTP step after a reset (202).
           if ("pending2fa" in res) {
-            sessionStorage.setItem("healthdocs_2fa_challenge", res.challengeToken);
+            sessionStorage.setItem(
+              "healthdocs_2fa_challenge",
+              res.challengeToken,
+            );
             toast.success(t("reset_password.success"));
             setLocation("/2fa-challenge");
             return;
@@ -75,10 +78,16 @@ export default function ResetPassword() {
       <div className="w-full max-w-md space-y-8">
         <div className="flex flex-col items-center text-center space-y-2">
           <div className="h-16 w-16 bg-primary/10 rounded-full flex items-center justify-center text-primary mb-4">
-            {linkInvalid ? <ShieldCheck className="h-8 w-8" /> : <KeyRound className="h-8 w-8" />}
+            {linkInvalid ? (
+              <ShieldCheck className="h-8 w-8" />
+            ) : (
+              <KeyRound className="h-8 w-8" />
+            )}
           </div>
           <h2 className="text-3xl font-bold tracking-tight">
-            {linkInvalid ? t("reset_password.invalid_link") : t("reset_password.title")}
+            {linkInvalid
+              ? t("reset_password.invalid_link")
+              : t("reset_password.title")}
           </h2>
           <p className="text-muted-foreground">
             {linkInvalid
@@ -90,7 +99,9 @@ export default function ResetPassword() {
         {linkInvalid ? (
           <div className="bg-card p-8 rounded-2xl border shadow-sm flex flex-col items-center text-center space-y-4">
             <Button asChild className="w-full h-11 text-lg font-semibold">
-              <Link href="/forgot-password">{t("reset_password.request_new")}</Link>
+              <Link href="/forgot-password">
+                {t("reset_password.request_new")}
+              </Link>
             </Button>
           </div>
         ) : (
@@ -99,12 +110,15 @@ export default function ResetPassword() {
             className="space-y-6 bg-card p-8 rounded-2xl border shadow-sm"
           >
             <div className="space-y-2">
-              <Label htmlFor="password">{t("reset_password.new_password")}</Label>
+              <Label htmlFor="password">
+                {t("reset_password.new_password")}
+              </Label>
               <Input
                 id="password"
                 type="password"
                 required
                 minLength={12}
+                maxLength={1024}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 dir="ltr"
@@ -116,12 +130,15 @@ export default function ResetPassword() {
               </p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="confirm">{t("reset_password.confirm_password")}</Label>
+              <Label htmlFor="confirm">
+                {t("reset_password.confirm_password")}
+              </Label>
               <Input
                 id="confirm"
                 type="password"
                 required
                 minLength={12}
+                maxLength={1024}
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 dir="ltr"

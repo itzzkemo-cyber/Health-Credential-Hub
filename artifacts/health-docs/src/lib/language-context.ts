@@ -1,6 +1,11 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext } from "react";
 
-export type Language = 'ar' | 'en';
+export type Language = "ar" | "en";
+export type LanguageDirection = "rtl" | "ltr";
+
+export function getLanguageDirection(language: Language): LanguageDirection {
+  return language === "ar" ? "rtl" : "ltr";
+}
 
 export interface LanguageContextType {
   language: Language;
@@ -13,12 +18,14 @@ export interface LanguageContextType {
 // translation files never re-create this context object. Re-creating it
 // mid-session detaches mounted components from the provider and crashes
 // the page with "useLanguage must be used within a LanguageProvider".
-export const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
+export const LanguageContext = createContext<LanguageContextType | undefined>(
+  undefined,
+);
 
 export function useLanguage(): LanguageContextType {
   const context = useContext(LanguageContext);
   if (context === undefined) {
-    throw new Error('useLanguage must be used within a LanguageProvider');
+    throw new Error("useLanguage must be used within a LanguageProvider");
   }
   return context;
 }

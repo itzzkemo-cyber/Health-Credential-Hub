@@ -1,4 +1,8 @@
-import express, { type NextFunction, type Request, type Response } from "express";
+import express, {
+  type NextFunction,
+  type Request,
+  type Response,
+} from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const testState = vi.hoisted(() => ({
@@ -120,8 +124,8 @@ vi.mock("../lib/auth", () => ({
     (req as Request & { user?: unknown }).user = testState.actor;
     next();
   },
-  requireRole:
-    () => (_req: Request, _res: Response, next: NextFunction) => next(),
+  requireRole: () => (_req: Request, _res: Response, next: NextFunction) =>
+    next(),
 }));
 
 vi.mock("../lib/helpers", () => ({
@@ -131,8 +135,8 @@ vi.mock("../lib/helpers", () => ({
 }));
 
 vi.mock("../lib/rateLimit", () => ({
-  rateLimit:
-    () => (_req: Request, _res: Response, next: NextFunction) => next(),
+  rateLimit: () => (_req: Request, _res: Response, next: NextFunction) =>
+    next(),
 }));
 
 vi.mock("../lib/csrf", () => ({
@@ -148,7 +152,8 @@ vi.mock("../lib/logger", () => ({
 }));
 
 import router from "./auth";
-import { comparePassword } from "../lib/auth";
+import { db } from "@workspace/db";
+import { comparePassword, hashPassword } from "../lib/auth";
 
 describe("clearing the temporary-password requirement", () => {
   let server: ReturnType<express.Express["listen"]> | undefined;
@@ -160,6 +165,9 @@ describe("clearing the temporary-password requirement", () => {
     testState.reuseNewPassword = false;
     testState.actorAvailable = true;
     vi.mocked(comparePassword).mockClear();
+    vi.mocked(hashPassword).mockClear();
+    vi.mocked(db.select).mockClear();
+    vi.mocked(db.transaction).mockClear();
   });
 
   afterEach(async () => {
@@ -248,6 +256,19 @@ describe("clearing the temporary-password requirement", () => {
     );
   });
 
+  it("rejects an overlong login password before database or bcrypt work", async () => {
+    const response = await post("/auth/login", {
+      email: testState.actor.email,
+      password: "x".repeat(1025),
+    });
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ message: "Invalid credentials" });
+    expect(db.select).not.toHaveBeenCalled();
+    expect(comparePassword).not.toHaveBeenCalled();
+    expect(testState.setSessionCookie).not.toHaveBeenCalled();
+  });
+
   it("does not clear the flag or rotate sessions when the new password is reused", async () => {
     testState.reuseNewPassword = true;
 
@@ -266,6 +287,36 @@ describe("clearing the temporary-password requirement", () => {
     expect(testState.setSessionCookie).not.toHaveBeenCalled();
   });
 
+  it("rejects an overlong authenticated password before bcrypt or database work", async () => {
+    const response = await post("/auth/change-password", {
+      currentPassword: "temporary-pass-123",
+      newPassword: "x".repeat(1025),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      message: "Password must be between 12 and 1024 characters",
+    });
+    expect(hashPassword).not.toHaveBeenCalled();
+    expect(testState.updateCalls).toEqual([]);
+  });
+
+  it("rejects an overlong current password before hashing or opening a transaction", async () => {
+    const response = await post("/auth/change-password", {
+      currentPassword: "x".repeat(1025),
+      newPassword: "replacement-pass-456",
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      message: "Password must be between 12 and 1024 characters",
+    });
+    expect(hashPassword).not.toHaveBeenCalled();
+    expect(comparePassword).not.toHaveBeenCalled();
+    expect(db.transaction).not.toHaveBeenCalled();
+    expect(testState.updateCalls).toEqual([]);
+  });
+
   it("clears the flag and rotates the session version after password recovery", async () => {
     const response = await post("/auth/reset-password", {
       token: "single-use-reset-token",
@@ -282,5 +333,19 @@ describe("clearing the temporary-password requirement", () => {
       ]),
     );
     expectPasswordRequirementCleared();
+  });
+
+  it("rejects an overlong recovered password before bcrypt or token lookup", async () => {
+    const response = await post("/auth/reset-password", {
+      token: "single-use-reset-token",
+      newPassword: "x".repeat(1025),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "weak_password" }),
+    );
+    expect(hashPassword).not.toHaveBeenCalled();
+    expect(testState.updateCalls).toEqual([]);
   });
 });

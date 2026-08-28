@@ -10,7 +10,10 @@ export interface EmployeeInput {
   name: string;
   nameAr: string;
   email: string;
-  /** @minLength 12 */
+  /**
+     * @minLength 12
+     * @maxLength 1024
+     */
   password: string;
   role: string;
   /** @nullable */
@@ -23,8 +26,16 @@ export interface EmployeeInput {
   phone?: string;
   /** Target facility; honored only for system administrators. */
   facilityId?: number;
-  /** Required with code when provisioning a manager role. */
-  currentPassword?: string;
-  /** Required with currentPassword when provisioning a manager role; accepts TOTP or a backup code. */
-  code?: string;
+  /**
+     * Required with code for every direct account provisioning operation.
+     * @minLength 12
+     * @maxLength 1024
+     */
+  currentPassword: string;
+  /**
+     * Required with currentPassword for every direct account provisioning operation; accepts TOTP or a backup code.
+     * @minLength 1
+     * @maxLength 128
+     */
+  code: string;
 }

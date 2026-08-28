@@ -407,6 +407,18 @@ describe("public employee invitation acceptance", () => {
     },
   );
 
+  it("rejects an overlong invitation password before hashing or database work", async () => {
+    const response = await accept({ password: "x".repeat(1025) });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "weak_password" }),
+    );
+    expect(state.hashPassword).not.toHaveBeenCalled();
+    expect(state.transactionCount).toBe(0);
+    expect(state.userInsert).toBeNull();
+  });
+
   it("rejects tenant or role injection fields with the generic response", async () => {
     const response = await accept({ facilityId: 99, role: "system_admin" });
 
@@ -420,6 +432,21 @@ describe("public employee invitation acceptance", () => {
 
   it("invalidates an invitation when the inviter no longer controls its facility", async () => {
     state.inviter!.facilityId = 99;
+
+    const response = await accept();
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "invalid_invitation" }),
+    );
+    expect(state.userInsert).toBeNull();
+    expect(state.invitationUpdate).toEqual(
+      expect.objectContaining({ revokedAt: expect.any(Date) }),
+    );
+  });
+
+  it("invalidates an invitation when its supervisor is no longer higher-ranked", async () => {
+    state.supervisor!.role = "employee";
 
     const response = await accept();
 

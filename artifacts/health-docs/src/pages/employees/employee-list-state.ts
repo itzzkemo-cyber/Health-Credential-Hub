@@ -18,13 +18,6 @@ const PASSWORD_CHARACTER_GROUPS = [
   "!@#$%^&*()-_=+",
 ] as const;
 const PASSWORD_ALPHABET = PASSWORD_CHARACTER_GROUPS.join("");
-const STEP_UP_ROLES = new Set([
-  "supervisor",
-  "department_manager",
-  "hospital_admin",
-  "system_admin",
-]);
-
 export function getEmployeeDisplayName(
   employee: Pick<EmployeeWithStats, "name" | "nameAr">,
   isRTL: boolean,
@@ -107,7 +100,7 @@ function secureRandomIndex(maxExclusive: number): number {
 
 export function buildEmployeeInput(
   form: EmployeeAccountForm,
-  stepUp?: AdminMfaStepUpCredentials,
+  stepUp: AdminMfaStepUpCredentials,
 ): EmployeeInput {
   return {
     name: form.name.trim(),
@@ -122,7 +115,7 @@ export function buildEmployeeInput(
     employeeNumber: form.employeeNumber.trim(),
     ...(form.phone?.trim() ? { phone: form.phone.trim() } : {}),
     ...(form.facilityId ? { facilityId: Number(form.facilityId) } : {}),
-    ...(stepUp ?? {}),
+    ...stepUp,
   };
 }
 
@@ -183,8 +176,11 @@ export function buildEmployeeUpdate(
   };
 }
 
-export function requiresEmployeeCreateStepUp(role: string): boolean {
-  return STEP_UP_ROLES.has(role);
+export function requiresEmployeeCreateStepUp(_role: string): boolean {
+  // Every direct provisioning request is a protected administrative action.
+  // Returning true for unexpected role values keeps the UI fail-closed while
+  // the API remains authoritative for role validation.
+  return true;
 }
 
 export function hasEmployeeOrganizationalChanges(

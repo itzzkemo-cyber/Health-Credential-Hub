@@ -36,6 +36,10 @@ const originalOcrEnvironment = {
   AI_INTEGRATIONS_GEMINI_BASE_URL: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL,
   AI_INTEGRATIONS_GEMINI_API_KEY: process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
 };
+const originalReleaseEnvironment = {
+  RELEASE_SHA: process.env.RELEASE_SHA,
+  RENDER_GIT_COMMIT: process.env.RENDER_GIT_COMMIT,
+};
 
 describe("health routes", () => {
   let server: ReturnType<express.Express["listen"]> | undefined;
@@ -48,6 +52,8 @@ describe("health routes", () => {
     state.logError.mockReset();
     process.env.EMAIL_ALERTS_DISABLED = "1";
     delete process.env.OCR_ENABLED;
+    delete process.env.RELEASE_SHA;
+    delete process.env.RENDER_GIT_COMMIT;
   });
 
   afterEach(async () => {
@@ -61,6 +67,10 @@ describe("health routes", () => {
       else process.env[name] = value;
     }
     for (const [name, value] of Object.entries(originalOcrEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    for (const [name, value] of Object.entries(originalReleaseEnvironment)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
@@ -97,6 +107,38 @@ describe("health routes", () => {
     expect(state.checkObjectStorageReadiness).not.toHaveBeenCalled();
   });
 
+  it("reports a validated release SHA without exposing arbitrary environment text", async () => {
+    process.env.RELEASE_SHA = "59ec2a8017ade8781b1595f6b163474627220de3";
+    const response = await request("/healthz");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      status: "ok",
+      releaseSha: "59ec2a8017ade8781b1595f6b163474627220de3",
+    });
+  });
+
+  it("omits malformed release metadata", async () => {
+    process.env.RELEASE_SHA = "not-a-commit; sensitive=value";
+    process.env.RENDER_GIT_COMMIT = "also-invalid";
+    const response = await request("/healthz");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "ok" });
+  });
+
+  it("falls back to a validated release SHA when Render metadata is malformed", async () => {
+    process.env.RENDER_GIT_COMMIT = "malformed-render-value";
+    process.env.RELEASE_SHA = "59ec2a8017ade8781b1595f6b163474627220de3";
+    const response = await request("/healthz");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      status: "ok",
+      releaseSha: "59ec2a8017ade8781b1595f6b163474627220de3",
+    });
+  });
+
   it("reports readiness only after database and storage verification", async () => {
     process.env.DOCUMENT_UPLOADS_ENABLED = "false";
     const response = await request("/readyz");
@@ -106,6 +148,24 @@ describe("health routes", () => {
     expect(state.checkObjectStorageReadiness).toHaveBeenCalledOnce();
     expect(await response.json()).toEqual({
       status: "ready",
+      database: "ok",
+      objectStorage: "verified",
+      documentUploads: "disabled",
+      emailDelivery: "disabled",
+      ocr: "disabled",
+    });
+  });
+
+  it("uses Render's validated commit identifier for release verification", async () => {
+    process.env.DOCUMENT_UPLOADS_ENABLED = "false";
+    process.env.RELEASE_SHA = "59ec2a8017ade8781b1595f6b163474627220de3";
+    process.env.RENDER_GIT_COMMIT = "1258b1d6f8370e4e2f850ef4394c4d6a9853e898";
+    const response = await request("/readyz");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      status: "ready",
+      releaseSha: "1258b1d6f8370e4e2f850ef4394c4d6a9853e898",
       database: "ok",
       objectStorage: "verified",
       documentUploads: "disabled",

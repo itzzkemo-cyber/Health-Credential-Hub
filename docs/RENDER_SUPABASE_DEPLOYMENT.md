@@ -61,7 +61,10 @@ node --enable-source-maps dist/index.mjs
 Render probes `GET /api/readyz`. That endpoint verifies the dependencies needed
 for the configured mode. With document intake enabled this includes PostgreSQL,
 private storage, and the server-mediated upload-security processor;
-`GET /api/healthz` is only process liveness.
+`GET /api/healthz` is only process liveness. Both endpoints include the
+validated public `releaseSha` when release provenance is available. Render
+injects the deployed commit as `RENDER_GIT_COMMIT`; do not configure a static
+`RELEASE_SHA` in the Blueprint because it can become stale.
 
 ## 1. Prepare Supabase
 
@@ -277,12 +280,25 @@ bootstrap values, service-role keys, or document data in the Blueprint.
 
 After CI, migration, and bootstrap gates pass, trigger the Render deploy
 manually. The release is healthy only when Render reports the health check as
-passing and both commands return `2xx`:
+passing, both commands return `2xx`, and `releaseSha` equals the reviewed commit:
 
 ```bash
 curl --fail --show-error https://YOUR_SERVICE.onrender.com/api/healthz
 curl --fail --show-error https://YOUR_SERVICE.onrender.com/api/readyz
 ```
+
+Verify the exact live commit without printing environment values or credentials:
+
+```bash
+export EXPECTED_SHA="$(git rev-parse HEAD)"
+export READY_URL="https://YOUR_SERVICE.onrender.com/api/readyz"
+node -e '(async()=>{const r=await fetch(process.env.READY_URL,{headers:{"cache-control":"no-cache"}}); const b=await r.json(); if(!r.ok||b.status!=="ready"||b.releaseSha!==process.env.EXPECTED_SHA){throw new Error("Live release or readiness mismatch")} console.log(`Verified live release ${b.releaseSha}`)})().catch(()=>process.exit(1))'
+```
+
+An absent or mismatched `releaseSha` blocks release sign-off. Inspect the Render
+deployment commit and deploy the reviewed revision; do not mask a mismatch by
+adding a static `RELEASE_SHA`. Record the expected SHA, observed SHA, UTC time,
+CI run, migration evidence, and operator in the release ticket.
 
 ## 5. Acceptance checks
 
@@ -322,6 +338,10 @@ database, private bucket, and upload-security processor are reachable; it is
 not a production SLA. Its traffic can also delay Render Free idle sleep and
 consume the workspace's monthly free-instance hours, so usage and suspension
 alerts still require operator review.
+
+The executable monitoring, backup, and disposable restore-drill checklist is in
+[`OPERATIONS_RUNBOOK.md`](OPERATIONS_RUNBOOK.md). Nothing in that checklist
+means those external controls are currently configured or approved.
 
 Before real use, complete all of the following:
 

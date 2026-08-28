@@ -342,9 +342,7 @@ export default function EmployeeDetail() {
           );
           clearAccountStateSecrets();
           setAccountStateFeedbackKey(errorKey);
-          requestAnimationFrame(() =>
-            accountStatePasswordRef.current?.focus(),
-          );
+          requestAnimationFrame(() => accountStatePasswordRef.current?.focus());
         },
       },
     );
@@ -540,6 +538,7 @@ export default function EmployeeDetail() {
                           name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
                           type="password"
                           dir="ltr"
+                          maxLength={1024}
                           autoComplete="current-password"
                           aria-describedby={
                             accountStateFeedbackKey
@@ -559,6 +558,7 @@ export default function EmployeeDetail() {
                           name={ADMIN_MFA_CODE_FIELD}
                           type="text"
                           dir="ltr"
+                          maxLength={128}
                           inputMode="text"
                           autoComplete="one-time-code"
                           autoCapitalize="characters"
@@ -747,6 +747,7 @@ export default function EmployeeDetail() {
                             name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
                             type="password"
                             dir="ltr"
+                            maxLength={1024}
                             autoComplete="current-password"
                             aria-describedby="admin-mfa-disable-hint"
                             required
@@ -761,6 +762,7 @@ export default function EmployeeDetail() {
                             name={ADMIN_MFA_CODE_FIELD}
                             type="text"
                             dir="ltr"
+                            maxLength={128}
                             className="font-mono"
                             autoComplete="one-time-code"
                             autoCapitalize="characters"
@@ -1005,7 +1007,7 @@ export default function EmployeeDetail() {
                       setEditFeedbackKey(null);
                       setEditForm((previous) =>
                         previous ? { ...previous, role } : previous,
-                      )
+                      );
                     }}
                   >
                     <SelectTrigger id="edit-role" className="min-h-11">
@@ -1039,7 +1041,7 @@ export default function EmployeeDetail() {
                                 departmentId === "none" ? "" : departmentId,
                             }
                           : previous,
-                      )
+                      );
                     }}
                   >
                     <SelectTrigger id="edit-department" className="min-h-11">
@@ -1079,7 +1081,7 @@ export default function EmployeeDetail() {
                                 supervisorId === "none" ? "" : supervisorId,
                             }
                           : previous,
-                      )
+                      );
                     }}
                   >
                     <SelectTrigger id="edit-supervisor" className="min-h-11">
@@ -1137,6 +1139,7 @@ export default function EmployeeDetail() {
                         name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
                         type="password"
                         dir="ltr"
+                        maxLength={1024}
                         autoComplete="current-password"
                         aria-describedby="edit-step-up-description"
                         required
@@ -1153,6 +1156,7 @@ export default function EmployeeDetail() {
                         name={ADMIN_MFA_CODE_FIELD}
                         type="text"
                         dir="ltr"
+                        maxLength={128}
                         inputMode="text"
                         autoComplete="one-time-code"
                         autoCapitalize="characters"

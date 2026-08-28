@@ -380,7 +380,7 @@ export const en = {
     no_supervisor: "No supervisor",
     step_up_title: "Confirm protected administrative change",
     create_step_up_hint:
-      "Creating an account with a supervisory or administrative role requires your current password and two-factor code or a backup code.",
+      "Creating any employee account directly is a protected administrative action that requires your current password and two-factor or backup code.",
     update_step_up_hint:
       "Changing the role, department, or supervisor requires your current password and two-factor code or a backup code.",
     step_up_required:

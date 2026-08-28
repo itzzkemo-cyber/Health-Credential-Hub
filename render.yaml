@@ -21,6 +21,9 @@ services:
         value: 0.0.0.0
       - key: LOG_LEVEL
         value: info
+      # Render injects RENDER_GIT_COMMIT at runtime. The public health endpoints
+      # expose it only after strict Git-SHA validation. Do not set a static
+      # RELEASE_SHA here because it would become stale on a later manual deploy.
       - key: DB_POOL_MAX
         value: "5"
       - key: NODE_EXTRA_CA_CERTS

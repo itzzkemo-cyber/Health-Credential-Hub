@@ -4,6 +4,7 @@ import {
   canAccessCredentialOwner,
   canAssignRole,
   canManageTarget,
+  canSuperviseTarget,
 } from "./roleHierarchy";
 
 function user(
@@ -52,5 +53,24 @@ describe("role management hierarchy", () => {
     expect(canAccessCredentialOwner(supervisor, directReport)).toBe(true);
     expect(canAccessCredentialOwner(supervisor, peer)).toBe(false);
     expect(canAccessCredentialOwner(supervisor, higher)).toBe(false);
+  });
+
+  it("requires reporting-line supervisors to be active, co-tenant, and higher-ranked", () => {
+    const target = user(20, "supervisor", 10);
+
+    expect(canSuperviseTarget(user(1, "department_manager", 10), target)).toBe(
+      true,
+    );
+    expect(canSuperviseTarget(user(2, "supervisor", 10), target)).toBe(false);
+    expect(canSuperviseTarget(user(3, "employee", 10), target)).toBe(false);
+    expect(canSuperviseTarget(user(4, "hospital_admin", 20), target)).toBe(
+      false,
+    );
+    expect(
+      canSuperviseTarget(
+        user(5, "hospital_admin", 10, { isActive: false }),
+        target,
+      ),
+    ).toBe(false);
   });
 });

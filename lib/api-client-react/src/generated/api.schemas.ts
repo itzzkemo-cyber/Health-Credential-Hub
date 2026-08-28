@@ -76,6 +76,13 @@ export const HealthStatusOcr = {
 
 export interface HealthStatus {
   status: string;
+  /**
+     * Public Git commit identifier for the running release, when available.
+     * @minLength 7
+     * @maxLength 40
+     * @pattern ^[0-9a-f]{7,40}$
+     */
+  releaseSha?: string;
   emailDelivery?: HealthStatusEmailDelivery;
   ocr?: HealthStatusOcr;
 }
@@ -106,6 +113,13 @@ export const ReadinessStatusOcr = {
 
 export interface ReadinessStatus {
   status: string;
+  /**
+     * Public Git commit identifier for the running release, when available.
+     * @minLength 7
+     * @maxLength 40
+     * @pattern ^[0-9a-f]{7,40}$
+     */
+  releaseSha?: string;
   database: string;
   objectStorage: string;
   documentUploads: ReadinessStatusDocumentUploads;
@@ -115,6 +129,10 @@ export interface ReadinessStatus {
 
 export interface LoginInput {
   email: string;
+  /**
+     * @minLength 1
+     * @maxLength 1024
+     */
   password: string;
 }
 
@@ -163,6 +181,10 @@ export interface TwoFactorPending {
 }
 
 export interface TotpSetupInput {
+  /**
+     * @minLength 1
+     * @maxLength 1024
+     */
   currentPassword: string;
 }
 
@@ -175,6 +197,10 @@ export interface TotpSetupData {
 
 export interface TotpVerifySetupInput {
   setupToken: string;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
   code: string;
 }
 
@@ -184,11 +210,23 @@ export interface TotpActivation {
 
 export interface TotpChallengeInput {
   challengeToken: string;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
   code: string;
 }
 
 export interface TotpConfirmInput {
+  /**
+     * @minLength 1
+     * @maxLength 1024
+     */
   currentPassword: string;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
   code: string;
 }
 
@@ -209,13 +247,28 @@ export interface AdminStepUpInput {
 
 export interface TotpAdminDisableInput {
   userId: number;
+  /**
+     * @minLength 1
+     * @maxLength 1024
+     */
   currentPassword: string;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
   code: string;
 }
 
 export interface ChangePasswordInput {
+  /**
+     * @minLength 1
+     * @maxLength 1024
+     */
   currentPassword: string;
-  /** @minLength 12 */
+  /**
+     * @minLength 12
+     * @maxLength 1024
+     */
   newPassword: string;
 }
 
@@ -229,7 +282,10 @@ export interface ChangePasswordResult {
 
 export interface ResetPasswordInput {
   token: string;
-  /** @minLength 12 */
+  /**
+     * @minLength 12
+     * @maxLength 1024
+     */
   newPassword: string;
 }
 
@@ -594,7 +650,10 @@ export interface EmployeeInput {
   name: string;
   nameAr: string;
   email: string;
-  /** @minLength 12 */
+  /**
+     * @minLength 12
+     * @maxLength 1024
+     */
   password: string;
   role: string;
   /** @nullable */
@@ -607,10 +666,18 @@ export interface EmployeeInput {
   phone?: string;
   /** Target facility; honored only for system administrators. */
   facilityId?: number;
-  /** Required with code when provisioning a manager role. */
-  currentPassword?: string;
-  /** Required with currentPassword when provisioning a manager role; accepts TOTP or a backup code. */
-  code?: string;
+  /**
+     * Required with code for every direct account provisioning operation.
+     * @minLength 12
+     * @maxLength 1024
+     */
+  currentPassword: string;
+  /**
+     * Required with currentPassword for every direct account provisioning operation; accepts TOTP or a backup code.
+     * @minLength 1
+     * @maxLength 128
+     */
+  code: string;
 }
 
 export interface CreateEmployeeInvitationInput {
@@ -694,15 +761,26 @@ export interface EmployeeUpdate {
   role?: string;
   /** @nullable */
   departmentId?: number | null;
-  /** @nullable */
+  /**
+     * Required when changing the role of an employee who already has a supervisor; send the existing supervisor ID to revalidate it atomically, or null to clear it.
+     * @nullable
+     */
   supervisorId?: number | null;
   jobTitle?: string;
   jobTitleAr?: string;
   phone?: string;
   isActive?: boolean;
-  /** Required with code when role, departmentId, supervisorId, or isActive actually changes. */
+  /**
+     * Required with code when role, departmentId, supervisorId, or isActive actually changes.
+     * @minLength 1
+     * @maxLength 1024
+     */
   currentPassword?: string;
-  /** Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code. */
+  /**
+     * Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code.
+     * @minLength 1
+     * @maxLength 128
+     */
   code?: string;
 }
 

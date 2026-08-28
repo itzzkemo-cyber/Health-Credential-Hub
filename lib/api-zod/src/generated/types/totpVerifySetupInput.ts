@@ -8,5 +8,9 @@
 
 export interface TotpVerifySetupInput {
   setupToken: string;
+  /**
+     * @minLength 1
+     * @maxLength 128
+     */
   code: string;
 }

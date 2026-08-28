@@ -13,8 +13,10 @@ import { Label } from "@/components/ui/label";
 import { useLanguage } from "@/lib/language-context";
 import {
   consumeRegistrationToken,
+  createRegistrationSubmission,
   focusRegistrationSuccess,
-  getRegistrationPasswordError,
+  getRegistrationApiFailure,
+  REGISTRATION_PASSWORD_MAX_LENGTH,
 } from "./register-state";
 
 export default function Register() {
@@ -42,22 +44,19 @@ export default function Register() {
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const validationError = getRegistrationPasswordError(
+    const submission = createRegistrationSubmission(
+      token,
       password,
       confirmation,
     );
-    if (validationError) {
-      setFeedbackKey(
-        validationError === "mismatch"
-          ? "register.mismatch"
-          : "register.weak_password",
-      );
+    if (!submission.ok) {
+      setFeedbackKey(submission.feedbackKey);
       return;
     }
 
     setFeedbackKey(null);
     acceptInvitation.mutate(
-      { data: { token, password } },
+      { data: submission.data },
       {
         onSuccess: () => {
           setToken("");
@@ -71,22 +70,15 @@ export default function Register() {
             error instanceof ApiError
               ? (error.data as { code?: string } | null)?.code
               : undefined;
+          const failure = getRegistrationApiFailure(code);
           setPassword("");
           setConfirmation("");
           acceptInvitation.reset();
-          if (code === "weak_password") {
-            setFeedbackKey("register.weak_password");
-            return;
-          }
-          if (code === "invalid_invitation") {
+          if (failure.invalidatesInvitation) {
             setInvitationInvalid(true);
             setToken("");
           }
-          setFeedbackKey(
-            code === "invalid_invitation"
-              ? "register.invalid_hint"
-              : "register.failed",
-          );
+          setFeedbackKey(failure.feedbackKey);
         },
       },
     );
@@ -187,6 +179,7 @@ export default function Register() {
                       type="password"
                       required
                       minLength={12}
+                      maxLength={REGISTRATION_PASSWORD_MAX_LENGTH}
                       autoComplete="new-password"
                       dir="ltr"
                       className="min-h-11"
@@ -213,6 +206,7 @@ export default function Register() {
                       type="password"
                       required
                       minLength={12}
+                      maxLength={REGISTRATION_PASSWORD_MAX_LENGTH}
                       autoComplete="new-password"
                       dir="ltr"
                       className="min-h-11"

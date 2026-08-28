@@ -1506,6 +1506,12 @@ components:
       properties:
         status:
           type: string
+        releaseSha:
+          type: string
+          minLength: 7
+          maxLength: 40
+          pattern: "^[0-9a-f]{7,40}$"
+          description: Public Git commit identifier for the running release, when available.
         emailDelivery:
           type: string
           enum: [configured, disabled, misconfigured]
@@ -1518,6 +1524,12 @@ components:
       properties:
         status:
           type: string
+        releaseSha:
+          type: string
+          minLength: 7
+          maxLength: 40
+          pattern: "^[0-9a-f]{7,40}$"
+          description: Public Git commit identifier for the running release, when available.
         database:
           type: string
         objectStorage:
@@ -1543,6 +1555,9 @@ components:
           type: string
         password:
           type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
 
     AuthResponse:
       type: object
@@ -1567,6 +1582,8 @@ components:
         currentPassword:
           type: string
           format: password
+          minLength: 1
+          maxLength: 1024
 
     TotpSetupData:
       type: object
@@ -1589,6 +1606,8 @@ components:
           type: string
         code:
           type: string
+          minLength: 1
+          maxLength: 128
 
     TotpActivation:
       type: object
@@ -1607,6 +1626,8 @@ components:
           type: string
         code:
           type: string
+          minLength: 1
+          maxLength: 128
 
     TotpConfirmInput:
       type: object
@@ -1614,8 +1635,13 @@ components:
       properties:
         currentPassword:
           type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
         code:
           type: string
+          minLength: 1
+          maxLength: 128
 
     AdminStepUpInput:
       type: object
@@ -1642,8 +1668,13 @@ components:
           type: number
         currentPassword:
           type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
         code:
           type: string
+          minLength: 1
+          maxLength: 128
 
     ChangePasswordInput:
       type: object
@@ -1651,9 +1682,13 @@ components:
       properties:
         currentPassword:
           type: string
+          format: password
+          minLength: 1
+          maxLength: 1024
         newPassword:
           type: string
           minLength: 12
+          maxLength: 1024
 
     ForgotPasswordInput:
       type: object
@@ -1678,6 +1713,7 @@ components:
         newPassword:
           type: string
           minLength: 12
+          maxLength: 1024
 
     AcceptEmployeeInvitationInput:
       type: object
@@ -2304,6 +2340,8 @@ components:
           jobTitle,
           jobTitleAr,
           employeeNumber,
+          currentPassword,
+          code,
         ]
       properties:
         name:
@@ -2315,6 +2353,7 @@ components:
         password:
           type: string
           minLength: 12
+          maxLength: 1024
         role:
           type: string
         departmentId:
@@ -2335,10 +2374,14 @@ components:
         currentPassword:
           type: string
           format: password
-          description: Required with code when provisioning a manager role.
+          minLength: 12
+          maxLength: 1024
+          description: Required with code for every direct account provisioning operation.
         code:
           type: string
-          description: Required with currentPassword when provisioning a manager role; accepts TOTP or a backup code.
+          minLength: 1
+          maxLength: 128
+          description: Required with currentPassword for every direct account provisioning operation; accepts TOTP or a backup code.
 
     CreateEmployeeInvitationInput:
       type: object
@@ -2428,6 +2471,7 @@ components:
           type: ["number", "null"]
         supervisorId:
           type: ["number", "null"]
+          description: Required when changing the role of an employee who already has a supervisor; send the existing supervisor ID to revalidate it atomically, or null to clear it.
         jobTitle:
           type: string
         jobTitleAr:
@@ -2439,9 +2483,13 @@ components:
         currentPassword:
           type: string
           format: password
+          minLength: 1
+          maxLength: 1024
           description: Required with code when role, departmentId, supervisorId, or isActive actually changes.
         code:
           type: string
+          minLength: 1
+          maxLength: 128
           description: Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code.
 
     # Department

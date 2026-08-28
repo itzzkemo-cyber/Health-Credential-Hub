@@ -455,20 +455,67 @@ describe("administrative employee mutations", () => {
     );
   });
 
+  it("requires atomic supervisor revalidation when changing a role with an existing supervisor", async () => {
+    testState.target.supervisorId = 3;
+
+    const response = await request("PATCH", "/employees/2", {
+      role: "supervisor",
+      currentPassword: "admin-password",
+      code: "123456",
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      code: "supervisor_revalidation_required",
+      message:
+        "Include supervisorId when changing the role of an employee who already has a supervisor",
+      messageAr: "أرسل معرّف المشرف عند تغيير دور موظف لديه مشرف حاليًا",
+    });
+    expect(testState.lockedUserBatches).toEqual([
+      { ids: [1, 2], orderBy: "users.id", strength: "update" },
+    ]);
+    expect(testState.committedUpdate).toBeNull();
+    expect(testState.committedAudit).toBeNull();
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       label: "employee",
+      targetRole: "employee",
       supervisor: { id: 3, role: "employee", isActive: true },
     },
     {
       label: "inactive manager",
+      targetRole: "employee",
       supervisor: { id: 3, role: "supervisor", isActive: false },
+    },
+    {
+      label: "equal-ranked manager",
+      targetRole: "supervisor",
+      supervisor: { id: 3, role: "supervisor", isActive: true },
+    },
+    {
+      label: "lower-ranked manager",
+      targetRole: "department_manager",
+      supervisor: { id: 3, role: "supervisor", isActive: true },
+    },
+    {
+      label: "cross-facility manager",
+      targetRole: "employee",
+      supervisor: {
+        id: 3,
+        role: "supervisor",
+        isActive: true,
+        facilityId: 99,
+      },
     },
   ])(
     "rejects assigning an ineligible $label supervisor",
-    async ({ supervisor }) => {
+    async ({ supervisor, targetRole }) => {
+      testState.target.role = targetRole;
       testState.extraUsers = [
-        { ...supervisor, facilityId: 10, sessionVersion: 1 },
+        { facilityId: 10, ...supervisor, sessionVersion: 1 },
       ];
 
       const response = await request("PATCH", "/employees/2", {
@@ -478,7 +525,7 @@ describe("administrative employee mutations", () => {
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({
         message:
-          "Supervisor must be an active non-employee in the employee facility",
+          "Supervisor must be an active higher-ranked account in the employee facility",
       });
       expect(testState.transactionCount).toBe(1);
       expect(testState.committedUpdate).toBeNull();

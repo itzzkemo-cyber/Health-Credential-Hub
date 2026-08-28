@@ -414,6 +414,7 @@ function PasswordField({
           onChange={(event) => onChange(event.target.value)}
           required
           minLength={minLength}
+          maxLength={1024}
           autoComplete={autoComplete}
           aria-describedby={describedBy}
           dir="ltr"

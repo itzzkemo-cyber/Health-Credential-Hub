@@ -31,6 +31,10 @@ import { consumeSecondFactor } from "../lib/secondFactor";
 import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
 import { rateLimit } from "../lib/rateLimit";
 import {
+  hasAllowedPasswordInputLength,
+  hasAllowedPasswordLength,
+} from "../lib/passwordPolicy";
+import {
   createEmailIdempotencyKey,
   isEmailConfigured,
   sendEmail,
@@ -53,6 +57,7 @@ import {
 import {
   canAssignRole,
   canManageTarget,
+  canSuperviseTarget,
   isUserInScope,
 } from "../lib/roleHierarchy";
 
@@ -204,168 +209,178 @@ router.get("/employees", async (req, res) => {
   res.json(result);
 });
 
-router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
-  const requestUser = getUser(req);
-  const body = req.body as Record<string, unknown>;
-  const currentPassword =
-    typeof body.currentPassword === "string" ? body.currentPassword : "";
-  const stepUpCode = typeof body.code === "string" ? body.code.trim() : "";
-  const required = [
-    "name",
-    "nameAr",
-    "email",
-    "password",
-    "role",
-    "jobTitle",
-    "jobTitleAr",
-    "employeeNumber",
-  ];
-  for (const f of required) {
-    if (!body[f] || typeof body[f] !== "string") {
-      res.status(400).json({ message: `Missing required field: ${f}` });
+router.post(
+  "/employees",
+  requireRole(...ADMIN_ROLES),
+  employeeStepUpRateLimit,
+  async (req, res) => {
+    const requestUser = getUser(req);
+    const body = req.body as Record<string, unknown>;
+    const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
+      ? body.currentPassword
+      : "";
+    const stepUpCode = requiredTrimmedString(body, "code", 128) ?? "";
+    const required = [
+      "name",
+      "nameAr",
+      "email",
+      "password",
+      "role",
+      "jobTitle",
+      "jobTitleAr",
+      "employeeNumber",
+    ];
+    for (const f of required) {
+      if (!body[f] || typeof body[f] !== "string") {
+        res.status(400).json({ message: `Missing required field: ${f}` });
+        return;
+      }
+    }
+    const role = body.role as string;
+    if (!USER_ROLES.includes(role as User["role"])) {
+      res.status(400).json({ message: `Invalid role: ${role}` });
       return;
     }
-  }
-  const role = body.role as string;
-  if (!USER_ROLES.includes(role as User["role"])) {
-    res.status(400).json({ message: `Invalid role: ${role}` });
-    return;
-  }
-  const email = (body.email as string).toLowerCase().trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    res.status(400).json({ message: "A valid email address is required" });
-    return;
-  }
-  if ((body.password as string).length < 12) {
-    res
-      .status(400)
-      .json({ message: "Password must contain at least 12 characters" });
-    return;
-  }
-  const requestedFacilityId =
-    body.facilityId != null ? Number(body.facilityId) : null;
-  const facilityInputIsValid =
-    requestedFacilityId == null ||
-    (Number.isInteger(requestedFacilityId) && requestedFacilityId > 0);
-  const departmentId =
-    body.departmentId != null ? Number(body.departmentId) : null;
-  if (
-    departmentId != null &&
-    (!Number.isInteger(departmentId) || departmentId <= 0)
-  ) {
-    res
-      .status(400)
-      .json({ message: "departmentId must be a positive integer" });
-    return;
-  }
-  const supervisorId =
-    body.supervisorId != null ? Number(body.supervisorId) : null;
-  if (
-    supervisorId != null &&
-    (!Number.isInteger(supervisorId) || supervisorId <= 0)
-  ) {
-    res
-      .status(400)
-      .json({ message: "supervisorId must be a positive integer" });
-    return;
-  }
-  const passwordHash = await hashPassword(body.password as string);
-  let result;
-  try {
-    result = await db.transaction(async (tx) => {
-      // Department retirement locks the department before its members. Follow
-      // the same global order so a department cannot be deleted between the
-      // eligibility check and the employee insert.
-      const department =
-        departmentId == null
-          ? null
-          : (
-              await tx
-                .select({
-                  id: departmentsTable.id,
-                  facilityId: departmentsTable.facilityId,
-                })
-                .from(departmentsTable)
-                .where(
-                  and(
-                    eq(departmentsTable.id, departmentId),
-                    isNull(departmentsTable.deletedAt),
-                  ),
-                )
-                .for("key share")
-            )[0];
+    const email = (body.email as string).toLowerCase().trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      res.status(400).json({ message: "A valid email address is required" });
+      return;
+    }
+    if (!hasAllowedPasswordLength(body.password)) {
+      res.status(400).json({
+        message: "Password must contain between 12 and 1024 characters",
+      });
+      return;
+    }
+    const requestedFacilityId =
+      body.facilityId != null ? Number(body.facilityId) : null;
+    const facilityInputIsValid =
+      requestedFacilityId == null ||
+      (Number.isInteger(requestedFacilityId) && requestedFacilityId > 0);
+    const departmentId =
+      body.departmentId != null ? Number(body.departmentId) : null;
+    if (
+      departmentId != null &&
+      (!Number.isInteger(departmentId) || departmentId <= 0)
+    ) {
+      res
+        .status(400)
+        .json({ message: "departmentId must be a positive integer" });
+      return;
+    }
+    const supervisorId =
+      body.supervisorId != null ? Number(body.supervisorId) : null;
+    if (
+      supervisorId != null &&
+      (!Number.isInteger(supervisorId) || supervisorId <= 0)
+    ) {
+      res
+        .status(400)
+        .json({ message: "supervisorId must be a positive integer" });
+      return;
+    }
+    const passwordHash = await hashPassword(body.password as string);
+    let result;
+    try {
+      result = await db.transaction(async (tx) => {
+        // Department retirement locks the department before its members. Follow
+        // the same global order so a department cannot be deleted between the
+        // eligibility check and the employee insert.
+        const department =
+          departmentId == null
+            ? null
+            : (
+                await tx
+                  .select({
+                    id: departmentsTable.id,
+                    facilityId: departmentsTable.facilityId,
+                  })
+                  .from(departmentsTable)
+                  .where(
+                    and(
+                      eq(departmentsTable.id, departmentId),
+                      isNull(departmentsTable.deletedAt),
+                    ),
+                  )
+                  .for("key share")
+              )[0];
 
-      const userIds = [requestUser.id, ...(supervisorId ? [supervisorId] : [])]
-        .filter((value, index, values) => values.indexOf(value) === index)
-        .sort((left, right) => left - right);
-      const lockedUsers = await tx
-        .select()
-        .from(usersTable)
-        .where(inArray(usersTable.id, userIds))
-        .orderBy(usersTable.id)
-        .for("update");
-      const actor = lockedUsers.find(
-        (candidate) => candidate.id === requestUser.id,
-      );
-      if (!isFreshActiveSessionActor(actor, requestUser)) {
-        return { kind: "unauthorized" as const };
-      }
-      if (!ADMIN_ROLES.includes(actor.role)) {
-        return { kind: "forbidden" as const };
-      }
-      if (!canAssignRole(actor, role as User["role"])) {
-        return { kind: "role_forbidden" as const };
-      }
-
-      const facilityId =
-        actor.role === "system_admin" && requestedFacilityId != null
-          ? requestedFacilityId
-          : actor.facilityId;
-      if (
-        !Number.isInteger(facilityId) ||
-        facilityId <= 0 ||
-        (actor.role === "system_admin" && !facilityInputIsValid)
-      ) {
-        return { kind: "invalid_facility_id" as const };
-      }
-      const facility = await tx
-        .select({ id: facilitiesTable.id })
-        .from(facilitiesTable)
-        .where(eq(facilitiesTable.id, facilityId));
-      if (facility.length === 0) {
-        return { kind: "facility_not_found" as const };
-      }
-      if (
-        departmentId != null &&
-        (!department || department.facilityId !== facilityId)
-      ) {
-        return { kind: "department_not_found" as const };
-      }
-
-      if (supervisorId != null) {
-        const supervisor = lockedUsers.find(
-          (candidate) => candidate.id === supervisorId,
+        const userIds = [
+          requestUser.id,
+          ...(supervisorId ? [supervisorId] : []),
+        ]
+          .filter((value, index, values) => values.indexOf(value) === index)
+          .sort((left, right) => left - right);
+        const lockedUsers = await tx
+          .select()
+          .from(usersTable)
+          .where(inArray(usersTable.id, userIds))
+          .orderBy(usersTable.id)
+          .for("update");
+        const actor = lockedUsers.find(
+          (candidate) => candidate.id === requestUser.id,
         );
-        if (
-          !supervisor ||
-          supervisor.facilityId !== facilityId ||
-          supervisor.role === "employee" ||
-          !supervisor.isActive
-        ) {
-          return { kind: "invalid_supervisor" as const };
+        if (!isFreshActiveSessionActor(actor, requestUser)) {
+          return { kind: "unauthorized" as const };
         }
-      }
+        if (!ADMIN_ROLES.includes(actor.role)) {
+          return { kind: "forbidden" as const };
+        }
+        if (!canAssignRole(actor, role as User["role"])) {
+          return { kind: "role_forbidden" as const };
+        }
 
-      const existing = await tx
-        .select({ id: usersTable.id })
-        .from(usersTable)
-        .where(eq(usersTable.email, email));
-      if (existing.length > 0) return { kind: "email_conflict" as const };
+        const facilityId =
+          actor.role === "system_admin" && requestedFacilityId != null
+            ? requestedFacilityId
+            : actor.facilityId;
+        if (
+          !Number.isInteger(facilityId) ||
+          facilityId <= 0 ||
+          (actor.role === "system_admin" && !facilityInputIsValid)
+        ) {
+          return { kind: "invalid_facility_id" as const };
+        }
+        const facility = await tx
+          .select({ id: facilitiesTable.id })
+          .from(facilitiesTable)
+          .where(eq(facilitiesTable.id, facilityId));
+        if (facility.length === 0) {
+          return { kind: "facility_not_found" as const };
+        }
+        if (
+          departmentId != null &&
+          (!department || department.facilityId !== facilityId)
+        ) {
+          return { kind: "department_not_found" as const };
+        }
 
-      // Provisioning a role that can act on other employees is a privileged
-      // operation. Re-prove both factors while the actor row is locked; the
-      // second factor is consumed in this same transaction so replay loses.
-      if (MANAGER_ROLES.includes(role as User["role"])) {
+        if (supervisorId != null) {
+          const supervisor = lockedUsers.find(
+            (candidate) => candidate.id === supervisorId,
+          );
+          if (
+            !supervisor ||
+            supervisor.facilityId !== facilityId ||
+            !canSuperviseTarget(supervisor, {
+              facilityId,
+              role: role as User["role"],
+            })
+          ) {
+            return { kind: "invalid_supervisor" as const };
+          }
+        }
+
+        const existing = await tx
+          .select({ id: usersTable.id })
+          .from(usersTable)
+          .where(eq(usersTable.email, email));
+        if (existing.length > 0) return { kind: "email_conflict" as const };
+
+        // Direct password provisioning is exceptional; invitation onboarding is
+        // the default. Re-prove both administrator factors for every direct
+        // account, even the least-privileged employee role. The route-wide
+        // limiter bounds guesses and the factor is consumed transactionally.
         if (!actor.totpEnabled || !actor.totpSecret) {
           return { kind: "admin_mfa_required" as const };
         }
@@ -379,108 +394,108 @@ router.post("/employees", requireRole(...ADMIN_ROLES), async (req, res) => {
           ? await consumeSecondFactor(tx, actor, stepUpCode)
           : null;
         if (!steppedUp) return { kind: "step_up_failed" as const };
-      }
 
-      const inserted = await tx
-        .insert(usersTable)
-        .values({
-          email,
-          passwordHash,
-          name: body.name as string,
-          nameAr: body.nameAr as string,
-          role: role as User["role"],
-          departmentId,
-          supervisorId,
-          facilityId,
-          jobTitle: body.jobTitle as string,
-          jobTitleAr: body.jobTitleAr as string,
-          employeeNumber: body.employeeNumber as string,
-          phone: (body.phone as string) ?? null,
-          isActive: true,
-          mustChangePassword: true,
-        })
-        .returning();
-      const insertedUser = inserted[0];
-      if (!insertedUser) throw new Error("Employee insert returned no row");
+        const inserted = await tx
+          .insert(usersTable)
+          .values({
+            email,
+            passwordHash,
+            name: body.name as string,
+            nameAr: body.nameAr as string,
+            role: role as User["role"],
+            departmentId,
+            supervisorId,
+            facilityId,
+            jobTitle: body.jobTitle as string,
+            jobTitleAr: body.jobTitleAr as string,
+            employeeNumber: body.employeeNumber as string,
+            phone: (body.phone as string) ?? null,
+            isActive: true,
+            mustChangePassword: true,
+          })
+          .returning();
+        const insertedUser = inserted[0];
+        if (!insertedUser) throw new Error("Employee insert returned no row");
 
-      await tx.insert(auditLogsTable).values({
-        userId: actor.id,
-        facilityId: insertedUser.facilityId,
-        userName: actor.name,
-        userNameAr: actor.nameAr,
-        action: "Added employee",
-        actionAr: "إضافة موظف",
-        target: insertedUser.name,
-        targetAr: insertedUser.nameAr,
-        details: null,
-        ipAddress: req.ip ?? null,
+        await tx.insert(auditLogsTable).values({
+          userId: actor.id,
+          facilityId: insertedUser.facilityId,
+          userName: actor.name,
+          userNameAr: actor.nameAr,
+          action: "Added employee",
+          actionAr: "إضافة موظف",
+          target: insertedUser.name,
+          targetAr: insertedUser.nameAr,
+          details: null,
+          ipAddress: req.ip ?? null,
+        });
+        return { kind: "created" as const, user: insertedUser };
       });
-      return { kind: "created" as const, user: insertedUser };
-    });
-  } catch (error) {
-    if (isPostgresUniqueViolation(error)) {
+    } catch (error) {
+      if (isPostgresUniqueViolation(error)) {
+        res.status(409).json({ message: "Email already registered" });
+        return;
+      }
+      throw error;
+    }
+    if (result.kind === "forbidden") {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
+    if (result.kind === "unauthorized") {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    if (result.kind === "admin_mfa_required") {
+      res.status(403).json({
+        code: "admin_mfa_required",
+        message: "Enable two-factor authentication on your admin account first",
+        messageAr: "فعّل المصادقة الثنائية لحساب المسؤول أولاً",
+      });
+      return;
+    }
+    if (result.kind === "step_up_failed") {
+      res.status(403).json({
+        code: "step_up_failed",
+        message: "Administrator step-up verification failed",
+        messageAr: "فشل التحقق الإضافي من هوية المسؤول",
+      });
+      return;
+    }
+    if (result.kind === "role_forbidden") {
+      res
+        .status(403)
+        .json({ message: "You are not allowed to assign this role" });
+      return;
+    }
+    if (result.kind === "invalid_facility_id") {
+      res.status(400).json({ message: "A valid facilityId is required" });
+      return;
+    }
+    if (result.kind === "facility_not_found") {
+      res.status(400).json({ message: "Facility not found" });
+      return;
+    }
+    if (result.kind === "department_not_found") {
+      res
+        .status(400)
+        .json({ message: "Department not found in the target facility" });
+      return;
+    }
+    if (result.kind === "invalid_supervisor") {
+      res.status(400).json({
+        message:
+          "Supervisor must be an active higher-ranked account in the target facility",
+      });
+      return;
+    }
+    if (result.kind === "email_conflict") {
       res.status(409).json({ message: "Email already registered" });
       return;
     }
-    throw error;
-  }
-  if (result.kind === "forbidden") {
-    res.status(403).json({ message: "Forbidden" });
-    return;
-  }
-  if (result.kind === "unauthorized") {
-    res.status(401).json({ message: "Unauthorized" });
-    return;
-  }
-  if (result.kind === "admin_mfa_required") {
-    res.status(403).json({
-      code: "admin_mfa_required",
-      message: "Enable two-factor authentication on your admin account first",
-      messageAr: "فعّل المصادقة الثنائية لحساب المسؤول أولاً",
-    });
-    return;
-  }
-  if (result.kind === "step_up_failed") {
-    res.status(403).json({
-      code: "step_up_failed",
-      message: "Administrator step-up verification failed",
-      messageAr: "فشل التحقق الإضافي من هوية المسؤول",
-    });
-    return;
-  }
-  if (result.kind === "role_forbidden") {
-    res
-      .status(403)
-      .json({ message: "You are not allowed to assign this role" });
-    return;
-  }
-  if (result.kind === "invalid_facility_id") {
-    res.status(400).json({ message: "A valid facilityId is required" });
-    return;
-  }
-  if (result.kind === "facility_not_found") {
-    res.status(400).json({ message: "Facility not found" });
-    return;
-  }
-  if (result.kind === "department_not_found") {
-    res
-      .status(400)
-      .json({ message: "Department not found in the target facility" });
-    return;
-  }
-  if (result.kind === "invalid_supervisor") {
-    res.status(400).json({
-      message:
-        "Supervisor must be an active non-employee in the target facility",
-    });
-    return;
-  }
-  if (result.kind === "email_conflict") {
-    res.status(409).json({ message: "Email already registered" });
-    return;
-  }
-  res.status(201).json(serializeUser(result.user));
-});
+    res.status(201).json(serializeUser(result.user));
+  },
+);
 
 /**
  * Invite-only employee onboarding. Organization/profile fields are captured
@@ -526,12 +541,9 @@ router.post(
     const jobTitle = requiredTrimmedString(body, "jobTitle", 200);
     const jobTitleAr = requiredTrimmedString(body, "jobTitleAr", 200);
     const employeeNumber = requiredTrimmedString(body, "employeeNumber", 100);
-    const currentPassword =
-      typeof body.currentPassword === "string" &&
-      body.currentPassword.length > 0 &&
-      body.currentPassword.length <= 1024
-        ? body.currentPassword
-        : null;
+    const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
+      ? body.currentPassword
+      : null;
     const stepUpCode = requiredTrimmedString(body, "code", 128);
     const phoneValue = body.phone;
     const phone =
@@ -696,8 +708,10 @@ router.post(
           if (
             !supervisor ||
             supervisor.facilityId !== facilityId ||
-            supervisor.role === "employee" ||
-            !supervisor.isActive
+            !canSuperviseTarget(supervisor, {
+              facilityId,
+              role: "employee",
+            })
           ) {
             return { kind: "invalid_supervisor" as const };
           }
@@ -815,7 +829,7 @@ router.post(
     if (result.kind === "invalid_supervisor") {
       res.status(400).json({
         message:
-          "Supervisor must be an active non-employee in the target facility",
+          "Supervisor must be an active higher-ranked account in the target facility",
       });
       return;
     }
@@ -1021,12 +1035,9 @@ router.delete(
       res.status(400).json({ message: "Invalid request" });
       return;
     }
-    const currentPassword =
-      typeof body.currentPassword === "string" &&
-      body.currentPassword.length > 0 &&
-      body.currentPassword.length <= 1024
-        ? body.currentPassword
-        : null;
+    const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
+      ? body.currentPassword
+      : null;
     const stepUpCode = requiredTrimmedString(body, "code", 128);
 
     const result = await db.transaction(async (tx) => {
@@ -1203,9 +1214,10 @@ router.patch(
       return;
     }
     const body = req.body as Record<string, unknown>;
-    const currentPassword =
-      typeof body.currentPassword === "string" ? body.currentPassword : "";
-    const stepUpCode = typeof body.code === "string" ? body.code.trim() : "";
+    const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
+      ? body.currentPassword
+      : "";
+    const stepUpCode = requiredTrimmedString(body, "code", 128) ?? "";
     const changesOrganization = ACCOUNT_AUDIT_FIELDS.some((field) =>
       Object.prototype.hasOwnProperty.call(body, field),
     );
@@ -1322,6 +1334,20 @@ router.patch(
         return { kind: "admin_required" as const };
       }
 
+      // A role change can make an existing supervisor relationship invalid.
+      // When a supervisor is already assigned, require the caller to resubmit
+      // that supervisor (or clear it) so the row is included in the stable
+      // lock set above and the relationship is revalidated atomically.
+      if (
+        roleWasRequested &&
+        requestedRole &&
+        requestedRole !== target.role &&
+        target.supervisorId != null &&
+        !supervisorWasRequested
+      ) {
+        return { kind: "supervisor_revalidation_required" as const };
+      }
+
       const patch: Record<string, unknown> = { ...profilePatch };
       let invalidatesTargetSessions = false;
       if (roleWasRequested) {
@@ -1366,8 +1392,10 @@ router.patch(
           if (
             !supervisor ||
             supervisor.facilityId !== target.facilityId ||
-            supervisor.role === "employee" ||
-            !supervisor.isActive
+            !canSuperviseTarget(supervisor, {
+              facilityId: target.facilityId,
+              role: requestedRole ?? target.role,
+            })
           ) {
             return { kind: "invalid_supervisor" as const };
           }
@@ -1514,6 +1542,15 @@ router.patch(
         .json({ message: "supervisorId must be a positive integer" });
       return;
     }
+    if (result.kind === "supervisor_revalidation_required") {
+      res.status(400).json({
+        code: "supervisor_revalidation_required",
+        message:
+          "Include supervisorId when changing the role of an employee who already has a supervisor",
+        messageAr: "أرسل معرّف المشرف عند تغيير دور موظف لديه مشرف حاليًا",
+      });
+      return;
+    }
     if (result.kind === "self_supervisor") {
       res
         .status(400)
@@ -1523,7 +1560,7 @@ router.patch(
     if (result.kind === "invalid_supervisor") {
       res.status(400).json({
         message:
-          "Supervisor must be an active non-employee in the employee facility",
+          "Supervisor must be an active higher-ranked account in the employee facility",
       });
       return;
     }
@@ -1551,9 +1588,10 @@ router.delete(
       typeof req.body === "object" && req.body !== null
         ? (req.body as Record<string, unknown>)
         : {};
-    const currentPassword =
-      typeof body.currentPassword === "string" ? body.currentPassword : "";
-    const stepUpCode = typeof body.code === "string" ? body.code.trim() : "";
+    const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
+      ? body.currentPassword
+      : "";
+    const stepUpCode = requiredTrimmedString(body, "code", 128) ?? "";
     const id = Number(req.params.id);
     if (!Number.isSafeInteger(id) || id < 1) {
       res.status(404).json({ message: "Employee not found" });
@@ -1681,9 +1719,10 @@ async function setActive(
     typeof req.body === "object" && req.body !== null
       ? (req.body as Record<string, unknown>)
       : {};
-  const currentPassword =
-    typeof body.currentPassword === "string" ? body.currentPassword : "";
-  const stepUpCode = typeof body.code === "string" ? body.code.trim() : "";
+  const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
+    ? body.currentPassword
+    : "";
+  const stepUpCode = requiredTrimmedString(body, "code", 128) ?? "";
   const id = Number((req.params as Record<string, string>).id);
   if (!Number.isSafeInteger(id) || id < 1) {
     res.status(404).json({ message: "Employee not found" });

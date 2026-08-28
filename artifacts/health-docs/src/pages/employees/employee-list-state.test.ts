@@ -61,20 +61,23 @@ describe("employee list presentation", () => {
     expect(getComplianceRate(120)).toBe(100);
   });
 
-  it("builds the scoped API payload without adding a facility or generated password", () => {
-    const payload = buildEmployeeInput({
-      name: "  Noura Alqahtani ",
-      nameAr: " نورة القحطاني ",
-      email: " Noura@Hospital.SA ",
-      password: "manager-entered-secret",
-      role: "employee",
-      departmentId: "4",
-      supervisorId: "8",
-      facilityId: "3",
-      jobTitle: " Nurse ",
-      jobTitleAr: " ممرضة ",
-      employeeNumber: " N-204 ",
-    });
+  it("builds the scoped direct-provisioning payload with required step-up", () => {
+    const payload = buildEmployeeInput(
+      {
+        name: "  Noura Alqahtani ",
+        nameAr: " نورة القحطاني ",
+        email: " Noura@Hospital.SA ",
+        password: "manager-entered-secret",
+        role: "employee",
+        departmentId: "4",
+        supervisorId: "8",
+        facilityId: "3",
+        jobTitle: " Nurse ",
+        jobTitleAr: " ممرضة ",
+        employeeNumber: " N-204 ",
+      },
+      { currentPassword: "administrator password", code: "123456" },
+    );
 
     expect(payload).toEqual({
       name: "Noura Alqahtani",
@@ -88,38 +91,44 @@ describe("employee list presentation", () => {
       jobTitle: "Nurse",
       jobTitleAr: "ممرضة",
       employeeNumber: "N-204",
+      currentPassword: "administrator password",
+      code: "123456",
     });
   });
 
   it("omits the facility when the scoped administrator does not select one", () => {
-    const payload = buildEmployeeInput({
-      name: "Noura",
-      nameAr: "نورة",
-      email: "noura@hospital.sa",
-      password: "manager-entered-secret",
-      role: "employee",
-      departmentId: "",
-      supervisorId: "",
-      facilityId: "",
-      jobTitle: "Nurse",
-      jobTitleAr: "ممرضة",
-      employeeNumber: "N-204",
-    });
+    const payload = buildEmployeeInput(
+      {
+        name: "Noura",
+        nameAr: "نورة",
+        email: "noura@hospital.sa",
+        password: "manager-entered-secret",
+        role: "employee",
+        departmentId: "",
+        supervisorId: "",
+        facilityId: "",
+        jobTitle: "Nurse",
+        jobTitleAr: "ممرضة",
+        employeeNumber: "N-204",
+      },
+      { currentPassword: "administrator password", code: "123456" },
+    );
 
     expect(payload).not.toHaveProperty("facilityId");
     expect(payload.departmentId).toBeNull();
     expect(payload.supervisorId).toBeNull();
   });
 
-  it("requires step-up for every role that can manage another account", () => {
-    expect(requiresEmployeeCreateStepUp("employee")).toBe(false);
+  it("requires step-up for every direct account role and fails closed for unknown values", () => {
+    expect(requiresEmployeeCreateStepUp("employee")).toBe(true);
     expect(requiresEmployeeCreateStepUp("supervisor")).toBe(true);
     expect(requiresEmployeeCreateStepUp("department_manager")).toBe(true);
     expect(requiresEmployeeCreateStepUp("hospital_admin")).toBe(true);
     expect(requiresEmployeeCreateStepUp("system_admin")).toBe(true);
+    expect(requiresEmployeeCreateStepUp("unexpected-role")).toBe(true);
   });
 
-  it("adds step-up credentials only when the submit handler supplies them", () => {
+  it("always includes direct-provisioning step-up credentials without altering the password", () => {
     const form = {
       name: "Noura",
       nameAr: "نورة",
@@ -134,7 +143,6 @@ describe("employee list presentation", () => {
       employeeNumber: "N-204",
     };
 
-    expect(buildEmployeeInput(form)).not.toHaveProperty("currentPassword");
     expect(
       buildEmployeeInput(form, {
         currentPassword: " administrator password ",
