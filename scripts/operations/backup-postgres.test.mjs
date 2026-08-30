@@ -155,7 +155,8 @@ test(
       "-l",
       path.join(base, "postgres.log"),
       "-o",
-      `-h 127.0.0.1 -p ${port}`,
+      // TCP only: Linux runners cannot write the system PostgreSQL socket dir.
+      `-h 127.0.0.1 -p ${port}${process.platform === "win32" ? "" : " -c unix_socket_directories=''"}`,
       "-w",
       "-t",
       "20",
