@@ -26,6 +26,22 @@
 | `git diff --check` and scoped staged secret/path pattern screen | Passed; no sensitive build/backup paths staged |
 | Linux Docker runtime | Not locally runnable: Docker/WSL unavailable. Required CI image build includes PDF child self-test |
 
+### Remote CI follow-up
+
+- Published the reviewed implementation as `84abec8`; the first Linux run
+  passed install, codegen, typecheck and tests, then failed starting the
+  disposable PostgreSQL cluster. The drills now disable Unix-domain sockets
+  on non-Windows hosts and use their existing loopback TCP clients, avoiding
+  reliance on a runner's system socket directory. Windows behavior is unchanged.
+- Commit `ff78416265a4b9118bbea4647a59c40b1eefc653` passed
+  [GitHub CI run 33342613206](https://github.com/wathaiqihealth/Health-Credential-Hub/actions/runs/33342613206)
+  on August 31. Both real PostgreSQL drills, API/web builds and the final Linux
+  Docker image check passed. The runtime-user PDF security self-test passed
+  inside that image; no production documents or secrets were used in CI.
+- The owner approved this exact repository's `main` branch and deployment
+  after CI. Render was instructed to deploy the tested `ff78416` commit, not
+  an unverified branch tip. Live readiness is checked separately below.
+
 Commands that failed under Windows filesystem/process sandboxing were rerun
 with explicit scoped execution approval; no test assertion or security control
 was weakened. Test databases, files and identities were synthetic and isolated.
@@ -70,14 +86,34 @@ were removed; production data was not deleted.
   `verified`, uploads `enabled`, email `configured`, OCR `disabled`. The release
   SHA remained `6358d773573b18559286b189a48843292e32426c`.
 
+## Deployment outcome — August 31, approximately 02:51 Riyadh
+
+- Render deployment `dep-daac2oon74is73afbagg` reported **Deploy succeeded / Live**
+  for `ff78416265a4b9118bbea4647a59c40b1eefc653` (1m45s). The public `/api/readyz`
+  response subsequently reported **ready** with that exact SHA, database `ok`,
+  object storage `verified`, uploads `enabled`, email `configured`, OCR `disabled`.
+- Reloading the owner's Chrome tab retained the authenticated System Admin
+  session and successfully loaded the employee directory after deployment.
+- The live own-profile upload form displayed JPEG/PNG/PDF with 8 MiB and five
+  PDF pages. Its file input accepted `image/jpeg,image/png,application/pdf`.
+  No personal file was selected or submitted; the document-specific upload
+  confirmation is still pending. This confirms the deployed form, not storage
+  round-trip acceptance.
+- Render's build log warned its linked repository credentials did not have
+  access, then successfully cloned the approved public repository. Review the
+  GitHub app/repository connection before making the repository private; no
+  additional GitHub app permissions were granted during this release.
+- No personal document, identity number, password, archive or provider secret
+  was committed to GitHub. Owner-file selection/inspection remained local;
+  live document submission is a separate, explicitly approved operation.
+
 ## Unfinished production gates
 
-1. The owner explicitly approved `wathaiqihealth/Health-Credential-Hub` on
-   `main` and Render deployment after successful CI on August 31. The earlier
-   target-approval hold is resolved. Publish the reviewed commit and pass remote
-   CI/Linux image checks before manual deployment; approval is not deployment.
-2. Verify matching live release SHA and a synthetic PDF upload/link/download
-   and cross-tenant denial on Render/Supabase after deployment.
+1. Repository approval, publication, remote CI/Linux checks, Render deployment
+   and matching live readiness SHA are now complete as recorded above.
+2. Complete approved PDF upload/link/download acceptance and cross-tenant
+   denial on Render/Supabase. Readiness and the Linux self-test are not a
+   substitute for end-to-end private-document acceptance.
 3. Provision the dedicated backup runner identity, independent encrypted
    destination and key escrow, approve a real write-freeze window, then take a
    live backup, restore it in an approved isolated environment, and activate
