@@ -149,6 +149,7 @@ describe("credential upload content verification", () => {
   it.each([
     ["image/png", TINY_PNG],
     ["image/jpeg", TINY_JPEG],
+    ["application/pdf", Buffer.from("%PDF-1.7\nsynthetic")],
   ])("accepts the real signature for %s", (contentType, bytes) => {
     expect(hasAllowedUploadSignature(bytes, contentType)).toBe(true);
   });
@@ -346,6 +347,32 @@ describe("controlled raster sanitizer", () => {
         },
       }),
     ).rejects.toBeInstanceOf(UploadSecurityUnavailableError);
+  });
+
+  it("fails readiness closed when PDF processing is unavailable", async () => {
+    await expect(
+      checkUploadSecurityReadiness({
+        env: rasterEnv,
+        pdfReadiness: async () => {
+          throw new Error("synthetic PDF dependency unavailable");
+        },
+      }),
+    ).rejects.toBeInstanceOf(UploadSecurityUnavailableError);
+  });
+
+  it("never falls back to raw PDF even for the legacy malware provider", async () => {
+    const bytes = Buffer.from("%PDF-1.7\nsynthetic");
+    const scanner = vi.fn();
+    await expect(
+      processUploadSecurity(bytes, "application/pdf", {
+        env: { UPLOAD_SECURITY_PROVIDER: "windows-defender" },
+        scanner,
+        pdfSanitizer: async () => {
+          throw new Error("synthetic PDF unavailable");
+        },
+      }),
+    ).rejects.toBeInstanceOf(UploadSecurityUnavailableError);
+    expect(scanner).not.toHaveBeenCalled();
   });
 });
 

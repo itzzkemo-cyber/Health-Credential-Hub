@@ -57,3 +57,9 @@ connect.lock
 
 # Temporary credentials emitted by google-github-actions/auth
 gha-creds-*.json
+
+# Security reports and backup/restore output may contain workforce data.
+strix_runs/
+/backups/
+/restore-drills/
+*.hchbak

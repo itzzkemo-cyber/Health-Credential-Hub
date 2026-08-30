@@ -100,6 +100,27 @@ describe("deferred credential submission", () => {
     expect(dependencies.onStage.mock.calls).toEqual([["upload"], ["create"]]);
   });
 
+  it("preserves PDF kind through the guarded upload and record creation", async () => {
+    const dependencies = createDependencies();
+    const pdfPrepared: PreparedCredentialFile = {
+      blob: new Blob(["synthetic-pdf"]),
+      contentType: "application/pdf",
+      kind: "pdf",
+    };
+    dependencies.prepareFile.mockResolvedValue(pdfPrepared);
+    await submitCredentialWithDeferredUpload({
+      ...dependencies,
+      file: new File(["synthetic-pdf"], "credential.pdf", {
+        type: "application/pdf",
+      }),
+    });
+    expect(dependencies.putUpload).toHaveBeenCalledWith(grant, pdfPrepared);
+    expect(dependencies.createCredential).toHaveBeenCalledWith({
+      objectPath: grant.objectPath,
+      kind: "pdf",
+    });
+  });
+
   it("reuses a reviewed OCR upload without sending the file twice", async () => {
     const dependencies = createDependencies();
     const existingUpload = {

@@ -106,7 +106,7 @@ vi.mock("../lib/objectStorage", () => ({
 }));
 
 vi.mock("../lib/uploadSecurity", () => ({
-  ALLOWED_UPLOAD_CONTENT_TYPE: /^(?:image\/jpeg|image\/png)$/,
+  ALLOWED_UPLOAD_CONTENT_TYPE: /^(?:image\/jpeg|image\/png|application\/pdf)$/,
   MAX_UPLOAD_BYTES: 8 * 1024 * 1024,
   UPLOAD_GRANT_TTL_MS: 15 * 60 * 1000,
   findActiveUploadGrant: mocks.findActiveUploadGrant,
@@ -301,6 +301,60 @@ describe("server-mediated private object upload route", () => {
       "image/jpeg",
       expectedSha256,
     );
+  });
+
+  it("stores only rebuilt PDF bytes with a PDF grant and finalized digest", async () => {
+    const pdfInput = Buffer.from("%PDF-1.7\nsynthetic-original");
+    const pdfOutput = Buffer.from("%PDF-1.7\nsynthetic-image-only-output");
+    const sha256 = createHash("sha256").update(pdfOutput).digest("hex");
+    mocks.processUploadSecurity.mockResolvedValue({
+      bytes: pdfOutput,
+      contentType: "application/pdf",
+      sha256,
+    });
+    mocks.validateUploadedObject.mockResolvedValue({
+      bytes: pdfOutput,
+      contentType: "application/pdf",
+      size: pdfOutput.length,
+      sha256,
+    });
+    const response = await put(pdfInput, {
+      "content-type": "application/pdf",
+      "if-none-match": "*",
+    });
+    expect(response.status).toBe(204);
+    expect(mocks.processUploadSecurity).toHaveBeenCalledWith(
+      pdfInput,
+      "application/pdf",
+    );
+    expect(mocks.writeServerMediatedObject).toHaveBeenCalledWith(
+      `/objects/uploads/${uploadId}`,
+      pdfOutput,
+      "application/pdf",
+      sha256,
+    );
+    expect(mocks.finalizeUploadGrantProcessing).toHaveBeenCalledWith(
+      19,
+      mocks.actor.id,
+      `/objects/uploads/${uploadId}`,
+      expect.any(String),
+      pdfOutput.length,
+      "application/pdf",
+      sha256,
+    );
+  });
+
+  it("does not persist rejected active PDF bytes or finalize their grant", async () => {
+    mocks.processUploadSecurity.mockRejectedValue(
+      new mocks.UploadSecurityRejectedError(),
+    );
+    const response = await put(
+      Buffer.from("%PDF-1.7\nsynthetic-active-content"),
+      { "content-type": "application/pdf", "if-none-match": "*" },
+    );
+    expect(response.status).toBe(422);
+    expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
+    expect(mocks.finalizeUploadGrantProcessing).not.toHaveBeenCalled();
   });
 
   it("fails closed before reading an upload when document intake is disabled", async () => {

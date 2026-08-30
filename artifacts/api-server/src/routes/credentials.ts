@@ -46,7 +46,6 @@ import {
   ObjectStorageService,
 } from "../lib/objectStorage";
 import {
-  ALLOWED_UPLOAD_CONTENT_TYPE,
   MAX_UPLOAD_BYTES,
   findActiveUploadGrant,
   validateUploadedObject,
@@ -188,8 +187,9 @@ router.get("/credentials/missing", async (req, res) => {
 const OCR_MODEL = "gemini-2.5-flash";
 // The integration accepts inline input data, capped at 8 MB.
 const MAX_OCR_BYTES = MAX_UPLOAD_BYTES;
-// Same explicit allowlist as the upload presign policy in storage.ts.
-const OCR_MIME_ALLOWLIST = ALLOWED_UPLOAD_CONTENT_TYPE;
+// Adding PDF intake must not silently expand external-processor disclosure.
+// PDF OCR stays unavailable until its separately approved integration exists.
+const OCR_MIME_ALLOWLIST = /^(?:image\/jpeg|image\/png)$/i;
 
 // Cheap in-memory per-user rate limit — every OCR call is a billed AI request.
 const OCR_RATE_LIMIT = 20;
@@ -644,6 +644,7 @@ router.post("/credentials", async (req, res) => {
       }
 
       let fileUrl: string | null = null;
+      let fileType: "image" | "pdf" | null = null;
       if (requestedFileUrl) {
         if (!requestedFileUrl.startsWith("/objects/")) {
           throw new InvalidCredentialFileError();
@@ -679,6 +680,8 @@ router.post("/credentials", async (req, res) => {
             throw new InvalidCredentialFileError();
           }
           await validateUploadedObject(objectFile, grant);
+          fileType =
+            grant.declaredContentType === "application/pdf" ? "pdf" : "image";
           const consumed = await tx
             .update(uploadGrantsTable)
             .set({ claimedAt: new Date() })
@@ -728,7 +731,7 @@ router.post("/credentials", async (req, res) => {
             issueDate,
             expiryDate,
             fileUrl,
-            fileType: (body.fileType as string) ?? null,
+            fileType,
             qrToken: crypto.randomBytes(16).toString("hex"),
             tags: Array.isArray(body.tags) ? (body.tags as string[]) : [],
             notes: (body.notes as string) ?? null,
@@ -987,6 +990,10 @@ router.patch("/credentials/:id", async (req, res) => {
       }
 
       const transactionPatch = { ...patch };
+      // Preview type is derived from verified storage, never a client label.
+      if ("fileType" in transactionPatch)
+        transactionPatch.fileType = current.fileType;
+      if (transactionPatch.fileUrl === null) transactionPatch.fileType = null;
       // A changed file is finalized only after the record and scope are
       // locked. Grant consumption rolls back with the DB transaction if GCS
       // validation/ACL or the credential update fails.
@@ -1030,6 +1037,8 @@ router.patch("/credentials/:id", async (req, res) => {
             throw new InvalidCredentialFileError();
           }
           await validateUploadedObject(objectFile, grant);
+          transactionPatch.fileType =
+            grant.declaredContentType === "application/pdf" ? "pdf" : "image";
           const consumed = await tx
             .update(uploadGrantsTable)
             .set({ claimedAt: new Date() })

@@ -19,6 +19,11 @@ async function buildAll() {
       index: path.resolve(artifactDir, "src/index.ts"),
       migrate: path.resolve(artifactDir, "src/migrate.ts"),
       "bootstrap-admin": path.resolve(artifactDir, "src/bootstrap-admin.ts"),
+      "pdf-sanitizer-worker": path.resolve(
+        artifactDir,
+        "src/pdf-sanitizer-worker.mjs",
+      ),
+      "check-pdf-security": path.resolve(artifactDir, "src/check-pdf-security.ts"),
       "automation-worker": path.resolve(
         artifactDir,
         "src/automation-worker.ts",
@@ -38,6 +43,8 @@ async function buildAll() {
     external: [
       "*.node",
       "sharp",
+      "pdfjs-dist",
+      "@napi-rs/canvas",
       "better-sqlite3",
       "sqlite3",
       "canvas",

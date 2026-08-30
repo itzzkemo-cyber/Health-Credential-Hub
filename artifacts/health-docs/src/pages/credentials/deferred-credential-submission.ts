@@ -6,8 +6,8 @@ export type CredentialSubmissionStage = "upload" | "create" | "cleanup";
 
 export interface PreparedCredentialFile {
   blob: Blob;
-  contentType: "image/jpeg" | "image/png";
-  kind: "image";
+  contentType: "image/jpeg" | "image/png" | "application/pdf";
+  kind: "image" | "pdf";
 }
 
 export interface CredentialUploadGrant {

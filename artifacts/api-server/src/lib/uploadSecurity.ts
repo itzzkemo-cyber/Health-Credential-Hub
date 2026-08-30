@@ -12,6 +12,11 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { and, eq, gt, isNotNull, isNull } from "drizzle-orm";
+import {
+  checkPdfSanitizerReadiness,
+  PdfRejectedError,
+  sanitizePdfInChild,
+} from "./pdfSanitizer";
 // sharp 0.35.0 ships lib/index.d.ts but its export map omits a `types`
 // condition. Keep the required runtime pinned while locally constraining the
 // small API surface used below until the upstream export map is corrected.
@@ -19,7 +24,10 @@ import { and, eq, gt, isNotNull, isNull } from "drizzle-orm";
 import sharp from "sharp";
 
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
-export const ALLOWED_UPLOAD_CONTENT_TYPE = /^(?:image\/jpeg|image\/png)$/i;
+export const ALLOWED_UPLOAD_CONTENT_TYPE =
+  /^(?:image\/jpeg|image\/png|application\/pdf)$/i;
+export type AllowedUploadContentType =
+  "image/jpeg" | "image/png" | "application/pdf";
 export const UPLOAD_GRANT_TTL_MS = 15 * 60 * 1000;
 export const CONTENT_SHA256_METADATA_KEY = "content-sha256";
 export const DEFAULT_MALWARE_SCAN_TIMEOUT_MS = 60_000;
@@ -98,7 +106,7 @@ export interface MalwareScannerReadinessOptions {
 
 export interface ProcessedUpload {
   bytes: Buffer;
-  contentType: typeof SANITIZED_CONTENT_TYPE | "image/png";
+  contentType: AllowedUploadContentType;
   sha256: string;
 }
 
@@ -108,6 +116,8 @@ export type RasterSanitizerRunner = (
 ) => Promise<Buffer>;
 
 export interface ProcessUploadSecurityOptions extends ScanUploadForMalwareOptions {
+  /** Explicit injection point for bounded PDF failure-path tests. */
+  pdfSanitizer?: (bytes: Buffer) => Promise<Buffer>;
   /** Explicit injection point for bounded failure-path tests. */
   rasterSanitizer?: RasterSanitizerRunner;
   /** Production always uses 15 seconds; tests may shorten the deadline. */
@@ -115,13 +125,15 @@ export interface ProcessUploadSecurityOptions extends ScanUploadForMalwareOption
 }
 
 export interface UploadSecurityReadinessOptions extends MalwareScannerReadinessOptions {
+  /** Explicit injection point for PDF readiness failure tests. */
+  pdfReadiness?: () => Promise<void>;
   /** Explicit injection point for readiness failure tests. */
   rasterSanitizer?: RasterSanitizerRunner;
 }
 
 export class UploadSecurityRejectedError extends Error {
   constructor() {
-    super("The uploaded image failed security processing");
+    super("The uploaded document failed security processing");
     this.name = "UploadSecurityRejectedError";
   }
 }
@@ -627,9 +639,41 @@ export async function processUploadSecurity(
   ) {
     throw new UploadSecurityRejectedError();
   }
-  const typedContentType = normalizedContentType as "image/jpeg" | "image/png";
   const env = options.env ?? process.env;
   const provider = getConfiguredUploadSecurityProvider(env);
+
+  if (normalizedContentType === "application/pdf") {
+    // No provider may turn a PDF into a raw passthrough. Even the legacy
+    // Defender profile must use the same fail-closed image-only PDF rebuild.
+    return withUploadSecuritySlot(async () => {
+      try {
+        const processedBytes = await (
+          options.pdfSanitizer ?? sanitizePdfInChild
+        )(bytes);
+        if (
+          !Buffer.isBuffer(processedBytes) ||
+          processedBytes.length < 1 ||
+          processedBytes.length > MAX_UPLOAD_BYTES ||
+          !hasAllowedUploadSignature(processedBytes, "application/pdf")
+        ) {
+          throw new UploadSecurityRejectedError();
+        }
+        return {
+          bytes: processedBytes,
+          contentType: "application/pdf" as const,
+          sha256: createHash("sha256").update(processedBytes).digest("hex"),
+        };
+      } catch (error) {
+        if (
+          error instanceof PdfRejectedError ||
+          error instanceof UploadSecurityRejectedError
+        )
+          throw new UploadSecurityRejectedError();
+        throw new UploadSecurityUnavailableError();
+      }
+    });
+  }
+  const typedContentType = normalizedContentType as "image/jpeg" | "image/png";
 
   if (provider === RASTER_SANITIZER_PROVIDER) {
     return withUploadSecuritySlot(() =>
@@ -678,6 +722,7 @@ export async function checkUploadSecurityReadiness(
           runner,
           RASTER_SANITIZER_TIMEOUT_MS,
         );
+        await (options.pdfReadiness ?? checkPdfSanitizerReadiness)();
       });
       return;
     } catch (error) {
@@ -708,6 +753,14 @@ export async function checkUploadSecurityReadiness(
     // service in the middle of that upload; the next idle probe checks cleanup.
     if (error instanceof MalwareScanBusyError) return;
     throw error;
+  }
+  try {
+    await withUploadSecuritySlot(
+      options.pdfReadiness ?? checkPdfSanitizerReadiness,
+    );
+  } catch (error) {
+    if (error instanceof UploadSecurityBusyError) return;
+    throw new UploadSecurityUnavailableError();
   }
 }
 
@@ -853,6 +906,11 @@ export function hasAllowedUploadSignature(
   if (normalized === "image/jpeg") {
     return startsWith(bytes, [0xff, 0xd8, 0xff]);
   }
+  if (normalized === "application/pdf") {
+    return /^%PDF-(?:1\.[0-7]|2\.0)[\r\n]/.test(
+      bytes.subarray(0, 10).toString("ascii"),
+    );
+  }
   return false;
 }
 
@@ -887,7 +945,7 @@ export async function reserveUploadGrantForProcessing(
   objectPath: string,
   requestedBy: number,
   originalSize: number,
-  originalContentType: "image/jpeg" | "image/png",
+  originalContentType: AllowedUploadContentType,
   processingToken: string,
 ): Promise<UploadGrant | null> {
   if (
@@ -1003,7 +1061,7 @@ export async function finalizeUploadGrantProcessing(
   objectPath: string,
   processingToken: string,
   declaredSize: number,
-  declaredContentType: "image/jpeg" | "image/png",
+  declaredContentType: AllowedUploadContentType,
   processedSha256: string,
 ): Promise<boolean> {
   if (

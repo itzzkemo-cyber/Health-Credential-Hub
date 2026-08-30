@@ -14,7 +14,7 @@ Every enabled integration below must use the reviewed production controls.
 
 | Integration                        | Implemented in the repository                                                                                                                        | Provisioned by supplied infrastructure                                                                                                                                                                                  | Production status                                                                                                                                                                                                                                                                                                     |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Supabase private Storage (S3 API)  | Server-mediated JPEG/PNG intake with bounded ingress, server-side decode/rebuild to a metadata-free JPEG, private reads, and application ACL checks. | The operator configures the existing private bucket and injects server-only S3 keys into Render.                                                                                                                        | **Controlled pilot only.** Original bytes are never persisted and PDF/general files are blocked. Image rewriting is not general malware scanning; Frankfurt transfer, free-tier SLA, backup, retention, orphan cleanup, and incident controls remain approval gates.                                                  |
+| Supabase private Storage (S3 API) | Bounded JPEG/PNG rebuilding and flat PDF image-only reconstruction, private reads and application ACL checks. | The operator configures the private bucket/MIME limits and injects server-only S3 keys into Render. | **Controlled pilot only.** Original bytes are not persisted. Active/encrypted/signed/form PDFs and general files are rejected. Reconstruction is not antivirus certification; worker isolation, Frankfurt transfer, free-tier SLA, backup, retention, orphan cleanup and incident controls remain approval gates. |
 | Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                                 | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | **No-go for real documents in this release.** Signed direct PUT has no provider-ingress byte cap and no malware quarantine. Keep synthetic-only until bounded ingress, AV/quarantine, orphan cleanup, and restore drills are accepted.                                                                                |
 | Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.                       | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | **No-go for real documents in this release.** Keep disabled until the same bounded-ingress, AV/quarantine, lifecycle, tenancy, IAM/CORS, and synthetic restore gates pass.                                                                                                                                            |
 | Gemini OCR                         | Authenticated users can send an authorized stored file to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields.               | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                        |
@@ -25,15 +25,15 @@ Every enabled integration below must use the reviewed production controls.
 environment. No FHIR, HL7, SMART on FHIR, regulator API, or other health-data
 standard integration is implemented or claimed here.
 
-## 1. Controlled Supabase image intake
+## 1. Controlled Supabase image and PDF intake
 
 ### Current data flow
 
-1. An authenticated browser sends only a JPEG/PNG filename, byte size, and MIME
+1. An authenticated browser sends only a JPEG/PNG/PDF filename, byte size, and MIME
    type to `POST /api/storage/uploads/request-url`. The server enforces the
    8 MiB cap, allocates an opaque random path, and records a caller-bound grant
    that expires after 15 minutes.
-2. The browser PUTs the original image to the guarded same-origin endpoint with
+2. The browser PUTs the original file to the guarded same-origin endpoint with
    its session, CSRF protections, exact content type, byte count, and
    create-only header. The request body is retained only in bounded process
    memory; it is not written to Supabase or a local quarantine file.
@@ -41,21 +41,26 @@ standard integration is implemented or claimed here.
    channel, frame, dimension, concurrency, and timeout limits, corrects
    orientation, and rebuilds a new JPEG without EXIF, GPS, ICC, XMP, comments,
    animation, or bytes appended to the original container.
-4. Only the rebuilt JPEG is written to the private bucket. The server reads it
+   PDF follows a separate child-process path: at most 5 pages/8 MiB, decoded
+   with local packaged libraries and rebuilt into a new image-only PDF. Active,
+   encrypted, signed and form PDFs are rejected. Selectable text is lost; the
+   UI discloses this in Arabic/English. No new external processor is contacted.
+4. Only the rebuilt JPEG/PDF is written to the private bucket. The server reads it
    back, checks type, size, signature, and SHA-256, then atomically updates the
    still-unclaimed grant to the rebuilt metadata. A failed write, verification,
    or grant update triggers object deletion and a fail-closed response.
 5. Credential linkage revalidates the stored object and consumes the grant.
-   Private reads and later OCR use the existing owner and server-side
+   Private reads and image-only OCR use the existing owner and server-side
    facility/team scope checks. The browser never receives Supabase S3 keys.
 
-This path accepts only `image/jpeg` and `image/png`. PDF, SVG, GIF, WebP, AVIF,
+This path accepts only `image/jpeg`, `image/png` and bounded `application/pdf`.
+SVG, GIF, WebP, AVIF,
 HEIC/HEIF, animated/multi-page images, malformed containers, and
 provider-direct upload modes are rejected. Image rewriting removes common
 metadata and appended-container payloads, but it is not a general malware
 scanner and does not make the free Frankfurt deployment approved healthcare
-production. An approved malware service is required before PDF or arbitrary
-file intake.
+production. See [`PDF_UPLOAD_SECURITY.md`](PDF_UPLOAD_SECURITY.md) for worker
+limits and deployment gates. Arbitrary file intake is not supported.
 
 ### Destination, retention, and failure handling
 
@@ -65,10 +70,12 @@ file intake.
   screenshots, logs, CI, or chat.
 - The original browser filename stays only in the short-lived PostgreSQL grant;
   it is never an object key or log field. Object names are random UUIDs.
-- The controlled release has no automated orphan lifecycle or tested object
-  restore. The owner-only cleanup endpoint covers failed form completion, but
-  scheduled retention, backup/restore evidence, capacity alerts, and incident
-  response are still required before real regulated data.
+- The owner-only cleanup endpoint covers failed form completion; automated
+  orphan lifecycle is still an operator gate. The encrypted backup and local
+  restore drill in [`BACKUP_RESTORE.md`](BACKUP_RESTORE.md) preserve object bytes
+  and ACL metadata but do not constitute a live Supabase backup or provider
+  restore. Scheduling, real-provider evidence, capacity alerts and incident
+  response remain required before real regulated data.
 - `DOCUMENT_UPLOADS_ENABLED=true` requires
   `UPLOAD_SECURITY_PROVIDER=raster-sanitizer`; `/api/readyz` performs a
   processor self-test and proves the private bucket is reachable. Unknown,

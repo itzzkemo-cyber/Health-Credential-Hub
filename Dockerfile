@@ -26,5 +26,8 @@ COPY --from=build --chown=node:node /workspace/lib/db/migrations/ /app/migration
 COPY --from=build --chown=node:node /workspace/config/supabase-prod-ca-2021.crt /app/certs/supabase-prod-ca-2021.crt
 
 USER node
+# Exercise the exact permission-limited PDF child process on Linux, without
+# database/storage credentials. Missing native packages fail the image build.
+RUN node dist/check-pdf-security.mjs
 EXPOSE 8080
 CMD ["node", "--enable-source-maps", "dist/index.mjs"]

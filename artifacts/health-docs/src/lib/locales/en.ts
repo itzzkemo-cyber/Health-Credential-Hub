@@ -271,7 +271,7 @@ export const en = {
     try_another_search: "Try a different search term.",
     no_documents: "You have not uploaded any documents yet",
     no_documents_hint:
-      "Start with a clear JPG or PNG photo of your professional certificate or license from your phone.",
+      "Start with a clear JPG or PNG photo, or a PDF of your professional certificate or license.",
     holder: "Document holder",
     issuer: "Issuer",
     expires: "Expires",
@@ -475,7 +475,7 @@ export const en = {
     file_too_large:
       "The photo is too large — the maximum is 8 MB. Take a smaller photo or reduce its resolution, then try again.",
     file_type_unsupported:
-      "Choose a JPG or PNG photo only. PDF uploads are temporarily unsupported.",
+      "Choose a JPG or PNG photo, or a PDF of up to 5 pages and 8 MiB.",
     document_preview: "Document Preview",
     open_file: "Open File",
     no_document: "No document attached",
@@ -501,7 +501,9 @@ export const en = {
     private_upload_notice:
       "The selected photo stays on this device until you save or explicitly choose document reading. After upload, it remains private and can be viewed only by you and authorized staff within your facility.",
     manual_upload_hint:
-      "Optional: take a photo on your phone or choose a JPG/PNG image up to 8 MB. PDF uploads are temporarily unsupported.",
+      "Optional: attach a JPG/PNG image or PDF up to 8 MiB. PDFs may contain up to 5 pages.",
+    pdf_processing_notice:
+      "PDFs are rebuilt as private image-only copies; selectable text, annotations and interactive features are not retained. Encrypted files, attachments, forms and digital signatures are rejected. Review every page after upload and keep your original. PDF OCR is not enabled.",
     upload_checking_title: "Checking secure photo upload availability",
     upload_checking_desc:
       "You can continue entering the details; file selection will appear when the check is complete.",

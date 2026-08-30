@@ -7,7 +7,7 @@
  */
 
 /**
- * JPEG or PNG input MIME type. Stored output is rebuilt as JPEG.
+ * JPEG/PNG is rebuilt as JPEG; eligible PDF is rebuilt as an image-only PDF (at most 5 pages).
  */
 export type UploadUrlRequestContentType = typeof UploadUrlRequestContentType[keyof typeof UploadUrlRequestContentType];
 
@@ -15,4 +15,5 @@ export type UploadUrlRequestContentType = typeof UploadUrlRequestContentType[key
 export const UploadUrlRequestContentType = {
   'image/jpeg': 'image/jpeg',
   'image/png': 'image/png',
+  'application/pdf': 'application/pdf',
 } as const;

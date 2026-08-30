@@ -187,7 +187,10 @@ export default function CredentialNew() {
       uploadURL: string;
       requiredHeaders: Record<string, string>;
     },
-    prepared: { blob: Blob; contentType: "image/jpeg" | "image/png" },
+    prepared: {
+      blob: Blob;
+      contentType: "image/jpeg" | "image/png" | "application/pdf";
+    },
   ) => {
     const response = await fetch(grant.uploadURL, {
       method: "PUT",
@@ -260,6 +263,7 @@ export default function CredentialNew() {
   const readSelectedDocument = async () => {
     if (
       !selectedFile ||
+      selectedFile.type === "application/pdf" ||
       !employeeId ||
       ocrAvailability !== "enabled" ||
       cleanupUnconfirmed ||
@@ -576,53 +580,68 @@ export default function CredentialNew() {
                     onClear={() => void clearSelectedFile()}
                     t={t}
                   />
-                  {selectedFile && ocrAvailability === "enabled" && (
-                    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0">
-                          <p className="font-semibold">
-                            {t("credential.ocr_title")}
-                          </p>
-                          <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                            {t("credential.ocr_disclosure")}
-                          </p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="min-h-11 w-full shrink-0 gap-2 sm:w-auto"
-                          disabled={controlsDisabled}
-                          onClick={() => void readSelectedDocument()}
-                        >
-                          {ocrStage === "upload" || ocrStage === "read" ? (
-                            <Loader2
-                              className="h-4 w-4 animate-spin"
-                              aria-hidden="true"
-                            />
-                          ) : (
-                            <ScanText className="h-4 w-4" aria-hidden="true" />
-                          )}
-                          {ocrStage === "upload"
-                            ? t("credential.ocr_uploading")
-                            : ocrStage === "read"
-                              ? t("credential.ocr_reading")
-                              : t("credential.ocr_read_action")}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                  {selectedFile && ocrAvailability !== "enabled" && (
+                  {selectedFile?.type === "application/pdf" && (
                     <p
-                      className="text-sm leading-6 text-muted-foreground"
+                      className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm leading-6"
                       role="status"
                     >
-                      {t(
-                        ocrAvailability === "checking"
-                          ? "credential.ocr_checking"
-                          : "credential.ocr_unavailable",
-                      )}
+                      {t("credential.pdf_processing_notice")}
                     </p>
                   )}
+                  {selectedFile &&
+                    selectedFile.type !== "application/pdf" &&
+                    ocrAvailability === "enabled" && (
+                      <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="font-semibold">
+                              {t("credential.ocr_title")}
+                            </p>
+                            <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                              {t("credential.ocr_disclosure")}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="min-h-11 w-full shrink-0 gap-2 sm:w-auto"
+                            disabled={controlsDisabled}
+                            onClick={() => void readSelectedDocument()}
+                          >
+                            {ocrStage === "upload" || ocrStage === "read" ? (
+                              <Loader2
+                                className="h-4 w-4 animate-spin"
+                                aria-hidden="true"
+                              />
+                            ) : (
+                              <ScanText
+                                className="h-4 w-4"
+                                aria-hidden="true"
+                              />
+                            )}
+                            {ocrStage === "upload"
+                              ? t("credential.ocr_uploading")
+                              : ocrStage === "read"
+                                ? t("credential.ocr_reading")
+                                : t("credential.ocr_read_action")}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  {selectedFile &&
+                    selectedFile.type !== "application/pdf" &&
+                    ocrAvailability !== "enabled" && (
+                      <p
+                        className="text-sm leading-6 text-muted-foreground"
+                        role="status"
+                      >
+                        {t(
+                          ocrAvailability === "checking"
+                            ? "credential.ocr_checking"
+                            : "credential.ocr_unavailable",
+                        )}
+                      </p>
+                    )}
                   {ocrResult && (
                     <OcrReviewCard
                       result={ocrResult}

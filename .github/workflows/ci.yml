@@ -47,8 +47,24 @@ jobs:
       - name: Test
         run: pnpm run test
 
+      - name: Isolated PostgreSQL backup and restore drill
+        run: |
+          export HCH_BACKUP_DRILL_PG_BIN="$(pg_config --bindir)"
+          test -x "$HCH_BACKUP_DRILL_PG_BIN/initdb"
+          node --test scripts/operations/backup-postgres.test.mjs
+
+      - name: Real PostgreSQL authorization and private-file isolation drill
+        run: |
+          export HCH_AUTH_POSTGRES_DRILL=true
+          export HCH_AUTH_DRILL_PG_BIN="$(pg_config --bindir)"
+          test -x "$HCH_AUTH_DRILL_PG_BIN/initdb"
+          pnpm --filter @workspace/api-server exec vitest run src/routes/auth-isolation-postgres.test.ts
+
       - name: Build API
         run: pnpm --filter @workspace/api-server run build
 
       - name: Build production web application
         run: pnpm --filter @workspace/health-docs run build:production
+
+      - name: Build Linux release image and verify PDF worker
+        run: docker build --tag wathaiqi-health:ci .

@@ -41,22 +41,42 @@ describe("buildUploadRequestHeaders", () => {
   });
 });
 
-describe("controlled image uploads", () => {
-  it("advertises and accepts only JPEG and PNG files", () => {
-    expect(UPLOAD_ACCEPT_ATTRIBUTE).toBe("image/jpeg,image/png");
+describe("controlled document uploads", () => {
+  it("advertises and accepts only JPEG, PNG and PDF files", () => {
+    expect(UPLOAD_ACCEPT_ATTRIBUTE).toBe(
+      "image/jpeg,image/png,application/pdf",
+    );
     expect(isSupportedUploadFile({ type: "image/jpeg" })).toBe(true);
     expect(isSupportedUploadFile({ type: "image/png" })).toBe(true);
-    expect(isSupportedUploadFile({ type: "application/pdf" })).toBe(false);
+    expect(isSupportedUploadFile({ type: "application/pdf" })).toBe(true);
     expect(isSupportedUploadFile({ type: "image/webp" })).toBe(false);
     expect(isSupportedUploadFile({ type: "" })).toBe(false);
   });
 
-  it("rejects PDF before upload preparation", async () => {
+  it("sends PDF only to controlled server processing without image decoding", async () => {
     const pdf = new File(["document"], "license.pdf", {
       type: "application/pdf",
     });
 
+    await expect(prepareUploadFile(pdf)).resolves.toEqual({
+      blob: pdf,
+      contentType: "application/pdf",
+      kind: "pdf",
+    });
+  });
+
+  it("rejects a PDF larger than 8 MiB before network upload", async () => {
+    const pdf = new File([new Uint8Array(MAX_UPLOAD_BYTES + 1)], "large.pdf", {
+      type: "application/pdf",
+    });
     await expect(prepareUploadFile(pdf)).rejects.toBeInstanceOf(
+      UploadTooLargeError,
+    );
+  });
+
+  it("rejects unsupported active types before upload", async () => {
+    const html = new File(["<script>"], "document.html", { type: "text/html" });
+    await expect(prepareUploadFile(html)).rejects.toBeInstanceOf(
       UnsupportedUploadTypeError,
     );
   });

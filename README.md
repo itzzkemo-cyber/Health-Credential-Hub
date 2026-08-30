@@ -2,7 +2,7 @@
 
 منصة عربية/إنجليزية لإدارة وثائق واعتمادات الكوادر الصحية، مع موقع متجاوب، API آمن، تخزين ملفات خاص، قراءة OCR اختيارية، تنبيهات، وتقارير امتثال.
 
-> **هدف الإصدار الحالي:** الموقع المتجاوب هو واجهة المنتج الوحيدة التي تُنشر. يستطيع الموظف من الجوال إدخال بياناته ورفع صورة وثيقة بصيغة JPEG/PNG، ويستطيع المدير مراجعة الموظفين والوثائق الواقعة ضمن نطاق صلاحياته. يعيد الخادم بناء الصورة ويحذف بياناتها الوصفية قبل حفظها في Supabase الخاص؛ ملفات PDF وبقية الصيغ غير مقبولة في هذا الإصدار. لا يحتوي إصدار الإطلاق على دخول تجريبي أو بيانات صناعية. مسار Render المجاني هو تجربة تشغيل مضبوطة وليس إنتاجًا صحيًا معتمدًا.
+> **هدف الإصدار الحالي:** الموقع المتجاوب هو واجهة المنتج الوحيدة التي تُنشر. يستطيع الموظف من الجوال إدخال بياناته ورفع JPEG/PNG أو PDF حتى 5 صفحات و8 MiB، ويستطيع المدير مراجعة الموظفين والوثائق الواقعة ضمن نطاق صلاحياته. يعيد الخادم بناء الصور وPDF قبل حفظها في مخزن خاص؛ PDF يصبح صور صفحات بلا نص قابل للتحديد، وتُرفض الملفات المشفرة أو ذات النماذج والتوقيع الرقمي. يلزم نشر هذا التحديث وتفعيل MIME الخاص به قبل توفر PDF على الموقع. لا يحتوي إصدار الإطلاق على دخول تجريبي أو بيانات صناعية. مسار Render المجاني هو تجربة تشغيل مضبوطة وليس إنتاجًا صحيًا معتمدًا.
 
 ## Workspace
 
@@ -21,9 +21,10 @@
 - PostgreSQL for API runtime
 - Private document storage: the encrypted single-host filesystem acceptance
   profile or a server-mediated private S3-compatible provider. The controlled
-  image path accepts only JPEG/PNG up to 8 MiB and rebuilds every input as a
-  metadata-free JPEG before persistence. PDF/general-file intake stays
-  fail-closed until an approved malware scanner and lifecycle controls exist.
+  intake path accepts JPEG/PNG and bounded PDF up to 8 MiB, rebuilding each
+  input without preserving the original. See the limits and deployment gates
+  in [PDF_UPLOAD_SECURITY.md](docs/PDF_UPLOAD_SECURITY.md). General-file intake
+  remains fail-closed; rebuilding is not an antivirus or compliance claim.
 
 ## Local setup
 
@@ -47,7 +48,7 @@ Run the web app separately:
 pnpm --filter @workspace/health-docs run dev
 ```
 
-اختبر مسار الموظف على عرض جوال أيضًا: تسجيل الدخول، فتح «وثائقي»، رفع صورة JPEG/PNG، تعبئة البيانات، ومراجعة حالة الوثيقة. مسار الرفع يعيد بناء الصورة على الخادم ولا يرسلها إلى OCR؛ لا تُفعّل المعالجة الخارجية إلا بعد اعتماد إعداداتها وتدفق الخصوصية الموثق.
+اختبر مسار الموظف على عرض 390px أيضًا: تسجيل الدخول، فتح «وثائقي»، رفع JPEG/PNG أو PDF بسيط، تعبئة البيانات، ومراجعة حالة الوثيقة. مسار الرفع يعيد بناء الملف على الخادم ولا يرسله إلى OCR؛ PDF غير مدعوم في OCR. لا تُفعّل المعالجة الخارجية إلا بعد اعتماد إعداداتها وتدفق الخصوصية الموثق.
 
 The API reads the root `.env` only in its `dev` command. Production `start` expects environment variables from the deployment platform.
 
@@ -109,13 +110,13 @@ The checked-in `render.yaml` deliberately keeps deploys manual: migrations run
 with a separate database identity before the web service is released, and the
 web service never receives bootstrap or migration credentials. It enables the
 bounded `raster-sanitizer` profile: account, employee, dashboard, scoped
-administration data, and rebuilt JPEG document images persist in Supabase.
-PDFs and other general files remain unavailable until an approved malware
-scanner passes readiness. This is not a production-ready healthcare deployment.
+administration data, rebuilt JPEG images and bounded image-only PDFs persist
+in Supabase once the matching code and bucket settings are deployed. Other
+general files remain unavailable. This is not a production-ready healthcare deployment.
 
 - Use a secret manager and a random `SESSION_SECRET` of at least 32 characters.
 - Apply reviewed Drizzle migrations; do not use `push-force` in production.
-- Provision private object storage and verify retention, image sanitization, file-size quotas, and orphan cleanup. Add approved malware scanning before accepting PDF or general files.
+- Provision private object storage and verify retention, image/PDF reconstruction, file-size quotas, and orphan cleanup. Review dedicated worker isolation and malware controls before expanding intake.
 - Attach a least-privilege runtime identity. GCS uses Google Application Default Credentials; OCI customer secret keys must come from OCI Vault and never from a committed file.
 - Configure Gemini only after approving the privacy/data-processing terms for uploaded workforce documents.
 - Configure and verify the email provider before enabling outbound messages.

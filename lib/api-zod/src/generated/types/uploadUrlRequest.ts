@@ -18,6 +18,6 @@ export interface UploadUrlRequest {
      * @minimum 1
      */
   size: number;
-  /** JPEG or PNG input MIME type. Stored output is rebuilt as JPEG. */
+  /** JPEG/PNG is rebuilt as JPEG; eligible PDF is rebuilt as an image-only PDF (at most 5 pages). */
   contentType: UploadUrlRequestContentType;
 }

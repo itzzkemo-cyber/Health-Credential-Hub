@@ -130,14 +130,18 @@ export const getRequestUploadUrlUrl = () => {
  * Returns a short-lived private upload capability. The client sends JSON
  * metadata here, then uploads the file with every returned required
  * header. Enabled document intake is restricted to server-mediated
- * filesystem/S3 deployments and JPEG/PNG input of at most 8 MiB. The
+ * filesystem/S3 deployments and JPEG/PNG/PDF input of at most 8 MiB. The
  * guarded same-origin endpoint validates the grant and byte count, then
  * decodes and rebuilds the image as a metadata-free JPEG before the
  * private object becomes durable. Each capability is scoped to a newly
  * allocated object identifier and the authenticated caller; the server
  * rejects a known pre-existing object and verifies the rebuilt bytes and
- * integrity hash after write. PDF and provider-direct uploads are not
- * accepted by this controlled-release flow.
+ * integrity hash after write. PDFs pass a separate bounded child process:
+ * at most 5 pages, no encryption, forms, digital signatures, embedded files,
+ * or active content. Pages are rasterized and rebuilt as an image-only PDF;
+ * selectable text, metadata, and interactive features are not preserved.
+ * Invalid, over-limit, or unprocessable PDFs fail closed. Provider-direct
+ * uploads are not accepted by this controlled-release flow.
  * @summary Request a controlled URL for private file upload
  */
 export const requestUploadUrl = async (uploadUrlRequest: UploadUrlRequest, options?: Parameters<typeof customFetch>[1]): Promise<UploadUrlResponse> => {

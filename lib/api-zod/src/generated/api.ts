@@ -12,14 +12,18 @@ import * as zod from 'zod';
  * Returns a short-lived private upload capability. The client sends JSON
  * metadata here, then uploads the file with every returned required
  * header. Enabled document intake is restricted to server-mediated
- * filesystem/S3 deployments and JPEG/PNG input of at most 8 MiB. The
+ * filesystem/S3 deployments and JPEG/PNG/PDF input of at most 8 MiB. The
  * guarded same-origin endpoint validates the grant and byte count, then
  * decodes and rebuilds the image as a metadata-free JPEG before the
  * private object becomes durable. Each capability is scoped to a newly
  * allocated object identifier and the authenticated caller; the server
  * rejects a known pre-existing object and verifies the rebuilt bytes and
- * integrity hash after write. PDF and provider-direct uploads are not
- * accepted by this controlled-release flow.
+ * integrity hash after write. PDFs pass a separate bounded child process:
+ * at most 5 pages, no encryption, forms, digital signatures, embedded files,
+ * or active content. Pages are rasterized and rebuilt as an image-only PDF;
+ * selectable text, metadata, and interactive features are not preserved.
+ * Invalid, over-limit, or unprocessable PDFs fail closed. Provider-direct
+ * uploads are not accepted by this controlled-release flow.
  * @summary Request a controlled URL for private file upload
  */
 
@@ -29,7 +33,7 @@ import * as zod from 'zod';
 export const RequestUploadUrlBody = zod.object({
   "name": zod.string().min(1).describe('Original file name.'),
   "size": zod.number().min(1).describe('File size in bytes.'),
-  "contentType": zod.enum(['image/jpeg', 'image/png']).describe('JPEG or PNG input MIME type. Stored output is rebuilt as JPEG.')
+  "contentType": zod.enum(['image/jpeg', 'image/png', 'application/pdf']).describe('JPEG\/PNG is rebuilt as JPEG; eligible PDF is rebuilt as an image-only PDF (at most 5 pages).')
 })
 
 
@@ -43,7 +47,7 @@ export const RequestUploadUrlResponse = zod.object({
   "metadata": zod.object({
   "name": zod.string().min(1).describe('Original file name.'),
   "size": zod.number().min(1).describe('File size in bytes.'),
-  "contentType": zod.enum(['image/jpeg', 'image/png']).describe('JPEG or PNG input MIME type. Stored output is rebuilt as JPEG.')
+  "contentType": zod.enum(['image/jpeg', 'image/png', 'application/pdf']).describe('JPEG\/PNG is rebuilt as JPEG; eligible PDF is rebuilt as an image-only PDF (at most 5 pages).')
 }).optional()
 })
 

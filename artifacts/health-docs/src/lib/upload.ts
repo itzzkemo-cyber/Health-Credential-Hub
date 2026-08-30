@@ -2,9 +2,9 @@
 //
 // Phone photos are routinely 5–20 MB; certificates stay readable for review
 // at 2000px, so supported images are downscaled/re-encoded in the browser
-// before the controlled private-object upload. This release accepts JPEG/PNG
-// only. The server independently verifies type, signature, and size, then
-// rebuilds the raster image before storing any bytes.
+// before the controlled private-object upload. PDFs are handed only to the
+// server-side bounded image-only PDF rebuilder; no browser parser or external
+// service receives them. The server independently verifies all upload bytes.
 
 /** Max prepared file size accepted by private document storage (8 MB). */
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
@@ -12,6 +12,7 @@ export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 export const ACCEPTED_UPLOAD_MIME_TYPES = [
   "image/jpeg",
   "image/png",
+  "application/pdf",
 ] as const;
 
 export type AcceptedUploadMimeType =
@@ -40,8 +41,7 @@ export class UnsupportedUploadTypeError extends Error {
 export interface PreparedUpload {
   blob: Blob;
   contentType: AcceptedUploadMimeType;
-  /** Controlled intake stores document images only in this release. */
-  kind: "image";
+  kind: "image" | "pdf";
 }
 
 export function isSupportedUploadFile(file: Pick<File, "type">): boolean {
@@ -87,9 +87,14 @@ function canvasToJpegBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 async function downscaleImage(file: File): Promise<Blob> {
   // imageOrientation: "from-image" bakes EXIF rotation into the pixels so
   // sideways phone photos come out upright.
-  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const bitmap = await createImageBitmap(file, {
+    imageOrientation: "from-image",
+  });
   try {
-    const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));
+    const scale = Math.min(
+      1,
+      MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height),
+    );
     const width = Math.max(1, Math.round(bitmap.width * scale));
     const height = Math.max(1, Math.round(bitmap.height * scale));
     const canvas = document.createElement("canvas");
@@ -116,6 +121,11 @@ async function downscaleImage(file: File): Promise<Blob> {
  */
 export async function prepareUploadFile(file: File): Promise<PreparedUpload> {
   if (!isSupportedUploadFile(file)) throw new UnsupportedUploadTypeError();
+
+  if (file.type === "application/pdf") {
+    if (file.size > MAX_UPLOAD_BYTES) throw new UploadTooLargeError();
+    return { blob: file, contentType: "application/pdf", kind: "pdf" };
+  }
 
   let blob: Blob | null = null;
   let contentType = file.type as AcceptedUploadMimeType;

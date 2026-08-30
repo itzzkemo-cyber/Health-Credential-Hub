@@ -41,6 +41,7 @@ import {
 } from "../lib/objectStorage";
 import {
   ALLOWED_UPLOAD_CONTENT_TYPE,
+  type AllowedUploadContentType,
   findActiveUploadGrant,
   hasAllowedUploadSignature,
   MalwareDetectedError,
@@ -180,7 +181,7 @@ router.put(
       objectPath,
       user.id,
       bytes.length,
-      contentType as "image/jpeg" | "image/png",
+      contentType as AllowedUploadContentType,
       processingToken,
     );
     if (!grant) {
@@ -192,7 +193,8 @@ router.put(
     let finalized = false;
     let storedObjectFile: StoredObjectFile | undefined;
     try {
-      // The raster provider returns a freshly encoded JPEG; the legacy Windows
+      // PDFs are rebuilt as image-only PDFs; raster input becomes fresh JPEG.
+      // The legacy Windows
       // provider returns only bytes that received its configured verdict.
       // Persist only the processor result, never the browser-supplied buffer.
       const processed = await processUploadSecurity(bytes, contentType);
@@ -222,7 +224,7 @@ router.put(
         objectPath,
         processingToken,
         storedObject.size,
-        storedObject.contentType as "image/jpeg" | "image/png",
+        storedObject.contentType as AllowedUploadContentType,
         storedObject.sha256,
       );
       if (!grantUpdated) {
@@ -418,8 +420,8 @@ router.post(
       return;
     }
 
-    // Server-side upload policy: credential documents are JPEG/PNG raster
-    // images at most 8 MB. Every accepted image is decoded and re-encoded by
+    // Server-side upload policy: JPEG/PNG/PDF documents at most 8 MiB.
+    // Every accepted document is decoded and rebuilt by
     // the guarded byte-ingress route before it becomes durable.
     if (
       parsed.data.size <= 0 ||
@@ -629,8 +631,7 @@ router.get(
           ? await findActiveUploadGrant(objectPath, user.id)
           : null;
       const isLinkedOwner =
-        hasObjectAcl &&
-        linked.some((entry) => entry.employeeId === user.id);
+        hasObjectAcl && linked.some((entry) => entry.employeeId === user.id);
       // An unlinked upload has no object ACL until credential creation. The
       // processed, unclaimed grant is itself the short-lived authorization:
       // findActiveUploadGrant already binds the exact object path to this user

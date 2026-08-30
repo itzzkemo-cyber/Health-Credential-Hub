@@ -20,17 +20,17 @@ health-document production:
 - Frankfurt is outside Saudi Arabia. A documented PDPL transfer assessment,
   provider agreements, retention schedule, and incident process are required
   before real workforce or health data is entered.
-- The controlled raster-rebuild path is not a general malware scanner. PDF and
-  general-file intake remain blocked until the object-ingress malware,
-  quarantine, and lifecycle gates in [`INTEGRATIONS.md`](INTEGRATIONS.md) are
-  closed.
+- The controlled raster-rebuild path is not a general malware scanner. PDF
+  support is limited to image-only reconstruction; review the worker isolation,
+  resource and lifecycle gates in [`PDF_UPLOAD_SECURITY.md`](PDF_UPLOAD_SECURITY.md).
+  Arbitrary general-file intake remains disabled.
 
 The Blueprint enables `DOCUMENT_UPLOADS_ENABLED=true` together with
-`UPLOAD_SECURITY_PROVIDER=raster-sanitizer`. Only authenticated, bounded JPEG
-and PNG inputs are accepted. The API decodes each input, rejects animated or
-oversized images, rebuilds it as a fresh metadata-free JPEG, and writes only
-that result to the private bucket. PDF, SVG, GIF, WebP, AVIF, HEIC, and
-provider-direct uploads fail closed. `/api/readyz` verifies the database,
+`UPLOAD_SECURITY_PROVIDER=raster-sanitizer`. Authenticated, bounded JPEG,
+PNG and flat PDF inputs are accepted. Images become metadata-free JPEG;
+PDFs become new image-only PDFs in a permission-limited child process (5 pages,
+8 MiB, 20 seconds). Encrypted/active/signed/form PDFs, SVG, GIF, WebP, AVIF,
+HEIC and provider-direct uploads fail closed. `/api/readyz` verifies the database,
 private storage, and the configured upload-security processor; a clean
 end-to-end synthetic upload must pass before release.
 
@@ -72,9 +72,10 @@ Use the existing project in `eu-central-1` (Frankfurt):
 
 1. Keep the Data API disabled. The application uses PostgreSQL directly.
 2. Enable SSL enforcement for database connections.
-3. Create one private Storage bucket. Set an 8 MB file limit and allow only
-   `image/jpeg` and `image/png`. The current server stores rebuilt JPEG output;
-   keeping PNG allows a controlled rollback without widening to general files.
+3. Keep one **private** Storage bucket. Set an 8 MiB (8388608 byte) file limit
+   and allow only `image/jpeg`, `image/png`, and `application/pdf`. Do not alter
+   public access, anonymous/authenticated policies or RLS when adding PDF.
+   Confirm the deployed image passed its PDF worker test before release.
 4. Create an S3 access-key pair for the private bucket. Store it only in the
    Render secret environment. Supabase S3 access keys bypass Storage RLS and
    must never be placed in browser code, Git, screenshots, CI output, or chat.
@@ -312,8 +313,10 @@ At a 390 px viewport, check both Arabic RTL and English LTR:
    workflows; confirm there is no public sign-up path.
 3. Upload a synthetic JPEG or PNG below 8 MiB. Confirm the stored response is a
    rebuilt JPEG, does not retain EXIF/GPS metadata, is visible only to the owner
-   and in-scope manager, and can be deleted when authorized. Confirm PDF, SVG,
-   GIF, WebP, AVIF, HEIC, malformed images, and direct provider uploads are
+   and in-scope manager, and can be deleted when authorized. Repeat with a flat
+   synthetic PDF; verify its readable, image-only output and cross-tenant denial.
+   Confirm active/encrypted/signed/form PDFs, SVG, GIF, WebP, AVIF, HEIC,
+   malformed images, and direct provider uploads are
    rejected fail-closed without creating an object.
 4. As the manager, confirm only employees and documents in the assigned
    facility are visible.
@@ -347,8 +350,8 @@ Before real use, complete all of the following:
 
 - a paid production service with availability commitments and no idle sleep;
 - automated encrypted database and object backups plus a tested restore drill;
-- an approved malware quarantine/scanner before PDF or general-file intake,
-  plus auditable orphan-object cleanup for the image path;
+- approved PDF worker resource/egress isolation and general-file malware
+  controls before expanding intake, plus auditable orphan-object cleanup;
 - PDPL transfer, provider-contract, retention, and breach-response approval;
 - rate limiting, monitoring, alerting, and audit-log retention;
 - storage-key, session-secret, TOTP-key, and database-credential rotation

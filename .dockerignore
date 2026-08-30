@@ -15,3 +15,9 @@
 attached_assets
 security_best_practices_report.md
 gha-creds-*.json
+.local
+**/.local
+backups
+restore-drills
+strix_runs
+**/*.hchbak

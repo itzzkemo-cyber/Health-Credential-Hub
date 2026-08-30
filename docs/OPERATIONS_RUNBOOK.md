@@ -54,103 +54,70 @@ procedure for authorization failures, suspected disclosure, credential
 rotation, and provider outage. The repository does not configure UptimeRobot or
 an alert destination automatically.
 
-## 3. Backup prerequisites and evidence
+For the operator-approved monitor `803870616` created on 2026-08-31, observed
+free-plan defaults are five-minute checks, 2xx/3xx success policy, no delay or
+repeat, redirect following OFF, and business-email alerts. The first check was
+Up; built-in DOWN/UP test emails reached the operations inbox without service
+interruption. Exact HTTP-200-only success codes and custom methods were paid
+features, so the stricter target policy above is not claimed configured. See
+[`MONITORING_AND_STORAGE.md`](MONITORING_AND_STORAGE.md) for dated evidence.
 
-Before real data, move to plans with explicit availability and backup terms.
-Assign a backup operator and an independent restore reviewer. The operator must:
+## 3. Encrypted backup implementation
 
-1. Use a dedicated, read-only database backup identity and a dedicated
-   server-only object-storage backup identity. Inject both from the approved
-   secret manager; never place credentials in shell history, this repository,
-   logs, tickets, or backup manifests.
-2. Write database dumps and private objects to an encrypted, access-restricted,
-   off-provider destination. The destination region, retention, deletion,
-   immutability, key ownership, and access logging require approval.
-3. Freeze application writes for the consistency window before capturing the
-   database and object store. The current Render profile has no repository
-   maintenance-mode command, so the exact external traffic-block or suspension
-   procedure must be documented and rehearsed before this can be automated.
-4. Create a PostgreSQL custom-format dump with `pg_dump` using
-   `--format=custom --no-owner --no-acl`, copy the complete private bucket
-   through the provider's supported S3 backup tool, then resume writes only
-   after both operations succeed. Never use the application or migration
-   password as the long-lived backup identity.
-5. Generate a manifest containing only backup ID, UTC start/end, release SHA,
-   migration version, database dump checksum, object count, aggregate bytes,
-   and object-key/checksum pairs. Protect the detailed manifest like document
-   data because object keys can be identifying; never attach it to GitHub.
-6. Monitor job success, age of the newest usable backup, destination capacity,
-   retention expiry, and access anomalies. Alert before the approved recovery
-   point objective is exceeded.
-
-After writes are verifiably frozen, an approved isolated backup runner with
-PostgreSQL tools and AWS CLI may use this template. Configure the referenced
-libpq service and AWS profile from the secret manager outside this repository;
-both must be backup-only identities. `BACKUP_DIR`, `S3_ENDPOINT`, and
-`PRIVATE_BUCKET` must be pre-reviewed explicit values on encrypted storage.
+Use [`BACKUP_RESTORE.md`](BACKUP_RESTORE.md) and
+[`scripts/operations/backup.mjs`](../scripts/operations/backup.mjs). The approved
+runner streams PostgreSQL and private documents into AES-256-GCM ciphertext,
+encrypts checksums and ACL custom metadata in its manifest, rejects changed
+inventories and incomplete captures, then verifies the completed archive. It
+requires a real write freeze and separate backup-only credentials; there is no
+automatic production freeze or scheduling in this repository.
 
 ```bash
-set -euo pipefail
-umask 077
-mkdir -p "${BACKUP_DIR}/objects"
-pg_dump --dbname="service=healthdocs-backup" --format=custom --no-owner --no-acl --file="${BACKUP_DIR}/database.dump"
-aws --profile healthdocs-backup --endpoint-url "${S3_ENDPOINT}" s3 sync "s3://${PRIVATE_BUCKET}/private/" "${BACKUP_DIR}/objects/" --only-show-errors
-sha256sum "${BACKUP_DIR}/database.dump" > "${BACKUP_DIR}/database.dump.sha256"
+node scripts/operations/backup.mjs backup
+node scripts/operations/backup.mjs verify
 ```
 
-Exit nonzero on any failed command in the scheduled job, never print profile
-contents, and move the completed backup plus protected object manifest to the
-approved off-provider destination before considering the run successful.
+Before invoking these commands, approve the exact source, source privacy,
+off-provider encrypted destination, region, retention, independent key escrow,
+RPO/RTO, PostgreSQL tool versions and operator/reviewer. Supply the documented
+environment out of band, never through the application `.env` or command-line
+passwords. Do not retain a failed capture as a recovery point. Monitor failure,
+age of latest verified backup, quota and expiry; test actual alert delivery.
 
-Provider-native database PITR and object versioning or replication are
-preferred when approved, but they do not replace an independent restore drill.
-Supabase Free has no guaranteed PITR; a dashboard badge or successful `pg_dump`
-alone is not backup evidence.
+Do not use the previous plain `pg_dump` + `s3 sync` template: it did not preserve
+the application's private ACL custom metadata or provide an authenticated
+encrypted manifest. Native PITR/versioning may complement this control, but do
+not replace an independently verified recovery.
 
-## 4. Disposable restore drill
-
-Run at the agreed cadence and after schema, storage, key, or provider changes:
-
-1. Select a completed backup and verify its manifest and checksums before any
-   restore. Record the backup ID and source release SHA, not credentials or
-   object names, in the drill ticket.
-2. Create an isolated disposable PostgreSQL database and private bucket in the
-   approved region. Deny public access and all production runtime identities.
-   Never restore over production and never reuse production URLs.
-3. Restore the database with `pg_restore --exit-on-error --no-owner --no-acl`
-   under a temporary restore identity, then restore objects through the
-   provider-supported S3 tool. Recalculate and compare dump/object checksums and
-   counts to the protected manifest.
-4. Deploy the recorded source commit to an isolated service with new session
-   and TOTP keys. Run migrations only if the drill explicitly tests a forward
-   upgrade; otherwise the code, schema, and backup must represent the same
-   release.
-5. Confirm `/api/readyz` returns `200`, reports database/storage readiness, and
-   exposes the expected `releaseSha`. Use only approved synthetic accounts and
-   documents to test sign-in, scoped read, rebuilt-image download, and
-   authorized deletion. Verify cross-facility and anonymous reads fail.
-6. Record start/end times, recovery point, recovery duration, checksum/count
-   results, test outcomes, deviations, reviewer, and corrective actions. Do not
-   put document content, object keys, employee data, passwords, or tokens in the
-   evidence.
-7. Revoke temporary credentials and destroy the isolated service, database,
-   bucket, and copied documents under a reviewed deletion ticket. Preserve only
-   the minimized drill evidence for the approved retention period.
-
-Only after confirming the destination is disposable, the restore runner may use
-the corresponding restricted profiles:
+## 4. Isolated restore verification
 
 ```bash
-set -euo pipefail
-sha256sum --check "${BACKUP_DIR}/database.dump.sha256"
-pg_restore --dbname="service=healthdocs-restore" --exit-on-error --no-owner --no-acl "${BACKUP_DIR}/database.dump"
-aws --profile healthdocs-restore --endpoint-url "${RESTORE_S3_ENDPOINT}" s3 sync "${BACKUP_DIR}/objects/" "s3://${RESTORE_BUCKET}/private/" --only-show-errors
+node scripts/operations/backup.mjs restore-local
 ```
 
-These commands do not create a consistent backup by themselves; the write
-freeze, protected manifest, object checksum comparison, isolated deployment,
-authorization smoke tests, review, and cleanup above remain mandatory.
+This command authenticates every entry **before** creating an extraction tree
+or contacting PostgreSQL; it requires a new restricted encrypted destination
+and a new empty `hch_restore_*` database on numeric loopback. It refuses target
+overwrites and restores in one PostgreSQL transaction. It writes no cloud
+objects. The documented extraction format preserves bytes, content type and
+private ACL metadata for a separately approved recovery adapter.
 
-A backup is not accepted until this drill succeeds within the approved RPO/RTO.
-Until there is current evidence, production readiness remains blocked even when
-`/api/readyz` is healthy.
+On 2026-08-31 the real local PostgreSQL drill passed: 10 SQL migrations, 13
+tables, two synthetic facilities/employees/credential records and two synthetic
+local document payloads. Data/checksums/ACL metadata matched; corrupted input
+was rejected before restoration and an existing database could not be
+overwritten. See the detailed evidence and repeatable tests in
+[`BACKUP_RESTORE.md`](BACKUP_RESTORE.md).
+
+**This is not a live Supabase backup or cloud recovery sign-off.** Before real
+workforce data, take an approved live capture and restore it to an isolated
+approved environment. Reapply reviewed database role/grant boundaries, recover
+the original TOTP key through independent escrow (or a reviewed reenrollment),
+rotate session secrets, and keep outbound integrations disabled. Verify
+readiness, administrator/employee authorization, anonymous/cross-facility file
+denial, counts and checksums. Record measured recovery point/duration and
+reviewer, then separately approve credential revocation and cleanup.
+
+Backup readiness remains blocked until the operator's source, destination,
+schedule, alert delivery, retention, key recovery and real-provider drill have
+current evidence, even when `/api/readyz` and local tests pass.
