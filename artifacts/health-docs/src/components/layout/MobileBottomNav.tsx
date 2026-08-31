@@ -1,4 +1,10 @@
-import { Bell, FileText, Home, Settings, UploadCloud } from "lucide-react";
+import {
+  CalendarDays,
+  FileText,
+  Home,
+  Settings,
+  UploadCloud,
+} from "lucide-react";
 import { Link, useLocation } from "wouter";
 
 import { getAuthUser } from "@/lib/auth";
@@ -18,8 +24,12 @@ export function MobileBottomNav() {
 
   const items = [
     { icon: Home, label: t("mobile.home"), path: "/" },
+    {
+      icon: CalendarDays,
+      label: t("mobile.schedule"),
+      path: "/schedules",
+    },
     { icon: FileText, label: t("mobile.documents"), path: "/credentials" },
-    { icon: Bell, label: t("mobile.alerts"), path: "/notifications" },
     { icon: Settings, label: t("mobile.account"), path: "/settings" },
   ];
 
@@ -30,7 +40,11 @@ export function MobileBottomNav() {
     >
       <div className="mx-auto grid max-w-lg grid-cols-5 items-end">
         {items.slice(0, 2).map((item) => (
-          <MobileNavLink key={item.path} {...item} active={isActive(location, item.path)} />
+          <MobileNavLink
+            key={item.path}
+            {...item}
+            active={isActive(location, item.path)}
+          />
         ))}
 
         <Link
@@ -45,7 +59,11 @@ export function MobileBottomNav() {
         </Link>
 
         {items.slice(2).map((item) => (
-          <MobileNavLink key={item.path} {...item} active={isActive(location, item.path)} />
+          <MobileNavLink
+            key={item.path}
+            {...item}
+            active={isActive(location, item.path)}
+          />
         ))}
       </div>
     </nav>

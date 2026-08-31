@@ -44,6 +44,7 @@ export const ar = {
   },
   mobile: {
     home: "الرئيسية",
+    schedule: "الجدول",
     documents: "وثائقي",
     upload: "رفع",
     alerts: "التنبيهات",

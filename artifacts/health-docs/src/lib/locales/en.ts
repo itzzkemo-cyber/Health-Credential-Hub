@@ -44,6 +44,7 @@ export const en = {
   },
   mobile: {
     home: "Home",
+    schedule: "Schedule",
     documents: "My Docs",
     upload: "Upload",
     alerts: "Alerts",
