@@ -116,15 +116,29 @@ export function serializeCredential(c: CredentialRow, employee?: User | null) {
 // Scoping
 // ---------------------------------------------------------------------------
 
-export async function getScopedUsers(current: User): Promise<User[]> {
-  if (current.role === "system_admin") {
-    return db.select().from(usersTable);
+export async function getScopedUsers(
+  current: User,
+  executor: Pick<typeof db, "select"> = db,
+  selectedUserIds?: number[],
+): Promise<User[]> {
+  if (selectedUserIds?.length === 0) return [];
+  if (current.role === "system_admin" && selectedUserIds === undefined) {
+    return executor.select().from(usersTable);
   }
-
-  const all = await db
+  const facilityScope = eq(usersTable.facilityId, current.facilityId);
+  const selectedScope = selectedUserIds
+    ? inArray(usersTable.id, selectedUserIds)
+    : undefined;
+  const all = await executor
     .select()
     .from(usersTable)
-    .where(eq(usersTable.facilityId, current.facilityId));
+    .where(
+      selectedScope
+        ? current.role === "system_admin"
+          ? selectedScope
+          : and(facilityScope, selectedScope)
+        : facilityScope,
+    );
 
   switch (current.role) {
     case "employee":

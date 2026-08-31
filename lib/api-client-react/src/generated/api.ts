@@ -30,6 +30,7 @@ import type {
   ChangePasswordResult,
   ComplianceReport,
   CreateEmployeeInvitationInput,
+  CreateScheduleRequest,
   Credential,
   CredentialInput,
   CredentialListResponse,
@@ -60,6 +61,8 @@ import type {
   GetCredentialOcrReadinessParams,
   GetExpiringCredentialsParams,
   GetMissingCredentialsParams,
+  GetMySchedulesParams,
+  GetTeamSchedulesParams,
   HealthStatus,
   InvitationError,
   ListAuditLogsParams,
@@ -68,15 +71,21 @@ import type {
   ListEmployeeInvitationsParams,
   ListEmployeesParams,
   ListNotificationsParams,
+  ListSchedulesParams,
   LoginInput,
   MessageEnvelope,
   MissingCredential,
+  MySchedule,
   Notification,
   OcrInput,
   OcrReadiness,
   OcrResult,
   ReadinessStatus,
   ResetPasswordInput,
+  Schedule,
+  ScheduleSummary,
+  ScheduleVersionBody,
+  TeamSchedule,
   TotpActivation,
   TotpAdminDisableInput,
   TotpChallengeInput,
@@ -86,6 +95,7 @@ import type {
   TotpVerifySetupInput,
   TwoFactorPending,
   UnreadCount,
+  UpdateScheduleRequest,
   UploadUrlRequest,
   UploadUrlResponse,
   User
@@ -117,6 +127,701 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getListSchedulesUrl = (params?: ListSchedulesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/schedules?${stringifiedParams}` : `/api/schedules`
+}
+
+/**
+ * Returns at most 100 schedules for the requested month (current month by default). A roster is visible only when every participant is in scope. Employees use /schedules/mine instead.
+ * @summary List complete rosters within the manager's current scope
+ */
+export const listSchedules = async (params?: ListSchedulesParams, options?: Parameters<typeof customFetch>[1]): Promise<ScheduleSummary[]> => {
+
+  return customFetch<ScheduleSummary[]>(getListSchedulesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListSchedulesQueryKey = (params?: ListSchedulesParams,) => {
+    return [
+    `/api/schedules`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListSchedulesQueryOptions = <TData = Awaited<ReturnType<typeof listSchedules>>, TError = ErrorType<void>>(params?: ListSchedulesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSchedules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListSchedulesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSchedules>>> = ({ signal }) => listSchedules(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listSchedules>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListSchedulesQueryResult = NonNullable<Awaited<ReturnType<typeof listSchedules>>>
+export type ListSchedulesQueryError = ErrorType<void>
+
+
+/**
+ * @summary List complete rosters within the manager's current scope
+ */
+
+export function useListSchedules<TData = Awaited<ReturnType<typeof listSchedules>>, TError = ErrorType<void>>(
+ params?: ListSchedulesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listSchedules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListSchedulesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateScheduleUrl = () => {
+
+
+
+
+  return `/api/schedules`
+}
+
+/**
+ * Managers select active workforce accounts from one facility within their current scope, including their own clinical shifts. At most one non-cancelled roster may include an employee in a month. Infeasible coverage is returned explicitly as shortages. These configurable planning checks do not assert labor-law or clinical staffing compliance.
+ * @summary Generate and save a deterministic monthly draft
+ */
+export const createSchedule = async (createScheduleRequest: CreateScheduleRequest, options?: Parameters<typeof customFetch>[1]): Promise<Schedule> => {
+
+  return customFetch<Schedule>(getCreateScheduleUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createScheduleRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateScheduleMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSchedule>>, TError,{data: BodyType<CreateScheduleRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createSchedule>>, TError,{data: BodyType<CreateScheduleRequest>}, TContext> => {
+
+const mutationKey = ['createSchedule'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createSchedule>>, {data: BodyType<CreateScheduleRequest>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createSchedule(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateScheduleMutationResult = NonNullable<Awaited<ReturnType<typeof createSchedule>>>
+    export type CreateScheduleMutationBody = BodyType<CreateScheduleRequest>
+    export type CreateScheduleMutationError = ErrorType<void>
+
+    /**
+ * @summary Generate and save a deterministic monthly draft
+ */
+export const useCreateSchedule = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSchedule>>, TError,{data: BodyType<CreateScheduleRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createSchedule>>,
+        TError,
+        {data: BodyType<CreateScheduleRequest>},
+        TContext
+      > => {
+      return useMutation(getCreateScheduleMutationOptions(options));
+    }
+
+export const getGetMySchedulesUrl = (params: GetMySchedulesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/schedules/mine?${stringifiedParams}` : `/api/schedules/mine`
+}
+
+/**
+ * @summary Read only the caller's published assignments
+ */
+export const getMySchedules = async (params: GetMySchedulesParams, options?: Parameters<typeof customFetch>[1]): Promise<MySchedule[]> => {
+
+  return customFetch<MySchedule[]>(getGetMySchedulesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMySchedulesQueryKey = (params?: GetMySchedulesParams,) => {
+    return [
+    `/api/schedules/mine`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetMySchedulesQueryOptions = <TData = Awaited<ReturnType<typeof getMySchedules>>, TError = ErrorType<unknown>>(params: GetMySchedulesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMySchedules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMySchedulesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMySchedules>>> = ({ signal }) => getMySchedules(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMySchedules>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMySchedulesQueryResult = NonNullable<Awaited<ReturnType<typeof getMySchedules>>>
+export type GetMySchedulesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read only the caller's published assignments
+ */
+
+export function useGetMySchedules<TData = Awaited<ReturnType<typeof getMySchedules>>, TError = ErrorType<unknown>>(
+ params: GetMySchedulesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMySchedules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMySchedulesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetTeamSchedulesUrl = (params: GetTeamSchedulesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/schedules/team?${stringifiedParams}` : `/api/schedules/team`
+}
+
+/**
+ * Returns the complete published roster shared by the caller and their active roster teammates in the same current facility. Published roster membership defines this team boundary. Teammate exposure is limited to display names and shift assignments. Drafts, cancelled rosters, availability constraints, edit metadata, inactive users, and cross-facility participants are never returned. A roster with any inactive or out-of-facility participant fails closed as invisible.
+ * @summary Read the caller's published team roster
+ */
+export const getTeamSchedules = async (params: GetTeamSchedulesParams, options?: Parameters<typeof customFetch>[1]): Promise<TeamSchedule[]> => {
+
+  return customFetch<TeamSchedule[]>(getGetTeamSchedulesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTeamSchedulesQueryKey = (params?: GetTeamSchedulesParams,) => {
+    return [
+    `/api/schedules/team`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetTeamSchedulesQueryOptions = <TData = Awaited<ReturnType<typeof getTeamSchedules>>, TError = ErrorType<unknown>>(params: GetTeamSchedulesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTeamSchedules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTeamSchedulesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTeamSchedules>>> = ({ signal }) => getTeamSchedules(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTeamSchedules>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetTeamSchedulesQueryResult = NonNullable<Awaited<ReturnType<typeof getTeamSchedules>>>
+export type GetTeamSchedulesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Read the caller's published team roster
+ */
+
+export function useGetTeamSchedules<TData = Awaited<ReturnType<typeof getTeamSchedules>>, TError = ErrorType<unknown>>(
+ params: GetTeamSchedulesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getTeamSchedules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetTeamSchedulesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetScheduleUrl = (id: number,) => {
+
+
+
+
+  return `/api/schedules/${id}`
+}
+
+/**
+ * @summary Read a complete scoped roster
+ */
+export const getSchedule = async (id: number, options?: Parameters<typeof customFetch>[1]): Promise<Schedule> => {
+
+  return customFetch<Schedule>(getGetScheduleUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetScheduleQueryKey = (id: number,) => {
+    return [
+    `/api/schedules/${id}`
+    ] as const;
+    }
+
+
+export const getGetScheduleQueryOptions = <TData = Awaited<ReturnType<typeof getSchedule>>, TError = ErrorType<void>>(id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSchedule>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetScheduleQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSchedule>>> = ({ signal }) => getSchedule(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSchedule>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetScheduleQueryResult = NonNullable<Awaited<ReturnType<typeof getSchedule>>>
+export type GetScheduleQueryError = ErrorType<void>
+
+
+/**
+ * @summary Read a complete scoped roster
+ */
+
+export function useGetSchedule<TData = Awaited<ReturnType<typeof getSchedule>>, TError = ErrorType<void>>(
+ id: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSchedule>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetScheduleQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateScheduleUrl = (id: number,) => {
+
+
+
+
+  return `/api/schedules/${id}`
+}
+
+/**
+ * Rejects duplicate employee/day assignments, unknown shifts or employees, unavailable days, insufficient overnight rest, and configured work limits. A published roster is immutable. Adjacent saved rosters are considered for boundary rest and consecutive-day checks.
+ * @summary Validate and replace all assignments in a draft
+ */
+export const updateSchedule = async (id: number,
+    updateScheduleRequest: UpdateScheduleRequest, options?: Parameters<typeof customFetch>[1]): Promise<Schedule> => {
+
+  return customFetch<Schedule>(getUpdateScheduleUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(updateScheduleRequest)
+  }
+);}
+
+
+
+
+
+export const getUpdateScheduleMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSchedule>>, TError,{id: number;data: BodyType<UpdateScheduleRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateSchedule>>, TError,{id: number;data: BodyType<UpdateScheduleRequest>}, TContext> => {
+
+const mutationKey = ['updateSchedule'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateSchedule>>, {id: number;data: BodyType<UpdateScheduleRequest>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateSchedule(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateScheduleMutationResult = NonNullable<Awaited<ReturnType<typeof updateSchedule>>>
+    export type UpdateScheduleMutationBody = BodyType<UpdateScheduleRequest>
+    export type UpdateScheduleMutationError = ErrorType<void>
+
+    /**
+ * @summary Validate and replace all assignments in a draft
+ */
+export const useUpdateSchedule = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSchedule>>, TError,{id: number;data: BodyType<UpdateScheduleRequest>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateSchedule>>,
+        TError,
+        {id: number;data: BodyType<UpdateScheduleRequest>},
+        TContext
+      > => {
+      return useMutation(getUpdateScheduleMutationOptions(options));
+    }
+
+export const getPublishScheduleUrl = (id: number,) => {
+
+
+
+
+  return `/api/schedules/${id}/publish`
+}
+
+/**
+ * Rechecks active participants, complete current manager scope, all configured constraints, adjacent rosters and coverage under transactional locks. Published assignments become visible to each participant separately.
+ * @summary Publish a validated, fully covered draft
+ */
+export const publishSchedule = async (id: number,
+    scheduleVersionBody: ScheduleVersionBody, options?: Parameters<typeof customFetch>[1]): Promise<Schedule> => {
+
+  return customFetch<Schedule>(getPublishScheduleUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(scheduleVersionBody)
+  }
+);}
+
+
+
+
+
+export const getPublishScheduleMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishSchedule>>, TError,{id: number;data: BodyType<ScheduleVersionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof publishSchedule>>, TError,{id: number;data: BodyType<ScheduleVersionBody>}, TContext> => {
+
+const mutationKey = ['publishSchedule'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof publishSchedule>>, {id: number;data: BodyType<ScheduleVersionBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  publishSchedule(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PublishScheduleMutationResult = NonNullable<Awaited<ReturnType<typeof publishSchedule>>>
+    export type PublishScheduleMutationBody = BodyType<ScheduleVersionBody>
+    export type PublishScheduleMutationError = ErrorType<void>
+
+    /**
+ * @summary Publish a validated, fully covered draft
+ */
+export const usePublishSchedule = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof publishSchedule>>, TError,{id: number;data: BodyType<ScheduleVersionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof publishSchedule>>,
+        TError,
+        {id: number;data: BodyType<ScheduleVersionBody>},
+        TContext
+      > => {
+      return useMutation(getPublishScheduleMutationOptions(options));
+    }
+
+export const getReopenScheduleUrl = (id: number,) => {
+
+
+
+
+  return `/api/schedules/${id}/reopen`
+}
+
+/**
+ * Versioned and audited. Immediately removes the roster from employees' published views until republished.
+ * @summary Withdraw a published roster into an editable draft
+ */
+export const reopenSchedule = async (id: number,
+    scheduleVersionBody: ScheduleVersionBody, options?: Parameters<typeof customFetch>[1]): Promise<Schedule> => {
+
+  return customFetch<Schedule>(getReopenScheduleUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(scheduleVersionBody)
+  }
+);}
+
+
+
+
+
+export const getReopenScheduleMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reopenSchedule>>, TError,{id: number;data: BodyType<ScheduleVersionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof reopenSchedule>>, TError,{id: number;data: BodyType<ScheduleVersionBody>}, TContext> => {
+
+const mutationKey = ['reopenSchedule'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof reopenSchedule>>, {id: number;data: BodyType<ScheduleVersionBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  reopenSchedule(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ReopenScheduleMutationResult = NonNullable<Awaited<ReturnType<typeof reopenSchedule>>>
+    export type ReopenScheduleMutationBody = BodyType<ScheduleVersionBody>
+    export type ReopenScheduleMutationError = ErrorType<void>
+
+    /**
+ * @summary Withdraw a published roster into an editable draft
+ */
+export const useReopenSchedule = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof reopenSchedule>>, TError,{id: number;data: BodyType<ScheduleVersionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof reopenSchedule>>,
+        TError,
+        {id: number;data: BodyType<ScheduleVersionBody>},
+        TContext
+      > => {
+      return useMutation(getReopenScheduleMutationOptions(options));
+    }
+
+export const getCancelScheduleUrl = (id: number,) => {
+
+
+
+
+  return `/api/schedules/${id}/cancel`
+}
+
+/**
+ * Releases monthly employee membership so a corrected draft can be created. Published rosters must be reopened first. Cancelled rosters remain available by ID to fully scoped managers but are excluded from monthly lists and employee views.
+ * @summary Cancel a draft while preserving its history
+ */
+export const cancelSchedule = async (id: number,
+    scheduleVersionBody: ScheduleVersionBody, options?: Parameters<typeof customFetch>[1]): Promise<Schedule> => {
+
+  return customFetch<Schedule>(getCancelScheduleUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(scheduleVersionBody)
+  }
+);}
+
+
+
+
+
+export const getCancelScheduleMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelSchedule>>, TError,{id: number;data: BodyType<ScheduleVersionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelSchedule>>, TError,{id: number;data: BodyType<ScheduleVersionBody>}, TContext> => {
+
+const mutationKey = ['cancelSchedule'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelSchedule>>, {id: number;data: BodyType<ScheduleVersionBody>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  cancelSchedule(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelScheduleMutationResult = NonNullable<Awaited<ReturnType<typeof cancelSchedule>>>
+    export type CancelScheduleMutationBody = BodyType<ScheduleVersionBody>
+    export type CancelScheduleMutationError = ErrorType<void>
+
+    /**
+ * @summary Cancel a draft while preserving its history
+ */
+export const useCancelSchedule = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelSchedule>>, TError,{id: number;data: BodyType<ScheduleVersionBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelSchedule>>,
+        TError,
+        {id: number;data: BodyType<ScheduleVersionBody>},
+        TContext
+      > => {
+      return useMutation(getCancelScheduleMutationOptions(options));
+    }
 
 export const getRequestUploadUrlUrl = () => {
 

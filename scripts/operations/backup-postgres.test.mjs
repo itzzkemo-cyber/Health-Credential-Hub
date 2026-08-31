@@ -198,6 +198,62 @@ test(
     INSERT INTO users (email,password_hash,name,name_ar,role,facility_id) VALUES ('employee-a@example.invalid','not-a-login-hash','Synthetic A','Synthetic A','employee',1),('employee-b@example.invalid','not-a-login-hash','Synthetic B','Synthetic B','employee',2);
     INSERT INTO credentials (employee_id,type,holder_name,holder_name_ar,issuer_name,issuer_name_ar,certificate_number,issue_date,expiry_date,file_url,file_type,qr_token) VALUES (1,'BLS','Synthetic A','Synthetic A','Fixture Issuer','Fixture Issuer','FIXTURE-A','2026-01-01','2028-01-01','/objects/uploads/11111111-1111-4111-8111-111111111111','application/pdf','fixture-a'),(2,'BLS','Synthetic B','Synthetic B','Fixture Issuer','Fixture Issuer','FIXTURE-B','2026-01-01','2028-01-01','/objects/uploads/22222222-2222-4222-8222-222222222222','image/jpeg','fixture-b');`,
     );
+    // Fixed test-only workforce records never pass through a runtime seed path.
+    // Exercise published, draft and retained cancelled rosters, including the
+    // released membership that permits a replacement in the same month.
+    const dayConfiguration = {
+      employeeIds: [1],
+      shiftTypes: [
+        {
+          code: "D",
+          label: "Fixture day",
+          labelAr: "Fixture day",
+          startTime: "08:00",
+          endTime: "16:00",
+          requiredPerDay: 1,
+        },
+      ],
+      constraints: {
+        minRestHours: 16,
+        maxConsecutiveDays: 31,
+        maxShiftsPerMonth: 31,
+      },
+      unavailability: [],
+    };
+    const nightConfiguration = {
+      employeeIds: [2],
+      shiftTypes: [
+        {
+          code: "N",
+          label: "Fixture night",
+          labelAr: "Fixture night",
+          startTime: "20:00",
+          endTime: "04:00",
+          requiredPerDay: 1,
+        },
+      ],
+      constraints: {
+        minRestHours: 12,
+        maxConsecutiveDays: 6,
+        maxShiftsPerMonth: 20,
+      },
+      unavailability: [{ employeeId: 2, date: "2026-09-03" }],
+    };
+    const publishedAssignments = Array.from({ length: 30 }, (_, day) => ({
+      employeeId: 1,
+      date: `2026-09-${String(day + 1).padStart(2, "0")}`,
+      shiftCode: "D",
+    }));
+    await sql(
+      "hch_fixture_source",
+      `INSERT INTO users (email,password_hash,name,name_ar,role,facility_id) VALUES ('roster-admin@example.invalid','not-a-login-hash','Synthetic Administrator','Synthetic Administrator','system_admin',1);
+    INSERT INTO shift_schedules (facility_id,title,month,status,row_version,configuration,assignments,created_by,updated_by) VALUES
+      (1,'Synthetic published roster','2026-09','published',3,'${JSON.stringify(dayConfiguration)}'::jsonb,'${JSON.stringify(publishedAssignments)}'::jsonb,3,3),
+      (2,'Synthetic draft roster','2026-09','draft',2,'${JSON.stringify(nightConfiguration)}'::jsonb,'[{"employeeId":2,"date":"2026-09-01","shiftCode":"N"}]'::jsonb,3,3),
+      (1,'Synthetic cancelled roster','2026-09','cancelled',4,'${JSON.stringify(dayConfiguration)}'::jsonb,'[]'::jsonb,3,3);
+    INSERT INTO shift_schedule_members (schedule_id,employee_id,month,released_at) VALUES
+      (1,1,'2026-09',NULL),(2,2,'2026-09',NULL),(3,1,'2026-09','2026-08-31T00:00:00Z');`,
+    );
     const fixtureObjects = [
       {
         key: "private/uploads/11111111-1111-4111-8111-111111111111",
@@ -218,9 +274,19 @@ test(
     ];
     const archive = path.join(base, "encrypted-backup");
     const destination = path.join(base, "restored-data");
-    const sourceRows = await sql(
-      "hch_fixture_source",
-      `SELECT json_build_object('facilities',(SELECT json_agg(row_to_json(f)) FROM facilities f),'users',(SELECT json_agg(row_to_json(u)) FROM users u),'credentials',(SELECT json_agg(row_to_json(c)) FROM credentials c));`,
+    const snapshotQuery = `SELECT json_build_object(
+      'facilities',(SELECT json_agg(row_to_json(f) ORDER BY f.id) FROM facilities f),
+      'users',(SELECT json_agg(row_to_json(u) ORDER BY u.id) FROM users u),
+      'credentials',(SELECT json_agg(row_to_json(c) ORDER BY c.id) FROM credentials c),
+      'shift_schedules',(SELECT json_agg(row_to_json(s) ORDER BY s.id) FROM shift_schedules s),
+      'shift_schedule_members',(SELECT json_agg(row_to_json(m) ORDER BY m.id) FROM shift_schedule_members m));`;
+    const sourceRows = await sql("hch_fixture_source", snapshotQuery);
+    const sourceSnapshot = JSON.parse(sourceRows);
+    assert.equal(sourceSnapshot.shift_schedules.length, 3);
+    assert.equal(sourceSnapshot.shift_schedule_members.length, 3);
+    assert.deepEqual(
+      sourceSnapshot.shift_schedules.map((row) => row.status),
+      ["published", "draft", "cancelled"],
     );
     const sourceTables = await sql(
       "hch_fixture_source",
@@ -270,10 +336,7 @@ test(
       dumpPath: path.join(destination, "database.dump"),
       confirmation: "RESTORE_DATABASE:hch_restore_verified",
     });
-    const restoredRows = await sql(
-      "hch_restore_verified",
-      `SELECT json_build_object('facilities',(SELECT json_agg(row_to_json(f)) FROM facilities f),'users',(SELECT json_agg(row_to_json(u)) FROM users u),'credentials',(SELECT json_agg(row_to_json(c)) FROM credentials c));`,
-    );
+    const restoredRows = await sql("hch_restore_verified", snapshotQuery);
     const restoredTables = await sql(
       "hch_restore_verified",
       `SELECT string_agg(tablename,',' ORDER BY tablename) FROM pg_tables WHERE schemaname='public';`,
@@ -281,6 +344,16 @@ test(
     assert.equal(restoredRows, sourceRows);
     assert.equal(restoredTables, sourceTables);
     assert.equal(await compareRestoredObjects(manifest, destination), 2);
+    // The restored partial unique index still prevents two live memberships;
+    // the cancelled membership in the snapshot remains available for history.
+    await sql(
+      "hch_restore_verified",
+      `DO $drill$ BEGIN
+        INSERT INTO shift_schedule_members (schedule_id,employee_id,month) VALUES (1,1,'2026-09');
+        RAISE EXCEPTION 'Duplicate active membership unexpectedly accepted';
+      EXCEPTION WHEN unique_violation THEN NULL;
+      END; $drill$;`,
+    );
     // A second invocation must not overwrite a target that contains restored data.
     await assert.rejects(
       restoreLocalDatabase({
@@ -336,8 +409,11 @@ test(
         schemaMigrations: journal.entries.length,
         restoredTables: sourceTables.split(",").length,
         facilities: 2,
-        users: 2,
+        users: 3,
         credentials: 2,
+        shiftSchedules: 3,
+        shiftScheduleMembers: 3,
+        scheduleStateAndMembershipMatches: true,
         objects: result.objectCount,
         databaseBytes: result.databaseBytes,
         checksumAndAclMatches: true,

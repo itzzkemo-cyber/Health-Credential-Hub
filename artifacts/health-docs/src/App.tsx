@@ -48,6 +48,7 @@ const ReportsView = lazy(() => import("@/pages/reports"));
 const PoliciesList = lazy(() => import("@/pages/policies"));
 const VerifyQR = lazy(() => import("@/pages/verify"));
 const Settings = lazy(() => import("@/pages/settings"));
+const Schedules = lazy(() => import("@/pages/schedules"));
 const NotFound = lazy(() => import("@/pages/not-found"));
 
 type AppRole =
@@ -233,6 +234,7 @@ function Router() {
               </AllowedRoles>
             </Route>
             <Route path="/settings" component={Settings} />
+            <Route path="/schedules" component={Schedules} />
 
             <Route component={NotFound} />
           </Switch>

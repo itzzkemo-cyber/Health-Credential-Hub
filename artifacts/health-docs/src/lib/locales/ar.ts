@@ -1,4 +1,7 @@
+import { schedulesAr } from "./schedules";
+
 export const ar = {
+  schedules: schedulesAr,
   common: {
     dashboard: "لوحة القيادة",
     credentials: "الوثائق",

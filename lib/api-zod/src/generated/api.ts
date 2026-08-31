@@ -9,6 +9,686 @@ import * as zod from 'zod';
 
 
 /**
+ * Returns at most 100 schedules for the requested month (current month by default). A roster is visible only when every participant is in scope. Employees use /schedules/mine instead.
+ * @summary List complete rosters within the manager's current scope
+ */
+export const listSchedulesQueryMonthRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])$');
+
+
+export const ListSchedulesQueryParams = zod.object({
+  "month": zod.coerce.string().regex(listSchedulesQueryMonthRegExp).optional()
+})
+
+export const ListSchedulesResponseItem = zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['draft', 'published', 'cancelled']),
+  "version": zod.number().int(),
+  "employeeCount": zod.number().int(),
+  "shortageCount": zod.number().int(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+export const ListSchedulesResponse = zod.array(ListSchedulesResponseItem)
+
+
+/**
+ * Managers select active workforce accounts from one facility within their current scope, including their own clinical shifts. At most one non-cancelled roster may include an employee in a month. Infeasible coverage is returned explicitly as shortages. These configurable planning checks do not assert labor-law or clinical staffing compliance.
+ * @summary Generate and save a deterministic monthly draft
+ */
+export const createScheduleBodyTitleMax = 120;
+
+export const createScheduleBodyMonthRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])$');
+
+export const createScheduleBodyEmployeeIdsMax = 200;
+
+export const createScheduleBodyShiftTypesItemCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const createScheduleBodyShiftTypesItemLabelMax = 80;
+
+export const createScheduleBodyShiftTypesItemLabelArMax = 80;
+
+export const createScheduleBodyShiftTypesItemStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createScheduleBodyShiftTypesItemEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createScheduleBodyShiftTypesItemRequiredPerDayMin = 0;
+export const createScheduleBodyShiftTypesItemRequiredPerDayMax = 200;
+
+export const createScheduleBodyShiftTypesMax = 6;
+
+export const createScheduleBodyConstraintsMinRestHoursMin = 0;
+export const createScheduleBodyConstraintsMinRestHoursMax = 24;
+
+export const createScheduleBodyConstraintsMaxConsecutiveDaysMax = 31;
+
+export const createScheduleBodyConstraintsMaxShiftsPerMonthMax = 31;
+
+
+export const createScheduleBodyUnavailabilityItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+export const createScheduleBodyUnavailabilityMax = 6200;
+
+
+
+export const CreateScheduleBody = zod.object({
+  "title": zod.string().min(1).max(createScheduleBodyTitleMax),
+  "month": zod.string().regex(createScheduleBodyMonthRegExp),
+  "employeeIds": zod.array(zod.number().int().min(1)).min(1).max(createScheduleBodyEmployeeIdsMax),
+  "shiftTypes": zod.array(zod.object({
+  "code": zod.string().regex(createScheduleBodyShiftTypesItemCodeRegExp),
+  "label": zod.string().min(1).max(createScheduleBodyShiftTypesItemLabelMax),
+  "labelAr": zod.string().min(1).max(createScheduleBodyShiftTypesItemLabelArMax),
+  "startTime": zod.string().regex(createScheduleBodyShiftTypesItemStartTimeRegExp),
+  "endTime": zod.string().regex(createScheduleBodyShiftTypesItemEndTimeRegExp),
+  "requiredPerDay": zod.number().int().min(createScheduleBodyShiftTypesItemRequiredPerDayMin).max(createScheduleBodyShiftTypesItemRequiredPerDayMax)
+}).describe('Facility-local Asia\/Riyadh wall-clock times. End at or before start rolls into the next day; duration must be greater than zero and no more than 16 hours. This is not a general DST-aware timezone scheduler.')).min(1).max(createScheduleBodyShiftTypesMax),
+  "constraints": zod.object({
+  "minRestHours": zod.number().int().min(createScheduleBodyConstraintsMinRestHoursMin).max(createScheduleBodyConstraintsMinRestHoursMax),
+  "maxConsecutiveDays": zod.number().int().min(1).max(createScheduleBodyConstraintsMaxConsecutiveDaysMax),
+  "maxShiftsPerMonth": zod.number().int().min(1).max(createScheduleBodyConstraintsMaxShiftsPerMonthMax)
+}),
+  "unavailability": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(createScheduleBodyUnavailabilityItemDateRegExp)
+})).max(createScheduleBodyUnavailabilityMax)
+})
+
+export const createScheduleResponseTwoShiftTypesItemCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const createScheduleResponseTwoShiftTypesItemLabelMax = 80;
+
+export const createScheduleResponseTwoShiftTypesItemLabelArMax = 80;
+
+export const createScheduleResponseTwoShiftTypesItemStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createScheduleResponseTwoShiftTypesItemEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const createScheduleResponseTwoShiftTypesItemRequiredPerDayMin = 0;
+export const createScheduleResponseTwoShiftTypesItemRequiredPerDayMax = 200;
+
+export const createScheduleResponseTwoConstraintsMinRestHoursMin = 0;
+export const createScheduleResponseTwoConstraintsMinRestHoursMax = 24;
+
+export const createScheduleResponseTwoConstraintsMaxConsecutiveDaysMax = 31;
+
+export const createScheduleResponseTwoConstraintsMaxShiftsPerMonthMax = 31;
+
+
+export const createScheduleResponseTwoUnavailabilityItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+
+export const createScheduleResponseTwoAssignmentsItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+export const createScheduleResponseTwoAssignmentsItemShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+
+
+export const CreateScheduleResponse = zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['draft', 'published', 'cancelled']),
+  "version": zod.number().int(),
+  "employeeCount": zod.number().int(),
+  "shortageCount": zod.number().int(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).and(zod.object({
+  "facilityId": zod.number().int(),
+  "employeeIds": zod.array(zod.number().int()),
+  "shiftTypes": zod.array(zod.object({
+  "code": zod.string().regex(createScheduleResponseTwoShiftTypesItemCodeRegExp),
+  "label": zod.string().min(1).max(createScheduleResponseTwoShiftTypesItemLabelMax),
+  "labelAr": zod.string().min(1).max(createScheduleResponseTwoShiftTypesItemLabelArMax),
+  "startTime": zod.string().regex(createScheduleResponseTwoShiftTypesItemStartTimeRegExp),
+  "endTime": zod.string().regex(createScheduleResponseTwoShiftTypesItemEndTimeRegExp),
+  "requiredPerDay": zod.number().int().min(createScheduleResponseTwoShiftTypesItemRequiredPerDayMin).max(createScheduleResponseTwoShiftTypesItemRequiredPerDayMax)
+}).describe('Facility-local Asia\/Riyadh wall-clock times. End at or before start rolls into the next day; duration must be greater than zero and no more than 16 hours. This is not a general DST-aware timezone scheduler.')),
+  "constraints": zod.object({
+  "minRestHours": zod.number().int().min(createScheduleResponseTwoConstraintsMinRestHoursMin).max(createScheduleResponseTwoConstraintsMinRestHoursMax),
+  "maxConsecutiveDays": zod.number().int().min(1).max(createScheduleResponseTwoConstraintsMaxConsecutiveDaysMax),
+  "maxShiftsPerMonth": zod.number().int().min(1).max(createScheduleResponseTwoConstraintsMaxShiftsPerMonthMax)
+}),
+  "unavailability": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(createScheduleResponseTwoUnavailabilityItemDateRegExp)
+})),
+  "assignments": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(createScheduleResponseTwoAssignmentsItemDateRegExp),
+  "shiftCode": zod.string().regex(createScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
+})),
+  "shortages": zod.array(zod.object({
+  "date": zod.string(),
+  "shiftCode": zod.string(),
+  "required": zod.number().int(),
+  "assigned": zod.number().int()
+})),
+  "warnings": zod.array(zod.string())
+}))
+
+
+/**
+ * @summary Read only the caller's published assignments
+ */
+export const getMySchedulesQueryMonthRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])$');
+
+
+export const GetMySchedulesQueryParams = zod.object({
+  "month": zod.coerce.string().regex(getMySchedulesQueryMonthRegExp)
+})
+
+export const getMySchedulesResponseShiftTypesItemCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const getMySchedulesResponseShiftTypesItemLabelMax = 80;
+
+export const getMySchedulesResponseShiftTypesItemLabelArMax = 80;
+
+export const getMySchedulesResponseShiftTypesItemStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const getMySchedulesResponseShiftTypesItemEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
+export const getMySchedulesResponseAssignmentsItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+export const getMySchedulesResponseAssignmentsItemShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+
+
+export const GetMySchedulesResponseItem = zod.object({
+  "scheduleId": zod.number().int(),
+  "title": zod.string(),
+  "month": zod.string(),
+  "shiftTypes": zod.array(zod.object({
+  "code": zod.string().regex(getMySchedulesResponseShiftTypesItemCodeRegExp),
+  "label": zod.string().min(1).max(getMySchedulesResponseShiftTypesItemLabelMax),
+  "labelAr": zod.string().min(1).max(getMySchedulesResponseShiftTypesItemLabelArMax),
+  "startTime": zod.string().regex(getMySchedulesResponseShiftTypesItemStartTimeRegExp),
+  "endTime": zod.string().regex(getMySchedulesResponseShiftTypesItemEndTimeRegExp)
+})),
+  "assignments": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(getMySchedulesResponseAssignmentsItemDateRegExp),
+  "shiftCode": zod.string().regex(getMySchedulesResponseAssignmentsItemShiftCodeRegExp)
+}))
+})
+export const GetMySchedulesResponse = zod.array(GetMySchedulesResponseItem)
+
+
+/**
+ * Returns the complete published roster shared by the caller and their active roster teammates in the same current facility. Published roster membership defines this team boundary. Teammate exposure is limited to display names and shift assignments. Drafts, cancelled rosters, availability constraints, edit metadata, inactive users, and cross-facility participants are never returned. A roster with any inactive or out-of-facility participant fails closed as invisible.
+ * @summary Read the caller's published team roster
+ */
+export const getTeamSchedulesQueryMonthRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])$');
+
+
+export const GetTeamSchedulesQueryParams = zod.object({
+  "month": zod.coerce.string().regex(getTeamSchedulesQueryMonthRegExp)
+})
+
+export const getTeamSchedulesResponseShiftTypesItemCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const getTeamSchedulesResponseShiftTypesItemLabelMax = 80;
+
+export const getTeamSchedulesResponseShiftTypesItemLabelArMax = 80;
+
+export const getTeamSchedulesResponseShiftTypesItemStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const getTeamSchedulesResponseShiftTypesItemEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+
+
+export const getTeamSchedulesResponseAssignmentsItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+export const getTeamSchedulesResponseAssignmentsItemShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+
+
+export const GetTeamSchedulesResponseItem = zod.object({
+  "scheduleId": zod.number().int(),
+  "title": zod.string(),
+  "month": zod.string(),
+  "shiftTypes": zod.array(zod.object({
+  "code": zod.string().regex(getTeamSchedulesResponseShiftTypesItemCodeRegExp),
+  "label": zod.string().min(1).max(getTeamSchedulesResponseShiftTypesItemLabelMax),
+  "labelAr": zod.string().min(1).max(getTeamSchedulesResponseShiftTypesItemLabelArMax),
+  "startTime": zod.string().regex(getTeamSchedulesResponseShiftTypesItemStartTimeRegExp),
+  "endTime": zod.string().regex(getTeamSchedulesResponseShiftTypesItemEndTimeRegExp)
+})),
+  "participants": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "name": zod.string(),
+  "nameAr": zod.string()
+})),
+  "assignments": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(getTeamSchedulesResponseAssignmentsItemDateRegExp),
+  "shiftCode": zod.string().regex(getTeamSchedulesResponseAssignmentsItemShiftCodeRegExp)
+}))
+})
+export const GetTeamSchedulesResponse = zod.array(GetTeamSchedulesResponseItem)
+
+
+/**
+ * @summary Read a complete scoped roster
+ */
+
+
+
+export const GetScheduleParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+export const getScheduleResponseTwoShiftTypesItemCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const getScheduleResponseTwoShiftTypesItemLabelMax = 80;
+
+export const getScheduleResponseTwoShiftTypesItemLabelArMax = 80;
+
+export const getScheduleResponseTwoShiftTypesItemStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const getScheduleResponseTwoShiftTypesItemEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const getScheduleResponseTwoShiftTypesItemRequiredPerDayMin = 0;
+export const getScheduleResponseTwoShiftTypesItemRequiredPerDayMax = 200;
+
+export const getScheduleResponseTwoConstraintsMinRestHoursMin = 0;
+export const getScheduleResponseTwoConstraintsMinRestHoursMax = 24;
+
+export const getScheduleResponseTwoConstraintsMaxConsecutiveDaysMax = 31;
+
+export const getScheduleResponseTwoConstraintsMaxShiftsPerMonthMax = 31;
+
+
+export const getScheduleResponseTwoUnavailabilityItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+
+export const getScheduleResponseTwoAssignmentsItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+export const getScheduleResponseTwoAssignmentsItemShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+
+
+export const GetScheduleResponse = zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['draft', 'published', 'cancelled']),
+  "version": zod.number().int(),
+  "employeeCount": zod.number().int(),
+  "shortageCount": zod.number().int(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).and(zod.object({
+  "facilityId": zod.number().int(),
+  "employeeIds": zod.array(zod.number().int()),
+  "shiftTypes": zod.array(zod.object({
+  "code": zod.string().regex(getScheduleResponseTwoShiftTypesItemCodeRegExp),
+  "label": zod.string().min(1).max(getScheduleResponseTwoShiftTypesItemLabelMax),
+  "labelAr": zod.string().min(1).max(getScheduleResponseTwoShiftTypesItemLabelArMax),
+  "startTime": zod.string().regex(getScheduleResponseTwoShiftTypesItemStartTimeRegExp),
+  "endTime": zod.string().regex(getScheduleResponseTwoShiftTypesItemEndTimeRegExp),
+  "requiredPerDay": zod.number().int().min(getScheduleResponseTwoShiftTypesItemRequiredPerDayMin).max(getScheduleResponseTwoShiftTypesItemRequiredPerDayMax)
+}).describe('Facility-local Asia\/Riyadh wall-clock times. End at or before start rolls into the next day; duration must be greater than zero and no more than 16 hours. This is not a general DST-aware timezone scheduler.')),
+  "constraints": zod.object({
+  "minRestHours": zod.number().int().min(getScheduleResponseTwoConstraintsMinRestHoursMin).max(getScheduleResponseTwoConstraintsMinRestHoursMax),
+  "maxConsecutiveDays": zod.number().int().min(1).max(getScheduleResponseTwoConstraintsMaxConsecutiveDaysMax),
+  "maxShiftsPerMonth": zod.number().int().min(1).max(getScheduleResponseTwoConstraintsMaxShiftsPerMonthMax)
+}),
+  "unavailability": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(getScheduleResponseTwoUnavailabilityItemDateRegExp)
+})),
+  "assignments": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(getScheduleResponseTwoAssignmentsItemDateRegExp),
+  "shiftCode": zod.string().regex(getScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
+})),
+  "shortages": zod.array(zod.object({
+  "date": zod.string(),
+  "shiftCode": zod.string(),
+  "required": zod.number().int(),
+  "assigned": zod.number().int()
+})),
+  "warnings": zod.array(zod.string())
+}))
+
+
+/**
+ * Rejects duplicate employee/day assignments, unknown shifts or employees, unavailable days, insufficient overnight rest, and configured work limits. A published roster is immutable. Adjacent saved rosters are considered for boundary rest and consecutive-day checks.
+ * @summary Validate and replace all assignments in a draft
+ */
+
+
+
+export const UpdateScheduleParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+
+
+export const updateScheduleBodyAssignmentsItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+export const updateScheduleBodyAssignmentsItemShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const updateScheduleBodyAssignmentsMax = 6200;
+
+
+
+export const UpdateScheduleBody = zod.object({
+  "expectedVersion": zod.number().int().min(1),
+  "assignments": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(updateScheduleBodyAssignmentsItemDateRegExp),
+  "shiftCode": zod.string().regex(updateScheduleBodyAssignmentsItemShiftCodeRegExp)
+})).max(updateScheduleBodyAssignmentsMax)
+})
+
+export const updateScheduleResponseTwoShiftTypesItemCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const updateScheduleResponseTwoShiftTypesItemLabelMax = 80;
+
+export const updateScheduleResponseTwoShiftTypesItemLabelArMax = 80;
+
+export const updateScheduleResponseTwoShiftTypesItemStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateScheduleResponseTwoShiftTypesItemEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const updateScheduleResponseTwoShiftTypesItemRequiredPerDayMin = 0;
+export const updateScheduleResponseTwoShiftTypesItemRequiredPerDayMax = 200;
+
+export const updateScheduleResponseTwoConstraintsMinRestHoursMin = 0;
+export const updateScheduleResponseTwoConstraintsMinRestHoursMax = 24;
+
+export const updateScheduleResponseTwoConstraintsMaxConsecutiveDaysMax = 31;
+
+export const updateScheduleResponseTwoConstraintsMaxShiftsPerMonthMax = 31;
+
+
+export const updateScheduleResponseTwoUnavailabilityItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+
+export const updateScheduleResponseTwoAssignmentsItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+export const updateScheduleResponseTwoAssignmentsItemShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+
+
+export const UpdateScheduleResponse = zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['draft', 'published', 'cancelled']),
+  "version": zod.number().int(),
+  "employeeCount": zod.number().int(),
+  "shortageCount": zod.number().int(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).and(zod.object({
+  "facilityId": zod.number().int(),
+  "employeeIds": zod.array(zod.number().int()),
+  "shiftTypes": zod.array(zod.object({
+  "code": zod.string().regex(updateScheduleResponseTwoShiftTypesItemCodeRegExp),
+  "label": zod.string().min(1).max(updateScheduleResponseTwoShiftTypesItemLabelMax),
+  "labelAr": zod.string().min(1).max(updateScheduleResponseTwoShiftTypesItemLabelArMax),
+  "startTime": zod.string().regex(updateScheduleResponseTwoShiftTypesItemStartTimeRegExp),
+  "endTime": zod.string().regex(updateScheduleResponseTwoShiftTypesItemEndTimeRegExp),
+  "requiredPerDay": zod.number().int().min(updateScheduleResponseTwoShiftTypesItemRequiredPerDayMin).max(updateScheduleResponseTwoShiftTypesItemRequiredPerDayMax)
+}).describe('Facility-local Asia\/Riyadh wall-clock times. End at or before start rolls into the next day; duration must be greater than zero and no more than 16 hours. This is not a general DST-aware timezone scheduler.')),
+  "constraints": zod.object({
+  "minRestHours": zod.number().int().min(updateScheduleResponseTwoConstraintsMinRestHoursMin).max(updateScheduleResponseTwoConstraintsMinRestHoursMax),
+  "maxConsecutiveDays": zod.number().int().min(1).max(updateScheduleResponseTwoConstraintsMaxConsecutiveDaysMax),
+  "maxShiftsPerMonth": zod.number().int().min(1).max(updateScheduleResponseTwoConstraintsMaxShiftsPerMonthMax)
+}),
+  "unavailability": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(updateScheduleResponseTwoUnavailabilityItemDateRegExp)
+})),
+  "assignments": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(updateScheduleResponseTwoAssignmentsItemDateRegExp),
+  "shiftCode": zod.string().regex(updateScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
+})),
+  "shortages": zod.array(zod.object({
+  "date": zod.string(),
+  "shiftCode": zod.string(),
+  "required": zod.number().int(),
+  "assigned": zod.number().int()
+})),
+  "warnings": zod.array(zod.string())
+}))
+
+
+/**
+ * Rechecks active participants, complete current manager scope, all configured constraints, adjacent rosters and coverage under transactional locks. Published assignments become visible to each participant separately.
+ * @summary Publish a validated, fully covered draft
+ */
+
+
+
+export const PublishScheduleParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+
+
+
+export const PublishScheduleBody = zod.object({
+  "expectedVersion": zod.number().int().min(1)
+})
+
+export const publishScheduleResponseTwoShiftTypesItemCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const publishScheduleResponseTwoShiftTypesItemLabelMax = 80;
+
+export const publishScheduleResponseTwoShiftTypesItemLabelArMax = 80;
+
+export const publishScheduleResponseTwoShiftTypesItemStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const publishScheduleResponseTwoShiftTypesItemEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const publishScheduleResponseTwoShiftTypesItemRequiredPerDayMin = 0;
+export const publishScheduleResponseTwoShiftTypesItemRequiredPerDayMax = 200;
+
+export const publishScheduleResponseTwoConstraintsMinRestHoursMin = 0;
+export const publishScheduleResponseTwoConstraintsMinRestHoursMax = 24;
+
+export const publishScheduleResponseTwoConstraintsMaxConsecutiveDaysMax = 31;
+
+export const publishScheduleResponseTwoConstraintsMaxShiftsPerMonthMax = 31;
+
+
+export const publishScheduleResponseTwoUnavailabilityItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+
+export const publishScheduleResponseTwoAssignmentsItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+export const publishScheduleResponseTwoAssignmentsItemShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+
+
+export const PublishScheduleResponse = zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['draft', 'published', 'cancelled']),
+  "version": zod.number().int(),
+  "employeeCount": zod.number().int(),
+  "shortageCount": zod.number().int(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).and(zod.object({
+  "facilityId": zod.number().int(),
+  "employeeIds": zod.array(zod.number().int()),
+  "shiftTypes": zod.array(zod.object({
+  "code": zod.string().regex(publishScheduleResponseTwoShiftTypesItemCodeRegExp),
+  "label": zod.string().min(1).max(publishScheduleResponseTwoShiftTypesItemLabelMax),
+  "labelAr": zod.string().min(1).max(publishScheduleResponseTwoShiftTypesItemLabelArMax),
+  "startTime": zod.string().regex(publishScheduleResponseTwoShiftTypesItemStartTimeRegExp),
+  "endTime": zod.string().regex(publishScheduleResponseTwoShiftTypesItemEndTimeRegExp),
+  "requiredPerDay": zod.number().int().min(publishScheduleResponseTwoShiftTypesItemRequiredPerDayMin).max(publishScheduleResponseTwoShiftTypesItemRequiredPerDayMax)
+}).describe('Facility-local Asia\/Riyadh wall-clock times. End at or before start rolls into the next day; duration must be greater than zero and no more than 16 hours. This is not a general DST-aware timezone scheduler.')),
+  "constraints": zod.object({
+  "minRestHours": zod.number().int().min(publishScheduleResponseTwoConstraintsMinRestHoursMin).max(publishScheduleResponseTwoConstraintsMinRestHoursMax),
+  "maxConsecutiveDays": zod.number().int().min(1).max(publishScheduleResponseTwoConstraintsMaxConsecutiveDaysMax),
+  "maxShiftsPerMonth": zod.number().int().min(1).max(publishScheduleResponseTwoConstraintsMaxShiftsPerMonthMax)
+}),
+  "unavailability": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(publishScheduleResponseTwoUnavailabilityItemDateRegExp)
+})),
+  "assignments": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(publishScheduleResponseTwoAssignmentsItemDateRegExp),
+  "shiftCode": zod.string().regex(publishScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
+})),
+  "shortages": zod.array(zod.object({
+  "date": zod.string(),
+  "shiftCode": zod.string(),
+  "required": zod.number().int(),
+  "assigned": zod.number().int()
+})),
+  "warnings": zod.array(zod.string())
+}))
+
+
+/**
+ * Versioned and audited. Immediately removes the roster from employees' published views until republished.
+ * @summary Withdraw a published roster into an editable draft
+ */
+
+
+
+export const ReopenScheduleParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+
+
+
+export const ReopenScheduleBody = zod.object({
+  "expectedVersion": zod.number().int().min(1)
+})
+
+export const reopenScheduleResponseTwoShiftTypesItemCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const reopenScheduleResponseTwoShiftTypesItemLabelMax = 80;
+
+export const reopenScheduleResponseTwoShiftTypesItemLabelArMax = 80;
+
+export const reopenScheduleResponseTwoShiftTypesItemStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const reopenScheduleResponseTwoShiftTypesItemEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const reopenScheduleResponseTwoShiftTypesItemRequiredPerDayMin = 0;
+export const reopenScheduleResponseTwoShiftTypesItemRequiredPerDayMax = 200;
+
+export const reopenScheduleResponseTwoConstraintsMinRestHoursMin = 0;
+export const reopenScheduleResponseTwoConstraintsMinRestHoursMax = 24;
+
+export const reopenScheduleResponseTwoConstraintsMaxConsecutiveDaysMax = 31;
+
+export const reopenScheduleResponseTwoConstraintsMaxShiftsPerMonthMax = 31;
+
+
+export const reopenScheduleResponseTwoUnavailabilityItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+
+export const reopenScheduleResponseTwoAssignmentsItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+export const reopenScheduleResponseTwoAssignmentsItemShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+
+
+export const ReopenScheduleResponse = zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['draft', 'published', 'cancelled']),
+  "version": zod.number().int(),
+  "employeeCount": zod.number().int(),
+  "shortageCount": zod.number().int(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).and(zod.object({
+  "facilityId": zod.number().int(),
+  "employeeIds": zod.array(zod.number().int()),
+  "shiftTypes": zod.array(zod.object({
+  "code": zod.string().regex(reopenScheduleResponseTwoShiftTypesItemCodeRegExp),
+  "label": zod.string().min(1).max(reopenScheduleResponseTwoShiftTypesItemLabelMax),
+  "labelAr": zod.string().min(1).max(reopenScheduleResponseTwoShiftTypesItemLabelArMax),
+  "startTime": zod.string().regex(reopenScheduleResponseTwoShiftTypesItemStartTimeRegExp),
+  "endTime": zod.string().regex(reopenScheduleResponseTwoShiftTypesItemEndTimeRegExp),
+  "requiredPerDay": zod.number().int().min(reopenScheduleResponseTwoShiftTypesItemRequiredPerDayMin).max(reopenScheduleResponseTwoShiftTypesItemRequiredPerDayMax)
+}).describe('Facility-local Asia\/Riyadh wall-clock times. End at or before start rolls into the next day; duration must be greater than zero and no more than 16 hours. This is not a general DST-aware timezone scheduler.')),
+  "constraints": zod.object({
+  "minRestHours": zod.number().int().min(reopenScheduleResponseTwoConstraintsMinRestHoursMin).max(reopenScheduleResponseTwoConstraintsMinRestHoursMax),
+  "maxConsecutiveDays": zod.number().int().min(1).max(reopenScheduleResponseTwoConstraintsMaxConsecutiveDaysMax),
+  "maxShiftsPerMonth": zod.number().int().min(1).max(reopenScheduleResponseTwoConstraintsMaxShiftsPerMonthMax)
+}),
+  "unavailability": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(reopenScheduleResponseTwoUnavailabilityItemDateRegExp)
+})),
+  "assignments": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(reopenScheduleResponseTwoAssignmentsItemDateRegExp),
+  "shiftCode": zod.string().regex(reopenScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
+})),
+  "shortages": zod.array(zod.object({
+  "date": zod.string(),
+  "shiftCode": zod.string(),
+  "required": zod.number().int(),
+  "assigned": zod.number().int()
+})),
+  "warnings": zod.array(zod.string())
+}))
+
+
+/**
+ * Releases monthly employee membership so a corrected draft can be created. Published rosters must be reopened first. Cancelled rosters remain available by ID to fully scoped managers but are excluded from monthly lists and employee views.
+ * @summary Cancel a draft while preserving its history
+ */
+
+
+
+export const CancelScheduleParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+
+
+
+export const CancelScheduleBody = zod.object({
+  "expectedVersion": zod.number().int().min(1)
+})
+
+export const cancelScheduleResponseTwoShiftTypesItemCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const cancelScheduleResponseTwoShiftTypesItemLabelMax = 80;
+
+export const cancelScheduleResponseTwoShiftTypesItemLabelArMax = 80;
+
+export const cancelScheduleResponseTwoShiftTypesItemStartTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const cancelScheduleResponseTwoShiftTypesItemEndTimeRegExp = new RegExp('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+export const cancelScheduleResponseTwoShiftTypesItemRequiredPerDayMin = 0;
+export const cancelScheduleResponseTwoShiftTypesItemRequiredPerDayMax = 200;
+
+export const cancelScheduleResponseTwoConstraintsMinRestHoursMin = 0;
+export const cancelScheduleResponseTwoConstraintsMinRestHoursMax = 24;
+
+export const cancelScheduleResponseTwoConstraintsMaxConsecutiveDaysMax = 31;
+
+export const cancelScheduleResponseTwoConstraintsMaxShiftsPerMonthMax = 31;
+
+
+export const cancelScheduleResponseTwoUnavailabilityItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+
+export const cancelScheduleResponseTwoAssignmentsItemDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$');
+export const cancelScheduleResponseTwoAssignmentsItemShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+
+
+export const CancelScheduleResponse = zod.object({
+  "id": zod.number().int(),
+  "title": zod.string(),
+  "month": zod.string(),
+  "status": zod.enum(['draft', 'published', 'cancelled']),
+  "version": zod.number().int(),
+  "employeeCount": zod.number().int(),
+  "shortageCount": zod.number().int(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).and(zod.object({
+  "facilityId": zod.number().int(),
+  "employeeIds": zod.array(zod.number().int()),
+  "shiftTypes": zod.array(zod.object({
+  "code": zod.string().regex(cancelScheduleResponseTwoShiftTypesItemCodeRegExp),
+  "label": zod.string().min(1).max(cancelScheduleResponseTwoShiftTypesItemLabelMax),
+  "labelAr": zod.string().min(1).max(cancelScheduleResponseTwoShiftTypesItemLabelArMax),
+  "startTime": zod.string().regex(cancelScheduleResponseTwoShiftTypesItemStartTimeRegExp),
+  "endTime": zod.string().regex(cancelScheduleResponseTwoShiftTypesItemEndTimeRegExp),
+  "requiredPerDay": zod.number().int().min(cancelScheduleResponseTwoShiftTypesItemRequiredPerDayMin).max(cancelScheduleResponseTwoShiftTypesItemRequiredPerDayMax)
+}).describe('Facility-local Asia\/Riyadh wall-clock times. End at or before start rolls into the next day; duration must be greater than zero and no more than 16 hours. This is not a general DST-aware timezone scheduler.')),
+  "constraints": zod.object({
+  "minRestHours": zod.number().int().min(cancelScheduleResponseTwoConstraintsMinRestHoursMin).max(cancelScheduleResponseTwoConstraintsMinRestHoursMax),
+  "maxConsecutiveDays": zod.number().int().min(1).max(cancelScheduleResponseTwoConstraintsMaxConsecutiveDaysMax),
+  "maxShiftsPerMonth": zod.number().int().min(1).max(cancelScheduleResponseTwoConstraintsMaxShiftsPerMonthMax)
+}),
+  "unavailability": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(cancelScheduleResponseTwoUnavailabilityItemDateRegExp)
+})),
+  "assignments": zod.array(zod.object({
+  "employeeId": zod.number().int().min(1),
+  "date": zod.string().regex(cancelScheduleResponseTwoAssignmentsItemDateRegExp),
+  "shiftCode": zod.string().regex(cancelScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
+})),
+  "shortages": zod.array(zod.object({
+  "date": zod.string(),
+  "shiftCode": zod.string(),
+  "required": zod.number().int(),
+  "assigned": zod.number().int()
+})),
+  "warnings": zod.array(zod.string())
+}))
+
+
+/**
  * Returns a short-lived private upload capability. The client sends JSON
  * metadata here, then uploads the file with every returned required
  * header. Enabled document intake is restricted to server-mediated

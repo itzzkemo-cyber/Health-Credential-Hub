@@ -231,6 +231,7 @@ test.skipIf(process.env.HCH_AUTH_POSTGRES_DRILL !== "true")(
         );
       }
       const app = express();
+      app.set("trust proxy", "loopback");
       app.use(express.json(), cookieParser());
       app.use((await import("../lib/csrf")).csrfOriginGuard);
       app.use(
@@ -238,26 +239,45 @@ test.skipIf(process.env.HCH_AUTH_POSTGRES_DRILL !== "true")(
         (await import("./employees")).default,
         (await import("./credentials")).default,
         (await import("./storage")).default,
+        (await import("./schedules")).default,
+      );
+      // Keep fixture failures private, just as production's error envelope does.
+      app.use(
+        (
+          _error: unknown,
+          _req: express.Request,
+          res: express.Response,
+          _next: express.NextFunction,
+        ) => {
+          res.status(500).json({ message: "Fixture server error" });
+        },
       );
       server = app.listen(0, "127.0.0.1");
       await new Promise<void>((resolve) => server!.once("listening", resolve));
       const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+      const fixtureAddresses = new Map<string, string>();
       const call = (
         url: string,
         cookie = "",
         body?: unknown,
         method = body ? "POST" : "GET",
-      ) =>
-        fetch(origin + url, {
+      ) => {
+        // Independent fixture identities simulate separate client addresses;
+        // keep the real per-source limiter enabled throughout this drill.
+        if (!fixtureAddresses.has(cookie))
+          fixtureAddresses.set(cookie, `192.0.2.${fixtureAddresses.size + 1}`);
+        return fetch(origin + url, {
           method,
           headers: {
             "Content-Type": "application/json",
             "X-Requested-With": "HealthCredentialHub",
             Origin: origin,
+            "X-Forwarded-For": fixtureAddresses.get(cookie)!,
             ...(cookie ? { Cookie: cookie } : {}),
           },
           ...(body ? { body: JSON.stringify(body) } : {}),
         });
+      };
       const cookieOf = (response: Response) =>
         response.headers.get("set-cookie")?.split(";", 1)[0] ?? "";
       const login = await call("/auth/login", "", {
@@ -396,6 +416,9 @@ test.skipIf(process.env.HCH_AUTH_POSTGRES_DRILL !== "true")(
       expect((await call("/employees", employeeCookie, create)).status).toBe(
         403,
       );
+      await (
+        await import("../test-support/schedulesPostgresDrill")
+      ).runSchedulesPostgresDrill(pool, call, rootCookie);
       await pool.query(
         "UPDATE users SET session_version=session_version+1 WHERE id=2",
       );

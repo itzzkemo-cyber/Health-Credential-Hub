@@ -1,4 +1,7 @@
+import { schedulesEn } from "./schedules";
+
 export const en = {
+  schedules: schedulesEn,
   common: {
     dashboard: "Dashboard",
     credentials: "Credentials",

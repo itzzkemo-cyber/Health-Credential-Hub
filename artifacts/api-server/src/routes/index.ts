@@ -11,6 +11,7 @@ import auditLogsRouter from "./audit-logs";
 import policiesRouter from "./policies";
 import reportsRouter from "./reports";
 import storageRouter from "./storage";
+import schedulesRouter from "./schedules";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(auditLogsRouter);
 router.use(policiesRouter);
 router.use(reportsRouter);
 router.use(storageRouter);
+router.use(schedulesRouter);
 
 export default router;

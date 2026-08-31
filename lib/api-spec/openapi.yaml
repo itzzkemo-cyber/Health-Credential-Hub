@@ -28,10 +28,217 @@ tags:
     description: Credential requirement policies
   - name: reports
     description: Reports and exports
+  - name: schedules
+    description: Scoped monthly employee shift scheduling
 
   - name: Storage
     description: Object storage upload and serving endpoints.
 paths:
+  /schedules:
+    get:
+      tags: [schedules]
+      operationId: listSchedules
+      summary: List complete rosters within the manager's current scope
+      description: Returns at most 100 schedules for the requested month (current month by default). A roster is visible only when every participant is in scope. Employees use /schedules/mine instead.
+      parameters:
+        - in: query
+          name: month
+          schema: { type: string, pattern: "^20[0-9]{2}-(0[1-9]|1[0-2])$" }
+      responses:
+        "200":
+          description: Scoped monthly schedules
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ScheduleSummary" }
+        "403":
+          description: Manager role required
+    post:
+      tags: [schedules]
+      operationId: createSchedule
+      summary: Generate and save a deterministic monthly draft
+      description: Managers select active workforce accounts from one facility within their current scope, including their own clinical shifts. At most one non-cancelled roster may include an employee in a month. Infeasible coverage is returned explicitly as shortages. These configurable planning checks do not assert labor-law or clinical staffing compliance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateScheduleRequest" }
+      responses:
+        "201":
+          description: Persisted draft, including coverage shortages
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Schedule" }
+        "400":
+          description: Invalid configuration
+        "403":
+          description: Manager role or complete participant scope required
+        "409":
+          description: A participant already belongs to a roster in this month
+  /schedules/mine:
+    get:
+      tags: [schedules]
+      operationId: getMySchedules
+      summary: Read only the caller's published assignments
+      parameters:
+        - in: query
+          name: month
+          required: true
+          schema: { type: string, pattern: "^20[0-9]{2}-(0[1-9]|1[0-2])$" }
+      responses:
+        "200":
+          description: Published own assignments only; excludes colleagues and unavailability
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/MySchedule" }
+  /schedules/team:
+    get:
+      tags: [schedules]
+      operationId: getTeamSchedules
+      summary: Read the caller's published team roster
+      description: Returns the complete published roster shared by the caller and their active roster teammates in the same current facility. Published roster membership defines this team boundary. Teammate exposure is limited to display names and shift assignments. Drafts, cancelled rosters, availability constraints, edit metadata, inactive users, and cross-facility participants are never returned. A roster with any inactive or out-of-facility participant fails closed as invisible.
+      parameters:
+        - in: query
+          name: month
+          required: true
+          schema: { type: string, pattern: "^20[0-9]{2}-(0[1-9]|1[0-2])$" }
+      responses:
+        "200":
+          description: Complete published team assignments and participant display names only
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/TeamSchedule" }
+  /schedules/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [schedules]
+      operationId: getSchedule
+      summary: Read a complete scoped roster
+      responses:
+        "200":
+          description: Complete authorized roster
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Schedule" }
+        "404":
+          description: Roster not found in current scope
+    patch:
+      tags: [schedules]
+      operationId: updateSchedule
+      summary: Validate and replace all assignments in a draft
+      description: Rejects duplicate employee/day assignments, unknown shifts or employees, unavailable days, insufficient overnight rest, and configured work limits. A published roster is immutable. Adjacent saved rosters are considered for boundary rest and consecutive-day checks.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateScheduleRequest" }
+      responses:
+        "200":
+          description: Updated validated draft
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Schedule" }
+        "400":
+          description: Invalid assignments
+        "404":
+          description: Roster not found in current scope
+        "409":
+          description: Stale version or published roster
+        "428":
+          description: expectedVersion is required
+  /schedules/{id}/publish:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags: [schedules]
+      operationId: publishSchedule
+      summary: Publish a validated, fully covered draft
+      description: Rechecks active participants, complete current manager scope, all configured constraints, adjacent rosters and coverage under transactional locks. Published assignments become visible to each participant separately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleVersionBody" }
+      responses:
+        "200":
+          description: Published roster
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Schedule" }
+        "404":
+          description: Roster not found in current scope
+        "409":
+          description: Stale version, invalid roster, coverage shortage or already published
+        "428":
+          description: expectedVersion is required
+  /schedules/{id}/reopen:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags: [schedules]
+      operationId: reopenSchedule
+      summary: Withdraw a published roster into an editable draft
+      description: Versioned and audited. Immediately removes the roster from employees' published views until republished.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleVersionBody" }
+      responses:
+        "200":
+          description: Reopened draft
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Schedule" }
+        "404":
+          description: Roster not found in current scope
+        "409":
+          description: Stale version or roster is not published
+        "428":
+          description: expectedVersion is required
+  /schedules/{id}/cancel:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags: [schedules]
+      operationId: cancelSchedule
+      summary: Cancel a draft while preserving its history
+      description: Releases monthly employee membership so a corrected draft can be created. Published rosters must be reopened first. Cancelled rosters remain available by ID to fully scoped managers but are excluded from monthly lists and employee views.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleVersionBody" }
+      responses:
+        "200":
+          description: Cancelled roster with retained history
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Schedule" }
+        "404":
+          description: Roster not found in current scope
+        "409":
+          description: Stale version or roster is not a draft
+        "428":
+          description: expectedVersion is required
   /storage/uploads/request-url:
     post:
       tags: [Storage]
@@ -1453,6 +1660,201 @@ paths:
 
 components:
   schemas:
+    ShiftType:
+      type: object
+      description: Facility-local Asia/Riyadh wall-clock times. End at or before start rolls into the next day; duration must be greater than zero and no more than 16 hours. This is not a general DST-aware timezone scheduler.
+      additionalProperties: false
+      required: [code, label, labelAr, startTime, endTime, requiredPerDay]
+      properties:
+        code: { type: string, pattern: "^[A-Z][A-Z0-9_-]{0,7}$" }
+        label: { type: string, minLength: 1, maxLength: 80 }
+        labelAr: { type: string, minLength: 1, maxLength: 80 }
+        startTime: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        endTime: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        requiredPerDay: { type: integer, minimum: 0, maximum: 200 }
+    ScheduleConstraints:
+      type: object
+      additionalProperties: false
+      required: [minRestHours, maxConsecutiveDays, maxShiftsPerMonth]
+      properties:
+        minRestHours: { type: integer, minimum: 0, maximum: 24 }
+        maxConsecutiveDays: { type: integer, minimum: 1, maximum: 31 }
+        maxShiftsPerMonth: { type: integer, minimum: 1, maximum: 31 }
+    ScheduleUnavailability:
+      type: object
+      additionalProperties: false
+      required: [employeeId, date]
+      properties:
+        employeeId: { type: integer, minimum: 1 }
+        date:
+          { type: string, pattern: "^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$" }
+    ShiftAssignment:
+      type: object
+      additionalProperties: false
+      required: [employeeId, date, shiftCode]
+      properties:
+        employeeId: { type: integer, minimum: 1 }
+        date:
+          { type: string, pattern: "^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$" }
+        shiftCode: { type: string, pattern: "^[A-Z][A-Z0-9_-]{0,7}$" }
+    ScheduleShortage:
+      type: object
+      required: [date, shiftCode, required, assigned]
+      properties:
+        date: { type: string }
+        shiftCode: { type: string }
+        required: { type: integer }
+        assigned: { type: integer }
+    CreateScheduleRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [title, month, employeeIds, shiftTypes, constraints, unavailability]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 120 }
+        month: { type: string, pattern: "^20[0-9]{2}-(0[1-9]|1[0-2])$" }
+        employeeIds:
+          type: array
+          minItems: 1
+          maxItems: 200
+          uniqueItems: true
+          items: { type: integer, minimum: 1 }
+        shiftTypes:
+          type: array
+          minItems: 1
+          maxItems: 6
+          items: { $ref: "#/components/schemas/ShiftType" }
+        constraints: { $ref: "#/components/schemas/ScheduleConstraints" }
+        unavailability:
+          type: array
+          maxItems: 6200
+          items: { $ref: "#/components/schemas/ScheduleUnavailability" }
+    ScheduleVersionBody:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+    UpdateScheduleRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, assignments]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+        assignments:
+          type: array
+          maxItems: 6200
+          items: { $ref: "#/components/schemas/ShiftAssignment" }
+    ScheduleSummary:
+      type: object
+      required:
+        [
+          id,
+          title,
+          month,
+          status,
+          version,
+          employeeCount,
+          shortageCount,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id: { type: integer }
+        title: { type: string }
+        month: { type: string }
+        status: { type: string, enum: [draft, published, cancelled] }
+        version: { type: integer }
+        employeeCount: { type: integer }
+        shortageCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Schedule:
+      allOf:
+        - { $ref: "#/components/schemas/ScheduleSummary" }
+        - type: object
+          required:
+            [
+              facilityId,
+              employeeIds,
+              shiftTypes,
+              constraints,
+              unavailability,
+              assignments,
+              shortages,
+              warnings,
+            ]
+          properties:
+            facilityId: { type: integer }
+            employeeIds:
+              type: array
+              items: { type: integer }
+            shiftTypes:
+              type: array
+              items: { $ref: "#/components/schemas/ShiftType" }
+            constraints: { $ref: "#/components/schemas/ScheduleConstraints" }
+            unavailability:
+              type: array
+              items: { $ref: "#/components/schemas/ScheduleUnavailability" }
+            assignments:
+              type: array
+              items: { $ref: "#/components/schemas/ShiftAssignment" }
+            shortages:
+              type: array
+              items: { $ref: "#/components/schemas/ScheduleShortage" }
+            warnings:
+              type: array
+              items: { type: string }
+    TeamScheduleParticipant:
+      type: object
+      additionalProperties: false
+      required: [employeeId, name, nameAr]
+      properties:
+        employeeId: { type: integer, minimum: 1 }
+        name: { type: string }
+        nameAr: { type: string }
+    TeamShiftType:
+      type: object
+      additionalProperties: false
+      required: [code, label, labelAr, startTime, endTime]
+      properties:
+        code: { type: string, pattern: "^[A-Z][A-Z0-9_-]{0,7}$" }
+        label: { type: string, minLength: 1, maxLength: 80 }
+        labelAr: { type: string, minLength: 1, maxLength: 80 }
+        startTime: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+        endTime: { type: string, pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$" }
+    TeamSchedule:
+      type: object
+      additionalProperties: false
+      required:
+        [scheduleId, title, month, shiftTypes, participants, assignments]
+      properties:
+        scheduleId: { type: integer }
+        title: { type: string }
+        month: { type: string }
+        shiftTypes:
+          type: array
+          items: { $ref: "#/components/schemas/TeamShiftType" }
+        participants:
+          type: array
+          items: { $ref: "#/components/schemas/TeamScheduleParticipant" }
+        assignments:
+          type: array
+          items: { $ref: "#/components/schemas/ShiftAssignment" }
+    MySchedule:
+      type: object
+      additionalProperties: false
+      required: [scheduleId, title, month, shiftTypes, assignments]
+      properties:
+        scheduleId: { type: integer }
+        title: { type: string }
+        month: { type: string }
+        shiftTypes:
+          type: array
+          items: { $ref: "#/components/schemas/TeamShiftType" }
+        assignments:
+          type: array
+          items: { $ref: "#/components/schemas/ShiftAssignment" }
     UploadUrlRequest:
       type: object
       required: [name, size, contentType]

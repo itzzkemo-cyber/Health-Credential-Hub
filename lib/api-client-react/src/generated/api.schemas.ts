@@ -6,6 +6,185 @@
  * OpenAPI spec version: 0.1.0
  */
 /**
+ * Facility-local Asia/Riyadh wall-clock times. End at or before start rolls into the next day; duration must be greater than zero and no more than 16 hours. This is not a general DST-aware timezone scheduler.
+ */
+export interface ShiftType {
+  /** @pattern ^[A-Z][A-Z0-9_-]{0,7}$ */
+  code: string;
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  label: string;
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  labelAr: string;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  startTime: string;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  endTime: string;
+  /**
+     * @minimum 0
+     * @maximum 200
+     */
+  requiredPerDay: number;
+}
+
+export interface ScheduleConstraints {
+  /**
+     * @minimum 0
+     * @maximum 24
+     */
+  minRestHours: number;
+  /**
+     * @minimum 1
+     * @maximum 31
+     */
+  maxConsecutiveDays: number;
+  /**
+     * @minimum 1
+     * @maximum 31
+     */
+  maxShiftsPerMonth: number;
+}
+
+export interface ScheduleUnavailability {
+  /** @minimum 1 */
+  employeeId: number;
+  /** @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$ */
+  date: string;
+}
+
+export interface ShiftAssignment {
+  /** @minimum 1 */
+  employeeId: number;
+  /** @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])-[0-3][0-9]$ */
+  date: string;
+  /** @pattern ^[A-Z][A-Z0-9_-]{0,7}$ */
+  shiftCode: string;
+}
+
+export interface ScheduleShortage {
+  date: string;
+  shiftCode: string;
+  required: number;
+  assigned: number;
+}
+
+export interface CreateScheduleRequest {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  title: string;
+  /** @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])$ */
+  month: string;
+  /**
+     * @minItems 1
+     * @maxItems 200
+     * @items.minimum 1
+     */
+  employeeIds: number[];
+  /**
+     * @minItems 1
+     * @maxItems 6
+     */
+  shiftTypes: ShiftType[];
+  constraints: ScheduleConstraints;
+  /** @maxItems 6200 */
+  unavailability: ScheduleUnavailability[];
+}
+
+export interface ScheduleVersionBody {
+  /** @minimum 1 */
+  expectedVersion: number;
+}
+
+export interface UpdateScheduleRequest {
+  /** @minimum 1 */
+  expectedVersion: number;
+  /** @maxItems 6200 */
+  assignments: ShiftAssignment[];
+}
+
+export type ScheduleSummaryStatus = typeof ScheduleSummaryStatus[keyof typeof ScheduleSummaryStatus];
+
+
+export const ScheduleSummaryStatus = {
+  draft: 'draft',
+  published: 'published',
+  cancelled: 'cancelled',
+} as const;
+
+export interface ScheduleSummary {
+  id: number;
+  title: string;
+  month: string;
+  status: ScheduleSummaryStatus;
+  version: number;
+  employeeCount: number;
+  shortageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type Schedule = ScheduleSummary & {
+  facilityId: number;
+  employeeIds: number[];
+  shiftTypes: ShiftType[];
+  constraints: ScheduleConstraints;
+  unavailability: ScheduleUnavailability[];
+  assignments: ShiftAssignment[];
+  shortages: ScheduleShortage[];
+  warnings: string[];
+};
+
+export interface TeamScheduleParticipant {
+  /** @minimum 1 */
+  employeeId: number;
+  name: string;
+  nameAr: string;
+}
+
+export interface TeamShiftType {
+  /** @pattern ^[A-Z][A-Z0-9_-]{0,7}$ */
+  code: string;
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  label: string;
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  labelAr: string;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  startTime: string;
+  /** @pattern ^([01][0-9]|2[0-3]):[0-5][0-9]$ */
+  endTime: string;
+}
+
+export interface TeamSchedule {
+  scheduleId: number;
+  title: string;
+  month: string;
+  shiftTypes: TeamShiftType[];
+  participants: TeamScheduleParticipant[];
+  assignments: ShiftAssignment[];
+}
+
+export interface MySchedule {
+  scheduleId: number;
+  title: string;
+  month: string;
+  shiftTypes: TeamShiftType[];
+  assignments: ShiftAssignment[];
+}
+
+/**
  * JPEG/PNG is rebuilt as JPEG; eligible PDF is rebuilt as an image-only PDF (at most 5 pages).
  */
 export type UploadUrlRequestContentType = typeof UploadUrlRequestContentType[keyof typeof UploadUrlRequestContentType];
@@ -1025,6 +1204,27 @@ export interface ComplianceReport {
   overallComplianceRate: number;
   departments: DepartmentComplianceDetail[];
 }
+
+export type ListSchedulesParams = {
+/**
+ * @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])$
+ */
+month?: string;
+};
+
+export type GetMySchedulesParams = {
+/**
+ * @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])$
+ */
+month: string;
+};
+
+export type GetTeamSchedulesParams = {
+/**
+ * @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])$
+ */
+month: string;
+};
 
 export type ChangePassword400Code = typeof ChangePassword400Code[keyof typeof ChangePassword400Code];
 

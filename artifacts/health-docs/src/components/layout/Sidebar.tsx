@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   FileBarChart,
   Settings,
+  CalendarDays,
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,20 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
     language === "ar" ? user?.nameAr || user?.name : user?.name || user?.nameAr;
 
   const menuItems = [
+    {
+      icon: CalendarDays,
+      label: t(
+        role === "employee" ? "schedules.team_title" : "schedules.title",
+      ),
+      path: "/schedules",
+      roles: [
+        "employee",
+        "supervisor",
+        "department_manager",
+        "hospital_admin",
+        "system_admin",
+      ],
+    },
     {
       icon: LayoutDashboard,
       label: t("common.dashboard"),

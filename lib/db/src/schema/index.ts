@@ -10,3 +10,4 @@ export * from "./password-reset-tokens";
 export * from "./employee-invitations";
 export * from "./upload-grants";
 export * from "./automation-outbox";
+export * from "./shift-schedules";
