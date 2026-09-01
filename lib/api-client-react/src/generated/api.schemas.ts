@@ -548,6 +548,16 @@ export interface InvitationError {
   messageAr: string;
 }
 
+export type EmployeeInvitationRole = typeof EmployeeInvitationRole[keyof typeof EmployeeInvitationRole];
+
+
+export const EmployeeInvitationRole = {
+  employee: 'employee',
+  supervisor: 'supervisor',
+  department_manager: 'department_manager',
+  hospital_admin: 'hospital_admin',
+} as const;
+
 export interface EmployeeInvitation {
   id: number;
   email: string;
@@ -567,6 +577,7 @@ export interface EmployeeInvitation {
   /** @nullable */
   phone: string | null;
   facilityId: number;
+  role: EmployeeInvitationRole;
   /** @nullable */
   departmentId: number | null;
   /** @nullable */
@@ -927,6 +938,19 @@ export interface EmployeeInput {
   code: string;
 }
 
+/**
+ * Intended account role. Hospital administrators may assign only lower-ranked roles; only system administrators may invite a hospital administrator. system_admin is never assignable here.
+ */
+export type CreateEmployeeInvitationInputRole = typeof CreateEmployeeInvitationInputRole[keyof typeof CreateEmployeeInvitationInputRole];
+
+
+export const CreateEmployeeInvitationInputRole = {
+  employee: 'employee',
+  supervisor: 'supervisor',
+  department_manager: 'department_manager',
+  hospital_admin: 'hospital_admin',
+} as const;
+
 export interface CreateEmployeeInvitationInput {
   /**
      * @minLength 1
@@ -955,6 +979,8 @@ export interface CreateEmployeeInvitationInput {
      * @maxLength 100
      */
   employeeNumber: string;
+  /** Intended account role. Hospital administrators may assign only lower-ranked roles; only system administrators may invite a hospital administrator. system_admin is never assignable here. */
+  role?: CreateEmployeeInvitationInputRole;
   /**
      * Optional Saudi mobile number in E.164 format. Email OTP does not verify this number.
      * @nullable
@@ -1024,13 +1050,13 @@ export interface EmployeeUpdate {
   phone?: string | null;
   isActive?: boolean;
   /**
-     * Required with code when role, departmentId, supervisorId, or isActive actually changes.
+     * Required with code when departmentId, supervisorId, or isActive actually changes. A role-only change is protected by RBAC, audit logging, and target-session revocation without step-up.
      * @minLength 1
      * @maxLength 1024
      */
   currentPassword?: string;
   /**
-     * Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code.
+     * Required with currentPassword when departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code. A role-only change does not consume a code.
      * @minLength 1
      * @maxLength 128
      */

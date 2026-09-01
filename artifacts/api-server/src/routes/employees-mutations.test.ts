@@ -504,16 +504,14 @@ describe("administrative employee mutations", () => {
     expect(testState.committedAudit).toBeNull();
   });
 
-  it("records a non-sensitive old/new role change in the atomic audit", async () => {
+  it("records and revokes sessions for a role-only change without step-up", async () => {
     const response = await request("PATCH", "/employees/2", {
       role: "supervisor",
-      currentPassword: "admin-password",
-      code: "123456",
     });
 
     expect(response.status).toBe(200);
     expect(testState.committedUpdate?.sessionVersion).not.toBe(1);
-    expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
     expect(testState.committedAudit).toEqual(
       expect.objectContaining({
         details: JSON.stringify({
@@ -521,6 +519,54 @@ describe("administrative employee mutations", () => {
         }),
       }),
     );
+  });
+
+  it.each([
+    ["supervisor", 200],
+    ["department_manager", 200],
+    ["hospital_admin", 403],
+    ["system_admin", 403],
+  ])(
+    "enforces the hospital-administrator assignment matrix for %s",
+    async (role, expectedStatus) => {
+      const response = await request("PATCH", "/employees/2", { role });
+
+      expect(response.status).toBe(expectedStatus);
+      if (expectedStatus === 200) {
+        expect(testState.committedUpdate).toEqual(
+          expect.objectContaining({ role }),
+        );
+      } else {
+        expect(testState.committedUpdate).toBeNull();
+      }
+      expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+    },
+  );
+
+  it("lets a system administrator assign hospital_admin but never system_admin", async () => {
+    testState.actor.role = "system_admin";
+    testState.lockedActor.role = "system_admin";
+
+    const allowed = await request("PATCH", "/employees/2", {
+      role: "hospital_admin",
+    });
+    expect(allowed.status).toBe(200);
+    expect(testState.committedUpdate).toEqual(
+      expect.objectContaining({ role: "hospital_admin" }),
+    );
+    if (server) {
+      await new Promise<void>((resolve, reject) =>
+        server!.close((error) => (error ? reject(error) : resolve())),
+      );
+      server = undefined;
+    }
+    testState.committedUpdate = null;
+
+    const denied = await request("PATCH", "/employees/2", {
+      role: "system_admin",
+    });
+    expect(denied.status).toBe(403);
+    expect(testState.committedUpdate).toBeNull();
   });
 
   it("requires atomic supervisor revalidation when changing a role with an existing supervisor", async () => {
@@ -719,9 +765,10 @@ describe("administrative employee mutations", () => {
     expect(testState.committedUpdate?.sessionVersion).not.toBe(1);
   });
 
-  it("requires MFA step-up before an actual organizational change", async () => {
+  it("still requires MFA step-up when a role change also changes department", async () => {
     const response = await request("PATCH", "/employees/2", {
       role: "supervisor",
+      departmentId: 7,
     });
 
     expect(response.status).toBe(403);

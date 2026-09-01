@@ -123,10 +123,13 @@ export function buildEmployeeInvitationInput(
   form: EmployeeAccountForm,
   stepUp: AdminMfaStepUpCredentials,
 ): CreateEmployeeInvitationInput {
+  const role = getInvitationRole(form.role);
+
   return {
     name: form.name.trim(),
     nameAr: form.nameAr.trim(),
     email: form.email.trim().toLowerCase(),
+    role,
     jobTitle: form.jobTitle.trim(),
     jobTitleAr: form.jobTitleAr.trim(),
     employeeNumber: form.employeeNumber.trim(),
@@ -135,6 +138,21 @@ export function buildEmployeeInvitationInput(
     supervisorId: form.supervisorId ? Number(form.supervisorId) : null,
     ...stepUp,
   };
+}
+
+function getInvitationRole(
+  role: string,
+): NonNullable<CreateEmployeeInvitationInput["role"]> {
+  if (
+    role === "employee" ||
+    role === "supervisor" ||
+    role === "department_manager" ||
+    role === "hospital_admin"
+  ) {
+    return role;
+  }
+
+  throw new Error("Unsupported employee invitation role");
 }
 
 export function createEmployeeEditForm(employee: Employee): EmployeeEditForm {
@@ -163,7 +181,7 @@ export function buildEmployeeUpdate(
     nameAr: form.nameAr.trim(),
     jobTitle: form.jobTitle.trim(),
     jobTitleAr: form.jobTitleAr.trim(),
-    phone: form.phone.trim(),
+    phone: form.phone.trim() || null,
     ...(includeOrganizationalFields
       ? {
           role: form.role,
@@ -182,9 +200,9 @@ export function requiresEmployeeCreateStepUp(_role: string): boolean {
   return true;
 }
 
-export function hasEmployeeOrganizationalChanges(
-  employee: Pick<Employee, "role" | "departmentId" | "supervisorId">,
-  form: Pick<EmployeeEditForm, "role" | "departmentId" | "supervisorId">,
+export function hasEmployeeScopeChangesRequiringStepUp(
+  employee: Pick<Employee, "departmentId" | "supervisorId">,
+  form: Pick<EmployeeEditForm, "departmentId" | "supervisorId">,
 ): boolean {
   const departmentId =
     employee.departmentId == null ? "" : String(employee.departmentId);
@@ -192,9 +210,7 @@ export function hasEmployeeOrganizationalChanges(
     employee.supervisorId == null ? "" : String(employee.supervisorId);
 
   return (
-    form.role !== employee.role ||
-    form.departmentId !== departmentId ||
-    form.supervisorId !== supervisorId
+    form.departmentId !== departmentId || form.supervisorId !== supervisorId
   );
 }
 
@@ -211,9 +227,13 @@ export function canEditOrganizationalFields(
 }
 
 export function getAssignableRoles(actorRole: string): string[] {
-  return actorRole === "system_admin"
-    ? ["hospital_admin", "department_manager", "supervisor", "employee"]
-    : ["department_manager", "supervisor", "employee"];
+  if (actorRole === "system_admin") {
+    return ["hospital_admin", "department_manager", "supervisor", "employee"];
+  }
+  if (actorRole === "hospital_admin") {
+    return ["department_manager", "supervisor", "employee"];
+  }
+  return [];
 }
 
 export type DepartmentOption = Pick<

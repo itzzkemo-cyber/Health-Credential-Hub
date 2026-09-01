@@ -38,7 +38,11 @@ import {
   logAudit,
   syncExpiryNotifications,
 } from "../lib/helpers";
-import { canManageTarget, canSuperviseTarget } from "../lib/roleHierarchy";
+import {
+  canAssignRole,
+  canManageTarget,
+  canSuperviseTarget,
+} from "../lib/roleHierarchy";
 import { sessionIssuanceCsrfGuard } from "../lib/csrf";
 import { encryptTotpSecret } from "../lib/totpSecret";
 import { consumeSecondFactor } from "../lib/secondFactor";
@@ -1152,7 +1156,8 @@ router.post(
         (inviter.role !== "hospital_admin" &&
           inviter.role !== "system_admin") ||
         (inviter.role === "hospital_admin" &&
-          inviter.facilityId !== invitation.facilityId)
+          inviter.facilityId !== invitation.facilityId) ||
+        !canAssignRole(inviter, invitation.role)
       ) {
         return { kind: "invalid" as const };
       }
@@ -1175,7 +1180,7 @@ router.post(
           !supervisor ||
           !canSuperviseTarget(supervisor, {
             facilityId: invitation.facilityId,
-            role: "employee",
+            role: invitation.role,
           })
         ) {
           return { kind: "invalid" as const };
@@ -1444,9 +1449,7 @@ router.post(
     if (
       Object.keys(body).some(
         (field) =>
-          field !== "token" &&
-          field !== "password" &&
-          field !== "code",
+          field !== "token" && field !== "password" && field !== "code",
       )
     ) {
       res.status(400).json(INVALID_INVITATION_RESPONSE);
@@ -1863,7 +1866,8 @@ router.post(
           (inviter.role !== "hospital_admin" &&
             inviter.role !== "system_admin") ||
           (inviter.role === "hospital_admin" &&
-            inviter.facilityId !== invitation.facilityId)
+            inviter.facilityId !== invitation.facilityId) ||
+          !canAssignRole(inviter, invitation.role)
         ) {
           return invalidate();
         }
@@ -1886,7 +1890,7 @@ router.post(
             !supervisor ||
             !canSuperviseTarget(supervisor, {
               facilityId: invitation.facilityId,
-              role: "employee",
+              role: invitation.role,
             })
           ) {
             return invalidate();
@@ -1907,7 +1911,7 @@ router.post(
               passwordHash,
               name: invitation.name,
               nameAr: invitation.nameAr,
-              role: "employee",
+              role: invitation.role,
               departmentId: invitation.departmentId,
               supervisorId: invitation.supervisorId,
               facilityId: invitation.facilityId,
@@ -1982,7 +1986,11 @@ router.post(
           actionAr: "قبول دعوة الموظف",
           target: "Account",
           targetAr: "الحساب",
-          details: null,
+          details: JSON.stringify({
+            role: acceptedUser.role,
+            departmentId: acceptedUser.departmentId,
+            supervisorId: acceptedUser.supervisorId,
+          }),
           ipAddress: req.ip ?? null,
         });
         return { kind: "accepted" as const };

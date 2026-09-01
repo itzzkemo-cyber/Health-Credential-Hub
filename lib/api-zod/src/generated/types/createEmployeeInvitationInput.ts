@@ -5,6 +5,7 @@
  * HealthDocs - Healthcare Credential Management Platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { CreateEmployeeInvitationInputRole } from './createEmployeeInvitationInputRole';
 
 export interface CreateEmployeeInvitationInput {
   /**
@@ -34,6 +35,8 @@ export interface CreateEmployeeInvitationInput {
      * @maxLength 100
      */
   employeeNumber: string;
+  /** Intended account role. Hospital administrators may assign only lower-ranked roles; only system administrators may invite a hospital administrator. system_admin is never assignable here. */
+  role?: CreateEmployeeInvitationInputRole;
   /**
      * Optional Saudi mobile number in E.164 format. Email OTP does not verify this number.
      * @nullable

@@ -524,14 +524,10 @@ router.post(
       typeof req.body === "object" && req.body !== null
         ? (req.body as Record<string, unknown>)
         : {};
-    if (
-      Object.prototype.hasOwnProperty.call(body, "role") ||
-      Object.prototype.hasOwnProperty.call(body, "password")
-    ) {
+    if (Object.prototype.hasOwnProperty.call(body, "password")) {
       res.status(400).json({
-        message:
-          "Role and password cannot be supplied when inviting an employee",
-        messageAr: "لا يمكن تحديد الدور أو كلمة المرور عند دعوة موظف",
+        message: "Password cannot be supplied when inviting an employee",
+        messageAr: "لا يمكن تحديد كلمة المرور عند دعوة موظف",
       });
       return;
     }
@@ -542,6 +538,13 @@ router.post(
     const jobTitle = requiredTrimmedString(body, "jobTitle", 200);
     const jobTitleAr = requiredTrimmedString(body, "jobTitleAr", 200);
     const employeeNumber = requiredTrimmedString(body, "employeeNumber", 100);
+    const requestedRole =
+      body.role == null
+        ? ("employee" as const)
+        : typeof body.role === "string" &&
+            USER_ROLES.includes(body.role as User["role"])
+          ? (body.role as User["role"])
+          : null;
     const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
       ? body.currentPassword
       : null;
@@ -561,6 +564,7 @@ router.post(
       !jobTitle ||
       !jobTitleAr ||
       !employeeNumber ||
+      !requestedRole ||
       !currentPassword ||
       !stepUpCode ||
       phone === undefined
@@ -675,6 +679,9 @@ router.post(
         if (!ADMIN_ROLES.includes(actor.role)) {
           return { kind: "forbidden" as const };
         }
+        if (!canAssignRole(actor, requestedRole)) {
+          return { kind: "role_forbidden" as const };
+        }
         if (!actor.totpEnabled || !actor.totpSecret) {
           return { kind: "admin_mfa_required" as const };
         }
@@ -712,7 +719,7 @@ router.post(
             supervisor.facilityId !== facilityId ||
             !canSuperviseTarget(supervisor, {
               facilityId,
-              role: "employee",
+              role: requestedRole,
             })
           ) {
             return { kind: "invalid_supervisor" as const };
@@ -751,6 +758,7 @@ router.post(
               tokenHash,
               invitedBy: actor.id,
               facilityId,
+              role: requestedRole,
               departmentId,
               supervisorId,
               name,
@@ -773,7 +781,11 @@ router.post(
           actionAr: "إنشاء دعوة موظف",
           target: name,
           targetAr: nameAr,
-          details: null,
+          details: JSON.stringify({
+            role: requestedRole,
+            departmentId,
+            supervisorId,
+          }),
           ipAddress: req.ip ?? null,
         });
         return { kind: "created" as const, invitationId: invitation.id };
@@ -796,6 +808,14 @@ router.post(
     }
     if (result.kind === "forbidden") {
       res.status(403).json({ message: "Forbidden" });
+      return;
+    }
+    if (result.kind === "role_forbidden") {
+      res.status(403).json({
+        code: "role_forbidden",
+        message: "You are not allowed to assign this role",
+        messageAr: "لا تملك صلاحية تعيين هذا الدور",
+      });
       return;
     }
     if (result.kind === "admin_mfa_required") {
@@ -998,6 +1018,7 @@ router.get(
         employeeNumber: employeeInvitationsTable.employeeNumber,
         phone: employeeInvitationsTable.phone,
         facilityId: employeeInvitationsTable.facilityId,
+        role: employeeInvitationsTable.role,
         departmentId: employeeInvitationsTable.departmentId,
         supervisorId: employeeInvitationsTable.supervisorId,
         expiresAt: employeeInvitationsTable.expiresAt,
@@ -1449,11 +1470,11 @@ router.patch(
         }
       }
 
-      // Organizational scope changes are privileged even when the actor is
-      // already an administrator. Require a current password and a replay-safe
-      // second factor while the authorization snapshot is locked.
+      // Scope, reporting-line, and activation changes require a fresh
+      // password plus replay-safe second factor. Role-only changes still run
+      // through the locked RBAC hierarchy, audit trail, and session revocation
+      // above, but deliberately do not require step-up verification.
       const requiresOrganizationStepUp =
-        Object.prototype.hasOwnProperty.call(patch, "role") ||
         Object.prototype.hasOwnProperty.call(patch, "departmentId") ||
         Object.prototype.hasOwnProperty.call(patch, "supervisorId") ||
         Object.prototype.hasOwnProperty.call(patch, "isActive");

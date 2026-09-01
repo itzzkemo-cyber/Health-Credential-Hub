@@ -1,0 +1,2 @@
+ALTER TABLE "employee_invitations" ADD COLUMN "role" text DEFAULT 'employee' NOT NULL;--> statement-breakpoint
+ALTER TABLE "employee_invitations" ADD CONSTRAINT "employee_invitations_assignable_role" CHECK ("employee_invitations"."role" in ('employee', 'supervisor', 'department_manager', 'hospital_admin'));

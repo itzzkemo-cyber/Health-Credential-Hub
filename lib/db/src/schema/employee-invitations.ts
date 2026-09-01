@@ -11,7 +11,7 @@ import {
 import { sql } from "drizzle-orm";
 import { departmentsTable } from "./departments";
 import { facilitiesTable } from "./facilities";
-import { usersTable } from "./users";
+import { USER_ROLES, usersTable } from "./users";
 
 /**
  * Administrator-issued, single-use employee invitations.
@@ -33,6 +33,7 @@ export const employeeInvitationsTable = pgTable(
     facilityId: integer("facility_id")
       .notNull()
       .references(() => facilitiesTable.id, { onDelete: "restrict" }),
+    role: text("role", { enum: USER_ROLES }).notNull().default("employee"),
     departmentId: integer("department_id").references(
       () => departmentsTable.id,
       { onDelete: "restrict" },
@@ -82,6 +83,10 @@ export const employeeInvitationsTable = pgTable(
     check(
       "employee_invitations_expiry_after_creation",
       sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+    check(
+      "employee_invitations_assignable_role",
+      sql`${table.role} in ('employee', 'supervisor', 'department_manager', 'hospital_admin')`,
     ),
   ],
 );

@@ -1244,11 +1244,12 @@ paths:
       tags: [employees]
       summary: Send a single-use employee registration invitation
       description: >-
-        Hospital and system administrators only. The server hardcodes the role
-        to employee, derives and validates tenant scope, consumes a fresh
-        password plus TOTP/backup-code step-up, stores only a SHA-256 token
-        digest, and emails a 24-hour single-use link. The raw token is never
-        returned.
+        Hospital and system administrators only. The server validates the
+        requested role against the administrator's current role hierarchy,
+        derives and validates tenant scope, consumes a fresh password plus
+        TOTP/backup-code step-up, stores only a SHA-256 token digest, and emails
+        a 24-hour single-use link. The raw token is never returned. The stored
+        role and scope are revalidated when the employee accepts the invitation.
       requestBody:
         required: true
         content:
@@ -2339,6 +2340,7 @@ components:
           employeeNumber,
           phone,
           facilityId,
+          role,
           departmentId,
           supervisorId,
           expiresAt,
@@ -2368,6 +2370,9 @@ components:
           type: ["string", "null"]
         facilityId:
           type: integer
+        role:
+          type: string
+          enum: [employee, supervisor, department_manager, hospital_admin]
         departmentId:
           type: ["integer", "null"]
         supervisorId:
@@ -3007,6 +3012,14 @@ components:
           type: string
           minLength: 1
           maxLength: 100
+        role:
+          type: string
+          enum: [employee, supervisor, department_manager, hospital_admin]
+          default: employee
+          description: >-
+            Intended account role. Hospital administrators may assign only
+            lower-ranked roles; only system administrators may invite a
+            hospital administrator. system_admin is never assignable here.
         phone:
           type: ["string", "null"]
           pattern: "^\\+9665[0-9]{8}$"
@@ -3073,12 +3086,12 @@ components:
           format: password
           minLength: 1
           maxLength: 1024
-          description: Required with code when role, departmentId, supervisorId, or isActive actually changes.
+          description: Required with code when departmentId, supervisorId, or isActive actually changes. A role-only change is protected by RBAC, audit logging, and target-session revocation without step-up.
         code:
           type: string
           minLength: 1
           maxLength: 128
-          description: Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code.
+          description: Required with currentPassword when departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code. A role-only change does not consume a code.
 
     # Department
     DepartmentSummary:

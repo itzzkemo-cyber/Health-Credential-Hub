@@ -356,7 +356,7 @@ export const en = {
     invite_employee_description:
       "Enter the authoritative organizational details, then email the employee a secure link to choose their own password.",
     invitation_employee_role_hint:
-      "Invitations create employee accounts only; administrative roles cannot be granted through this path.",
+      "Choose the employee's role before sending the invitation. Only roles within your administrative scope are available.",
     invitation_step_up_hint:
       "Sending an employee invitation is a protected administrative action. Enter your current password and two-factor or backup code.",
     invitation_email_title: "Secure delivery to the employee's email",
@@ -413,6 +413,10 @@ export const en = {
       "This number is verified. Changing it requires a dedicated re-verification flow.",
     phone_reverification_required:
       "A verified mobile number cannot be changed from profile editing. Use the re-verification flow when available.",
+    invalid_phone:
+      "Enter a Saudi mobile number in +9665XXXXXXXX format, or leave the field empty.",
+    update_rate_limited:
+      "Too many account update attempts were made. Wait briefly, then try again.",
     facility: "Facility",
     select_facility: "Select a facility",
     facility_create_hint:
@@ -427,7 +431,7 @@ export const en = {
     create_step_up_hint:
       "Creating any employee account directly is a protected administrative action that requires your current password and two-factor or backup code.",
     update_step_up_hint:
-      "Changing the role, department, or supervisor requires your current password and two-factor code or a backup code.",
+      "Changing the department or supervisor requires your current password and two-factor or backup code. A role-only change can be saved directly within your permissions.",
     step_up_required:
       "Enter your current administrator password and verification code to complete this change.",
     temporary_password: "Temporary password",

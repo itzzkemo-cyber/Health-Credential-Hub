@@ -226,7 +226,6 @@ export default function EmployeesList() {
   const openInviteEmployee = () => {
     resetCreateEmployeeForm();
     setEmployeeDialogMode("invitation");
-    setEmployeeForm((previous) => ({ ...previous, role: "employee" }));
     setIsCreateOpen(true);
   };
 
@@ -819,42 +818,39 @@ export default function EmployeesList() {
                 </div>
               )}
 
-              {isInvitationMode ? (
-                <div className="space-y-2">
-                  <Label>{t("employees_page.role")}</Label>
-                  <div className="flex min-h-11 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
-                    {t("roles.employee")}
-                  </div>
+              <div className="space-y-2">
+                <Label htmlFor="employee-role">
+                  {t("employees_page.role")}
+                </Label>
+                <Select
+                  value={employeeForm.role}
+                  onValueChange={(role) => {
+                    clearCreateStepUpSecrets();
+                    setCreateFeedbackKey(null);
+                    setEmployeeForm((previous) => ({
+                      ...previous,
+                      role,
+                      supervisorId: "",
+                    }));
+                  }}
+                >
+                  <SelectTrigger id="employee-role" className="min-h-11">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assignableRoles.map((role) => (
+                      <SelectItem key={role} value={role}>
+                        {t(`roles.${role}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {isInvitationMode && (
                   <p className="text-xs leading-5 text-muted-foreground">
                     {t("employees_page.invitation_employee_role_hint")}
                   </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label htmlFor="employee-role">
-                    {t("employees_page.role")}
-                  </Label>
-                  <Select
-                    value={employeeForm.role}
-                    onValueChange={(role) => {
-                      clearCreateStepUpSecrets();
-                      setCreateFeedbackKey(null);
-                      setEmployeeForm((previous) => ({ ...previous, role }));
-                    }}
-                  >
-                    <SelectTrigger id="employee-role" className="min-h-11">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {assignableRoles.map((role) => (
-                        <SelectItem key={role} value={role}>
-                          {t(`roles.${role}`)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+                )}
+              </div>
 
               <div className="space-y-2">
                 <Label htmlFor="employee-department">
@@ -1324,7 +1320,7 @@ export default function EmployeesList() {
   );
 }
 
-function InvitationCard({
+export function InvitationCard({
   invitation,
   facilityLabel,
   isRTL,
@@ -1369,7 +1365,7 @@ function InvitationCard({
             </p>
           </div>
           <Badge variant="secondary" className="shrink-0">
-            {t("roles.employee")}
+            {t(`roles.${invitation.role}`)}
           </Badge>
         </div>
 

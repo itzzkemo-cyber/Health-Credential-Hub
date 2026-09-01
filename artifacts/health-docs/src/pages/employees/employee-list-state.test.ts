@@ -15,7 +15,7 @@ import {
   getInvitationDisplayName,
   getInvitationListParams,
   getSupervisorOptions,
-  hasEmployeeOrganizationalChanges,
+  hasEmployeeScopeChangesRequiringStepUp,
   isPasswordDeliveryReady,
   requiresEmployeeCreateStepUp,
 } from "./employee-list-state";
@@ -154,14 +154,14 @@ describe("employee list presentation", () => {
     });
   });
 
-  it("builds an employee-only invitation without a role or password", () => {
+  it("builds an invitation with the selected assignable role and no password", () => {
     const payload = buildEmployeeInvitationInput(
       {
         name: " Noura ",
         nameAr: " نورة ",
         email: " Noura@Hospital.SA ",
         password: "must-never-be-sent",
-        role: "system_admin",
+        role: "supervisor",
         departmentId: "4",
         supervisorId: "8",
         facilityId: "3",
@@ -176,6 +176,7 @@ describe("employee list presentation", () => {
       name: "Noura",
       nameAr: "نورة",
       email: "noura@hospital.sa",
+      role: "supervisor",
       jobTitle: "Nurse",
       jobTitleAr: "ممرضة",
       employeeNumber: "N-204",
@@ -185,8 +186,28 @@ describe("employee list presentation", () => {
       currentPassword: "admin password",
       code: "123456",
     });
-    expect(payload).not.toHaveProperty("role");
     expect(payload).not.toHaveProperty("password");
+  });
+
+  it("fails closed when an unsupported invitation role reaches the payload builder", () => {
+    expect(() =>
+      buildEmployeeInvitationInput(
+        {
+          name: "Noura",
+          nameAr: "نورة",
+          email: "noura@hospital.sa",
+          password: "must-never-be-sent",
+          role: "system_admin",
+          departmentId: "",
+          supervisorId: "",
+          facilityId: "3",
+          jobTitle: "Nurse",
+          jobTitleAr: "ممرضة",
+          employeeNumber: "N-204",
+        },
+        { currentPassword: "admin password", code: "123456" },
+      ),
+    ).toThrow("Unsupported employee invitation role");
   });
 
   it("generates a strong temporary password without a fixed value", () => {
@@ -236,7 +257,7 @@ describe("employee list presentation", () => {
     expect(payload).not.toHaveProperty("facilityId");
   });
 
-  it("detects only actual organizational changes for update step-up", () => {
+  it("requires step-up for department or supervisor changes but not a role-only change", () => {
     const employee = {
       role: "employee",
       departmentId: 4,
@@ -248,21 +269,23 @@ describe("employee list presentation", () => {
       supervisorId: "",
     };
 
-    expect(hasEmployeeOrganizationalChanges(employee, unchanged)).toBe(false);
+    expect(hasEmployeeScopeChangesRequiringStepUp(employee, unchanged)).toBe(
+      false,
+    );
     expect(
-      hasEmployeeOrganizationalChanges(employee, {
+      hasEmployeeScopeChangesRequiringStepUp(employee, {
         ...unchanged,
         role: "supervisor",
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
-      hasEmployeeOrganizationalChanges(employee, {
+      hasEmployeeScopeChangesRequiringStepUp(employee, {
         ...unchanged,
         departmentId: "5",
       }),
     ).toBe(true);
     expect(
-      hasEmployeeOrganizationalChanges(employee, {
+      hasEmployeeScopeChangesRequiringStepUp(employee, {
         ...unchanged,
         supervisorId: "8",
       }),
@@ -286,6 +309,7 @@ describe("employee list presentation", () => {
     );
 
     expect(payload).toMatchObject({
+      phone: null,
       currentPassword: "administrator password",
       code: "123456",
     });
@@ -324,6 +348,8 @@ describe("employee list presentation", () => {
     expect(getAssignableRoles("hospital_admin")).not.toContain(
       "hospital_admin",
     );
+    expect(getAssignableRoles("supervisor")).toEqual([]);
+    expect(getAssignableRoles("unexpected-role")).toEqual([]);
   });
 
   it("derives only scoped department and active supervisor options", () => {

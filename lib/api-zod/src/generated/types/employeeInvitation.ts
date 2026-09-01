@@ -5,6 +5,7 @@
  * HealthDocs - Healthcare Credential Management Platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { EmployeeInvitationRole } from './employeeInvitationRole';
 
 export interface EmployeeInvitation {
   id: number;
@@ -25,6 +26,7 @@ export interface EmployeeInvitation {
   /** @nullable */
   phone: string | null;
   facilityId: number;
+  role: EmployeeInvitationRole;
   /** @nullable */
   departmentId: number | null;
   /** @nullable */

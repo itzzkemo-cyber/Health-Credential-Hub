@@ -346,6 +346,7 @@ describe("public employee invitation acceptance", () => {
       email: "new.worker@example.sa",
       invitedBy: 1,
       facilityId: 10,
+      role: "employee",
       departmentId: 7,
       supervisorId: 3,
       name: "New Worker",
@@ -514,6 +515,11 @@ describe("public employee invitation acceptance", () => {
         userId: 22,
         facilityId: 10,
         action: "Accepted employee invitation",
+        details: JSON.stringify({
+          role: "employee",
+          departmentId: 7,
+          supervisorId: 3,
+        }),
       }),
     );
     expect(state.setSessionCookie).not.toHaveBeenCalled();
@@ -523,6 +529,42 @@ describe("public employee invitation acceptance", () => {
         verifiedAt: expect.any(Date),
         consumedAt: expect.any(Date),
       }),
+    );
+  });
+
+  it("creates the account with the stored invitation role", async () => {
+    state.invitation!.role = "department_manager";
+    state.invitation!.supervisorId = null;
+    state.supervisor = null;
+
+    const response = await accept();
+
+    expect(response.status).toBe(201);
+    expect(state.userInsert).toEqual(
+      expect.objectContaining({ role: "department_manager", facilityId: 10 }),
+    );
+    expect(state.auditInsert).toEqual(
+      expect.objectContaining({
+        details: JSON.stringify({
+          role: "department_manager",
+          departmentId: 7,
+          supervisorId: null,
+        }),
+      }),
+    );
+  });
+
+  it("lets a system administrator invitation create a hospital administrator", async () => {
+    state.invitation!.role = "hospital_admin";
+    state.invitation!.supervisorId = null;
+    state.inviter!.role = "system_admin";
+    state.supervisor = null;
+
+    const response = await accept();
+
+    expect(response.status).toBe(201);
+    expect(state.userInsert).toEqual(
+      expect.objectContaining({ role: "hospital_admin", facilityId: 10 }),
     );
   });
 
@@ -562,6 +604,45 @@ describe("public employee invitation acceptance", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({ code: "invalid_invitation" }),
     );
+    expect(state.sendEmail).not.toHaveBeenCalled();
+    expect(state.challenge).toBeNull();
+  });
+
+  it("does not send an OTP after a system administrator inviter is demoted below the stored role", async () => {
+    state.challenge = null;
+    state.invitation!.role = "hospital_admin";
+    state.invitation!.supervisorId = null;
+    state.inviter!.role = "hospital_admin";
+    state.supervisor = null;
+
+    const response = await startOtp();
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "invalid_invitation" }),
+    );
+    expect(state.sendEmail).not.toHaveBeenCalled();
+    expect(state.challenge).toBeNull();
+  });
+
+  it("does not send an OTP when the inviter is deactivated", async () => {
+    state.challenge = null;
+    state.inviter!.isActive = false;
+
+    const response = await startOtp();
+
+    expect(response.status).toBe(400);
+    expect(state.sendEmail).not.toHaveBeenCalled();
+    expect(state.challenge).toBeNull();
+  });
+
+  it("rejects OTP dispatch when the stored supervisor is not above the intended role", async () => {
+    state.challenge = null;
+    state.invitation!.role = "supervisor";
+
+    const response = await startOtp();
+
+    expect(response.status).toBe(400);
     expect(state.sendEmail).not.toHaveBeenCalled();
     expect(state.challenge).toBeNull();
   });
@@ -966,6 +1047,36 @@ describe("public employee invitation acceptance", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({ code: "invalid_invitation" }),
     );
+    expect(state.userInsert).toBeNull();
+    expect(state.invitationUpdate).toEqual(
+      expect.objectContaining({ revokedAt: expect.any(Date) }),
+    );
+  });
+
+  it("invalidates a hospital-admin invitation after its system-admin inviter is demoted", async () => {
+    state.invitation!.role = "hospital_admin";
+    state.invitation!.supervisorId = null;
+    state.inviter!.role = "hospital_admin";
+    state.supervisor = null;
+
+    const response = await accept();
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "invalid_invitation" }),
+    );
+    expect(state.userInsert).toBeNull();
+    expect(state.invitationUpdate).toEqual(
+      expect.objectContaining({ revokedAt: expect.any(Date) }),
+    );
+  });
+
+  it("invalidates an invitation when the inviter is deactivated before acceptance", async () => {
+    state.inviter!.isActive = false;
+
+    const response = await accept();
+
+    expect(response.status).toBe(400);
     expect(state.userInsert).toBeNull();
     expect(state.invitationUpdate).toEqual(
       expect.objectContaining({ revokedAt: expect.any(Date) }),

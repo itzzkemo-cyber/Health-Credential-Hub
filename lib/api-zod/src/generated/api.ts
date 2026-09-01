@@ -1798,6 +1798,7 @@ export const ListEmployeeInvitationsResponseItem = zod.object({
   "employeeNumber": zod.string(),
   "phone": zod.string().nullable(),
   "facilityId": zod.number().int(),
+  "role": zod.enum(['employee', 'supervisor', 'department_manager', 'hospital_admin']),
   "departmentId": zod.number().int().nullable(),
   "supervisorId": zod.number().int().nullable(),
   "expiresAt": zod.coerce.date(),
@@ -1807,7 +1808,7 @@ export const ListEmployeeInvitationsResponse = zod.array(ListEmployeeInvitations
 
 
 /**
- * Hospital and system administrators only. The server hardcodes the role to employee, derives and validates tenant scope, consumes a fresh password plus TOTP/backup-code step-up, stores only a SHA-256 token digest, and emails a 24-hour single-use link. The raw token is never returned.
+ * Hospital and system administrators only. The server validates the requested role against the administrator's current role hierarchy, derives and validates tenant scope, consumes a fresh password plus TOTP/backup-code step-up, stores only a SHA-256 token digest, and emails a 24-hour single-use link. The raw token is never returned. The stored role and scope are revalidated when the employee accepts the invitation.
  * @summary Send a single-use employee registration invitation
  */
 export const createEmployeeInvitationBodyNameMax = 200;
@@ -1822,6 +1823,7 @@ export const createEmployeeInvitationBodyJobTitleArMax = 200;
 
 export const createEmployeeInvitationBodyEmployeeNumberMax = 100;
 
+export const createEmployeeInvitationBodyRoleDefault = `employee`;
 export const createEmployeeInvitationBodyPhoneRegExp = new RegExp('^\\+9665[0-9]{8}$');
 
 
@@ -1839,6 +1841,7 @@ export const CreateEmployeeInvitationBody = zod.object({
   "jobTitle": zod.string().min(1).max(createEmployeeInvitationBodyJobTitleMax),
   "jobTitleAr": zod.string().min(1).max(createEmployeeInvitationBodyJobTitleArMax),
   "employeeNumber": zod.string().min(1).max(createEmployeeInvitationBodyEmployeeNumberMax),
+  "role": zod.enum(['employee', 'supervisor', 'department_manager', 'hospital_admin']).default(createEmployeeInvitationBodyRoleDefault).describe('Intended account role. Hospital administrators may assign only lower-ranked roles; only system administrators may invite a hospital administrator. system_admin is never assignable here.'),
   "phone": zod.string().regex(createEmployeeInvitationBodyPhoneRegExp).nullish().describe('Optional Saudi mobile number in E.164 format. Email OTP does not verify this number.'),
   "facilityId": zod.number().int().min(1).nullish().describe('Optional target facility; honored only for system administrators.'),
   "departmentId": zod.number().int().min(1).nullish(),
@@ -1992,8 +1995,8 @@ export const UpdateEmployeeBody = zod.object({
   "jobTitleAr": zod.string().optional(),
   "phone": zod.string().regex(updateEmployeeBodyPhoneRegExp).nullish().describe('May update or clear an unverified phone. Changing a verified phone requires a dedicated re-verification flow.'),
   "isActive": zod.boolean().optional(),
-  "currentPassword": zod.string().min(1).max(updateEmployeeBodyCurrentPasswordMax).optional().describe('Required with code when role, departmentId, supervisorId, or isActive actually changes.'),
-  "code": zod.string().min(1).max(updateEmployeeBodyCodeMax).optional().describe('Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code.')
+  "currentPassword": zod.string().min(1).max(updateEmployeeBodyCurrentPasswordMax).optional().describe('Required with code when departmentId, supervisorId, or isActive actually changes. A role-only change is protected by RBAC, audit logging, and target-session revocation without step-up.'),
+  "code": zod.string().min(1).max(updateEmployeeBodyCodeMax).optional().describe('Required with currentPassword when departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code. A role-only change does not consume a code.')
 })
 
 export const UpdateEmployeeResponse = zod.object({

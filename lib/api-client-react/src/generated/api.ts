@@ -3630,7 +3630,7 @@ export const getCreateEmployeeInvitationUrl = () => {
 }
 
 /**
- * Hospital and system administrators only. The server hardcodes the role to employee, derives and validates tenant scope, consumes a fresh password plus TOTP/backup-code step-up, stores only a SHA-256 token digest, and emails a 24-hour single-use link. The raw token is never returned.
+ * Hospital and system administrators only. The server validates the requested role against the administrator's current role hierarchy, derives and validates tenant scope, consumes a fresh password plus TOTP/backup-code step-up, stores only a SHA-256 token digest, and emails a 24-hour single-use link. The raw token is never returned. The stored role and scope are revalidated when the employee accepts the invitation.
  * @summary Send a single-use employee registration invitation
  */
 export const createEmployeeInvitation = async (createEmployeeInvitationInput: CreateEmployeeInvitationInput, options?: Parameters<typeof customFetch>[1]): Promise<EmployeeInvitationCreated> => {

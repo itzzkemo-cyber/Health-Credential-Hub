@@ -74,7 +74,7 @@ import {
   getDepartmentOptions,
   getEmployeeDisplayName,
   getSupervisorOptions,
-  hasEmployeeOrganizationalChanges,
+  hasEmployeeScopeChangesRequiringStepUp,
 } from "./employee-list-state";
 import { getDepartmentQueryParams } from "./department-query";
 import {
@@ -185,7 +185,7 @@ export default function EmployeeDetail() {
     organizationEditable &&
     emp != null &&
     editForm != null &&
-    hasEmployeeOrganizationalChanges(emp, editForm);
+    hasEmployeeScopeChangesRequiringStepUp(emp, editForm);
   const facility = facilitiesQuery.data?.find(
     (candidate) => candidate.id === emp?.facilityId,
   );
@@ -260,9 +260,13 @@ export default function EmployeeDetail() {
           const fallbackKey =
             code === "phone_reverification_required"
               ? "employees_page.phone_reverification_required"
-              : error instanceof ApiError && error.status === 403
-                ? "employees_page.update_forbidden"
-                : "employees_page.update_failed";
+              : code === "invalid_phone"
+                ? "employees_page.invalid_phone"
+                : error instanceof ApiError && error.status === 429
+                  ? "employees_page.update_rate_limited"
+                  : error instanceof ApiError && error.status === 403
+                    ? "employees_page.update_forbidden"
+                    : "employees_page.update_failed";
           const errorKey = getAdminMfaStepUpErrorKey(code, fallbackKey);
           clearEditStepUpSecrets();
           updateEmployee.reset();

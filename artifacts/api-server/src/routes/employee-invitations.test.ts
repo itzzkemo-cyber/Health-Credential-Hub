@@ -79,6 +79,7 @@ vi.mock("@workspace/db", () => {
     jobTitleAr: "employeeInvitations.jobTitleAr",
     employeeNumber: "employeeInvitations.employeeNumber",
     phone: "employeeInvitations.phone",
+    role: "employeeInvitations.role",
     acceptedAt: "employeeInvitations.acceptedAt",
     revokedAt: "employeeInvitations.revokedAt",
     expiresAt: "employeeInvitations.expiresAt",
@@ -303,7 +304,14 @@ vi.mock("../lib/logger", () => ({
 }));
 
 vi.mock("../lib/roleHierarchy", () => ({
-  canAssignRole: vi.fn(() => true),
+  canAssignRole: vi.fn((actor: { role: string }, requestedRole: string) =>
+    actor.role === "system_admin"
+      ? requestedRole !== "system_admin"
+      : actor.role === "hospital_admin" &&
+        ["employee", "supervisor", "department_manager"].includes(
+          requestedRole,
+        ),
+  ),
   canManageTarget: vi.fn(() => true),
   canSuperviseTarget: vi.fn(
     (
@@ -415,6 +423,7 @@ describe("invite-only employee registration provisioning", () => {
         jobTitle: "Nurse",
         jobTitleAr: "ممرض",
         employeeNumber: "EMP-2",
+        role: "employee",
         phone: "+966500000000",
         currentPassword: " admin password ",
         code: "123456",
@@ -453,6 +462,7 @@ describe("invite-only employee registration provisioning", () => {
         email: "new.worker@example.sa",
         invitedBy: 1,
         facilityId: 10,
+        role: "employee",
         phone: "+966500000000",
       }),
     );
@@ -469,6 +479,11 @@ describe("invite-only employee registration provisioning", () => {
       expect.objectContaining({
         action: "Created employee invitation",
         facilityId: 10,
+        details: JSON.stringify({
+          role: "employee",
+          departmentId: null,
+          supervisorId: null,
+        }),
       }),
     );
     expect(state.comparePassword).toHaveBeenCalledWith(
@@ -525,6 +540,59 @@ describe("invite-only employee registration provisioning", () => {
     expect(state.invitationValues).toBeNull();
   });
 
+  it("lets a hospital administrator choose a lower-ranked role", async () => {
+    const response = await invite({ role: "department_manager" });
+
+    expect(response.status).toBe(201);
+    expect(state.invitationValues).toEqual(
+      expect.objectContaining({ role: "department_manager", facilityId: 10 }),
+    );
+    expect(state.invitationAudit).toEqual(
+      expect.objectContaining({
+        details: JSON.stringify({
+          role: "department_manager",
+          departmentId: null,
+          supervisorId: null,
+        }),
+      }),
+    );
+  });
+
+  it.each(["hospital_admin", "system_admin"])(
+    "does not let a hospital administrator invite a %s",
+    async (role) => {
+      const response = await invite({ role });
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual(
+        expect.objectContaining({ code: "role_forbidden" }),
+      );
+      expect(state.invitationValues).toBeNull();
+      expect(state.sendEmail).not.toHaveBeenCalled();
+    },
+  );
+
+  it("lets a system administrator invite a hospital administrator into an explicit facility", async () => {
+    state.actor.role = "system_admin";
+    state.lockedActor = { ...state.actor };
+    state.facilityRows = [{ id: 99 }];
+
+    const response = await invite({ role: "hospital_admin", facilityId: 99 });
+
+    expect(response.status).toBe(201);
+    expect(state.invitationValues).toEqual(
+      expect.objectContaining({ role: "hospital_admin", facilityId: 99 }),
+    );
+  });
+
+  it("rejects an unknown invitation role before persistence", async () => {
+    const response = await invite({ role: "owner" });
+
+    expect(response.status).toBe(400);
+    expect(state.transactionCount).toBe(0);
+    expect(state.invitationValues).toBeNull();
+  });
+
   it("rejects a department outside the administrator-derived facility", async () => {
     state.departmentRows = [{ id: 7, facilityId: 99 }];
 
@@ -576,6 +644,23 @@ describe("invite-only employee registration provisioning", () => {
     expect(state.invitationValues).toBeNull();
   });
 
+  it("validates the supervisor against the intended invitation role", async () => {
+    state.extraUsers = [
+      {
+        id: 3,
+        role: "supervisor",
+        facilityId: 10,
+        isActive: true,
+        sessionVersion: 1,
+      },
+    ];
+
+    const response = await invite({ role: "supervisor", supervisorId: 3 });
+
+    expect(response.status).toBe(400);
+    expect(state.invitationValues).toBeNull();
+  });
+
   it("revokes the stored invitation when the provider fails", async () => {
     state.sendEmail.mockRejectedValueOnce(new Error("provider failure"));
 
@@ -618,6 +703,7 @@ describe("invite-only employee registration provisioning", () => {
         employeeNumber: "EMP-91",
         phone: null,
         facilityId: 10,
+        role: "department_manager",
         departmentId: null,
         supervisorId: null,
         expiresAt: new Date(Date.now() + 60_000),
@@ -631,6 +717,7 @@ describe("invite-only employee registration provisioning", () => {
 
     expect(response.status).toBe(200);
     expect(body).toHaveLength(1);
+    expect(body[0]?.role).toBe("department_manager");
     expect(body[0]).not.toHaveProperty("tokenHash");
     expect(state.invitationListSelection).not.toHaveProperty("tokenHash");
     expect(JSON.stringify(state.invitationListWhere)).toContain(
