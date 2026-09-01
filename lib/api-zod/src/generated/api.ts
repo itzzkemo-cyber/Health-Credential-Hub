@@ -9,6 +9,290 @@ import * as zod from 'zod';
 
 
 /**
+ * The employee identity and facility come only from the authenticated session. Employee-facing feasibility is evaluated against a published roster only; draft existence, identifiers, versions, coverage, and constraint details are never disclosed. Feasibility is a deterministic planning aid, not an automatic approval or a legal, clinical, or staffing-compliance decision. Notes are optional operational context and must not contain medical details.
+ * @summary Submit a scheduling request for the authenticated employee
+ */
+export const createScheduleRequestBodyStartDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const createScheduleRequestBodyEndDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const createScheduleRequestBodyShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const createScheduleRequestBodyNoteMax = 500;
+
+
+
+export const CreateScheduleRequestBody = zod.object({
+  "kind": zod.enum(['leave', 'preferred_shift', 'off', 'eo']),
+  "startDate": zod.string().regex(createScheduleRequestBodyStartDateRegExp),
+  "endDate": zod.string().regex(createScheduleRequestBodyEndDateRegExp),
+  "shiftCode": zod.string().regex(createScheduleRequestBodyShiftCodeRegExp).optional(),
+  "note": zod.string().min(1).max(createScheduleRequestBodyNoteMax).optional().describe('Optional operational context. Do not include medical details; this field is excluded from audit and notification payloads.')
+})
+
+
+
+export const createScheduleRequestResponseStartDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const createScheduleRequestResponseEndDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const createScheduleRequestResponseShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const createScheduleRequestResponseNoteMax = 500;
+
+
+export const createScheduleRequestResponseFeasibilityReasonCodesMax = 20;
+
+
+
+
+
+
+export const CreateScheduleRequestResponse = zod.object({
+  "id": zod.number().int().min(1),
+  "employee": zod.object({
+  "id": zod.number().int().min(1),
+  "name": zod.string(),
+  "nameAr": zod.string()
+}),
+  "kind": zod.enum(['leave', 'preferred_shift', 'off', 'eo']),
+  "startDate": zod.string().regex(createScheduleRequestResponseStartDateRegExp),
+  "endDate": zod.string().regex(createScheduleRequestResponseEndDateRegExp),
+  "shiftCode": zod.string().regex(createScheduleRequestResponseShiftCodeRegExp).nullable(),
+  "note": zod.string().max(createScheduleRequestResponseNoteMax).nullable(),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'withdrawn']),
+  "version": zod.number().int().min(1),
+  "feasibility": zod.object({
+  "status": zod.enum(['possible', 'conflict', 'unknown']),
+  "reasonCodes": zod.array(zod.string()).max(createScheduleRequestResponseFeasibilityReasonCodesMax),
+  "scheduleId": zod.number().int().min(1).nullable(),
+  "scheduleVersion": zod.number().int().min(1).nullable(),
+  "evaluatedAt": zod.coerce.date()
+}),
+  "decidedBy": zod.number().int().min(1).nullable(),
+  "decidedAt": zod.coerce.date().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).describe('Employee endpoints preserve the feasibility status but return reasonCodes as [generic], scheduleId\/scheduleVersion as null, and decidedBy as null. Authorized review and decision endpoints return the stored detailed snapshot and reviewer identifier.')
+
+
+/**
+ * Returns the advisory status while replacing detailed reason codes with a generic review message and returning null schedule identifiers and versions. Draft roster state is never exposed.
+ * @summary List the authenticated employee's own requests
+ */
+
+
+export const getMyScheduleRequestsResponseStartDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const getMyScheduleRequestsResponseEndDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const getMyScheduleRequestsResponseShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const getMyScheduleRequestsResponseNoteMax = 500;
+
+
+export const getMyScheduleRequestsResponseFeasibilityReasonCodesMax = 20;
+
+
+
+
+
+
+export const GetMyScheduleRequestsResponseItem = zod.object({
+  "id": zod.number().int().min(1),
+  "employee": zod.object({
+  "id": zod.number().int().min(1),
+  "name": zod.string(),
+  "nameAr": zod.string()
+}),
+  "kind": zod.enum(['leave', 'preferred_shift', 'off', 'eo']),
+  "startDate": zod.string().regex(getMyScheduleRequestsResponseStartDateRegExp),
+  "endDate": zod.string().regex(getMyScheduleRequestsResponseEndDateRegExp),
+  "shiftCode": zod.string().regex(getMyScheduleRequestsResponseShiftCodeRegExp).nullable(),
+  "note": zod.string().max(getMyScheduleRequestsResponseNoteMax).nullable(),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'withdrawn']),
+  "version": zod.number().int().min(1),
+  "feasibility": zod.object({
+  "status": zod.enum(['possible', 'conflict', 'unknown']),
+  "reasonCodes": zod.array(zod.string()).max(getMyScheduleRequestsResponseFeasibilityReasonCodesMax),
+  "scheduleId": zod.number().int().min(1).nullable(),
+  "scheduleVersion": zod.number().int().min(1).nullable(),
+  "evaluatedAt": zod.coerce.date()
+}),
+  "decidedBy": zod.number().int().min(1).nullable(),
+  "decidedAt": zod.coerce.date().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).describe('Employee endpoints preserve the feasibility status but return reasonCodes as [generic], scheduleId\/scheduleVersion as null, and decidedBy as null. Authorized review and decision endpoints return the stored detailed snapshot and reviewer identifier.')
+export const GetMyScheduleRequestsResponse = zod.array(GetMyScheduleRequestsResponseItem)
+
+
+/**
+ * Returns recent history across every status by default and can be filtered by status. Authorized reviewers receive the stored detailed feasibility snapshot. Supervisors see direct reports, department managers see lower-ranked staff in their department, hospital administrators see lower-ranked staff in their facility, and system administrators see lower-ranked staff globally. Self-review is excluded.
+ * @summary List requests for employees within the reviewer's management scope
+ */
+export const GetScheduleRequestsForReviewQueryParams = zod.object({
+  "status": zod.enum(['pending', 'approved', 'rejected', 'withdrawn']).optional()
+})
+
+
+
+export const getScheduleRequestsForReviewResponseStartDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const getScheduleRequestsForReviewResponseEndDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const getScheduleRequestsForReviewResponseShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const getScheduleRequestsForReviewResponseNoteMax = 500;
+
+
+export const getScheduleRequestsForReviewResponseFeasibilityReasonCodesMax = 20;
+
+
+
+
+
+
+export const GetScheduleRequestsForReviewResponseItem = zod.object({
+  "id": zod.number().int().min(1),
+  "employee": zod.object({
+  "id": zod.number().int().min(1),
+  "name": zod.string(),
+  "nameAr": zod.string()
+}),
+  "kind": zod.enum(['leave', 'preferred_shift', 'off', 'eo']),
+  "startDate": zod.string().regex(getScheduleRequestsForReviewResponseStartDateRegExp),
+  "endDate": zod.string().regex(getScheduleRequestsForReviewResponseEndDateRegExp),
+  "shiftCode": zod.string().regex(getScheduleRequestsForReviewResponseShiftCodeRegExp).nullable(),
+  "note": zod.string().max(getScheduleRequestsForReviewResponseNoteMax).nullable(),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'withdrawn']),
+  "version": zod.number().int().min(1),
+  "feasibility": zod.object({
+  "status": zod.enum(['possible', 'conflict', 'unknown']),
+  "reasonCodes": zod.array(zod.string()).max(getScheduleRequestsForReviewResponseFeasibilityReasonCodesMax),
+  "scheduleId": zod.number().int().min(1).nullable(),
+  "scheduleVersion": zod.number().int().min(1).nullable(),
+  "evaluatedAt": zod.coerce.date()
+}),
+  "decidedBy": zod.number().int().min(1).nullable(),
+  "decidedAt": zod.coerce.date().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).describe('Employee endpoints preserve the feasibility status but return reasonCodes as [generic], scheduleId\/scheduleVersion as null, and decidedBy as null. Authorized review and decision endpoints return the stored detailed snapshot and reviewer identifier.')
+export const GetScheduleRequestsForReviewResponse = zod.array(GetScheduleRequestsForReviewResponseItem)
+
+
+/**
+ * @summary Withdraw the authenticated employee's pending request
+ */
+
+
+
+export const WithdrawScheduleRequestParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+
+
+
+export const WithdrawScheduleRequestBody = zod.object({
+  "expectedVersion": zod.number().int().min(1)
+})
+
+
+
+export const withdrawScheduleRequestResponseStartDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const withdrawScheduleRequestResponseEndDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const withdrawScheduleRequestResponseShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const withdrawScheduleRequestResponseNoteMax = 500;
+
+
+export const withdrawScheduleRequestResponseFeasibilityReasonCodesMax = 20;
+
+
+
+
+
+
+export const WithdrawScheduleRequestResponse = zod.object({
+  "id": zod.number().int().min(1),
+  "employee": zod.object({
+  "id": zod.number().int().min(1),
+  "name": zod.string(),
+  "nameAr": zod.string()
+}),
+  "kind": zod.enum(['leave', 'preferred_shift', 'off', 'eo']),
+  "startDate": zod.string().regex(withdrawScheduleRequestResponseStartDateRegExp),
+  "endDate": zod.string().regex(withdrawScheduleRequestResponseEndDateRegExp),
+  "shiftCode": zod.string().regex(withdrawScheduleRequestResponseShiftCodeRegExp).nullable(),
+  "note": zod.string().max(withdrawScheduleRequestResponseNoteMax).nullable(),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'withdrawn']),
+  "version": zod.number().int().min(1),
+  "feasibility": zod.object({
+  "status": zod.enum(['possible', 'conflict', 'unknown']),
+  "reasonCodes": zod.array(zod.string()).max(withdrawScheduleRequestResponseFeasibilityReasonCodesMax),
+  "scheduleId": zod.number().int().min(1).nullable(),
+  "scheduleVersion": zod.number().int().min(1).nullable(),
+  "evaluatedAt": zod.coerce.date()
+}),
+  "decidedBy": zod.number().int().min(1).nullable(),
+  "decidedAt": zod.coerce.date().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).describe('Employee endpoints preserve the feasibility status but return reasonCodes as [generic], scheduleId\/scheduleVersion as null, and decidedBy as null. Authorized review and decision endpoints return the stored detailed snapshot and reviewer identifier.')
+
+
+/**
+ * The employee, request and current schedule are rechecked under transactional locks. A pending request may be approved or rejected; an approved request may only be changed to rejected to revoke an erroneous approval. Rejected and withdrawn requests are terminal. Every mutation requires the current expectedVersion, feasibility is recalculated before the human decision is stored, and a decision never edits a published roster automatically.
+ * @summary Decide a pending request or revoke an approval within managerial scope
+ */
+
+
+
+export const DecideScheduleRequestParams = zod.object({
+  "id": zod.coerce.number().int().min(1)
+})
+
+
+
+
+export const DecideScheduleRequestBody = zod.object({
+  "expectedVersion": zod.number().int().min(1),
+  "decision": zod.enum(['approved', 'rejected'])
+})
+
+
+
+export const decideScheduleRequestResponseStartDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const decideScheduleRequestResponseEndDateRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$');
+export const decideScheduleRequestResponseShiftCodeRegExp = new RegExp('^[A-Z][A-Z0-9_-]{0,7}$');
+export const decideScheduleRequestResponseNoteMax = 500;
+
+
+export const decideScheduleRequestResponseFeasibilityReasonCodesMax = 20;
+
+
+
+
+
+
+export const DecideScheduleRequestResponse = zod.object({
+  "id": zod.number().int().min(1),
+  "employee": zod.object({
+  "id": zod.number().int().min(1),
+  "name": zod.string(),
+  "nameAr": zod.string()
+}),
+  "kind": zod.enum(['leave', 'preferred_shift', 'off', 'eo']),
+  "startDate": zod.string().regex(decideScheduleRequestResponseStartDateRegExp),
+  "endDate": zod.string().regex(decideScheduleRequestResponseEndDateRegExp),
+  "shiftCode": zod.string().regex(decideScheduleRequestResponseShiftCodeRegExp).nullable(),
+  "note": zod.string().max(decideScheduleRequestResponseNoteMax).nullable(),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'withdrawn']),
+  "version": zod.number().int().min(1),
+  "feasibility": zod.object({
+  "status": zod.enum(['possible', 'conflict', 'unknown']),
+  "reasonCodes": zod.array(zod.string()).max(decideScheduleRequestResponseFeasibilityReasonCodesMax),
+  "scheduleId": zod.number().int().min(1).nullable(),
+  "scheduleVersion": zod.number().int().min(1).nullable(),
+  "evaluatedAt": zod.coerce.date()
+}),
+  "decidedBy": zod.number().int().min(1).nullable(),
+  "decidedAt": zod.coerce.date().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+}).describe('Employee endpoints preserve the feasibility status but return reasonCodes as [generic], scheduleId\/scheduleVersion as null, and decidedBy as null. Authorized review and decision endpoints return the stored detailed snapshot and reviewer identifier.')
+
+
+/**
  * Returns at most 100 schedules for the requested month (current month by default). A roster is visible only when every participant is in scope. Employees use /schedules/mine instead.
  * @summary List complete rosters within the manager's current scope
  */
@@ -428,7 +712,7 @@ export const UpdateScheduleResponse = zod.object({
 
 
 /**
- * Rechecks active participants, complete current manager scope, all configured constraints, adjacent rosters and coverage under transactional locks. Published assignments become visible to each participant separately.
+ * Rechecks active participants, complete current manager scope, all configured constraints, adjacent rosters, coverage, and approved schedule requests under transactional locks. A roster that contradicts approved leave, off, EO, or preferred-shift requests cannot be published. Published assignments become visible to each participant separately.
  * @summary Publish a validated, fully covered draft
  */
 

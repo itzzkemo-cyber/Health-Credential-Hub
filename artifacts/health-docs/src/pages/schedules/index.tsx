@@ -20,6 +20,7 @@ import { MonthPicker, ScheduleEmpty, ScheduleLoading } from "./schedule-ui";
 import { MySchedules } from "./my-schedules";
 import { ScheduleCreate } from "./schedule-create";
 import { ScheduleEditor } from "./schedule-editor";
+import { ScheduleRequests } from "./schedule-requests";
 
 export default function SchedulesPage() {
   const { t, isRTL } = useLanguage();
@@ -28,8 +29,14 @@ export default function SchedulesPage() {
   const role = (getAuthUser() as { role?: string } | null)?.role;
   const manager = canManageSchedules(role);
   const employee = role === "employee";
-  const personalView = new URLSearchParams(search).get("view") === "mine";
-  const employeeTeamView = employee && !personalView;
+  const requestedView = new URLSearchParams(search).get("view");
+  const activeView =
+    requestedView === "mine" || requestedView === "requests"
+      ? requestedView
+      : "primary";
+  const personalView = activeView === "mine";
+  const requestsView = activeView === "requests";
+  const employeeTeamView = employee && activeView === "primary";
   if (!manager && role !== "employee")
     return (
       <div role="alert" className="rounded-lg border border-destructive/30 p-6">
@@ -45,7 +52,9 @@ export default function SchedulesPage() {
           </span>
           <h1 className="text-2xl font-bold">
             {t(
-              employeeTeamView
+              requestsView
+                ? "schedules.requests_title"
+                : employeeTeamView
                 ? "schedules.team_title"
                 : personalView
                   ? "schedules.my_title"
@@ -55,7 +64,9 @@ export default function SchedulesPage() {
         </div>
         <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
           {t(
-            employeeTeamView
+            requestsView
+              ? "schedules.requests_subtitle"
+              : employeeTeamView
               ? "schedules.team_subtitle"
               : personalView
                 ? "schedules.my_subtitle"
@@ -66,41 +77,51 @@ export default function SchedulesPage() {
       {manager || employee ? (
         <nav
           aria-label={t("schedules.view_label")}
-          className="grid grid-cols-2 gap-2 rounded-xl border bg-card p-1.5 sm:max-w-md"
+          className="grid grid-cols-3 gap-2 rounded-xl border bg-card p-1.5 sm:max-w-xl"
         >
           {(manager
             ? [
                 {
-                  personal: false,
+                  view: "primary",
                   href: "/schedules",
                   label: "schedules.manage_view",
                 },
                 {
-                  personal: true,
+                  view: "mine",
                   href: "/schedules?view=mine",
                   label: "schedules.my_title",
+                },
+                {
+                  view: "requests",
+                  href: "/schedules?view=requests",
+                  label: "schedules.requests_view",
                 },
               ]
             : [
                 {
-                  personal: false,
+                  view: "primary",
                   href: "/schedules",
                   label: "schedules.team_title",
                 },
                 {
-                  personal: true,
+                  view: "mine",
                   href: "/schedules?view=mine",
                   label: "schedules.my_title",
+                },
+                {
+                  view: "requests",
+                  href: "/schedules?view=requests",
+                  label: "schedules.requests_view",
                 },
               ]
           ).map((view) => (
             <Link
               key={view.href}
               href={view.href}
-              aria-current={personalView === view.personal ? "page" : undefined}
+              aria-current={activeView === view.view ? "page" : undefined}
               className={cn(
                 "flex min-h-11 items-center justify-center rounded-lg px-3 py-2 text-center text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                personalView === view.personal
+                activeView === view.view
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
               )}
@@ -110,7 +131,9 @@ export default function SchedulesPage() {
           ))}
         </nav>
       ) : null}
-      {manager && !personalView ? (
+      {requestsView ? (
+        <ScheduleRequests manager={manager} />
+      ) : manager && !personalView ? (
         <ManagedSchedules month={month} setMonth={setMonth} />
       ) : (
         <>

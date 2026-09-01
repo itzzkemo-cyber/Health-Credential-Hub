@@ -33,6 +33,7 @@ import type {
   ComplianceReport,
   CreateEmployeeInvitationInput,
   CreateScheduleRequest,
+  CreateShiftRequestInput,
   Credential,
   CredentialInput,
   CredentialListResponse,
@@ -67,6 +68,7 @@ import type {
   GetExpiringCredentialsParams,
   GetMissingCredentialsParams,
   GetMySchedulesParams,
+  GetScheduleRequestsForReviewParams,
   GetTeamSchedulesParams,
   HealthStatus,
   InvitationError,
@@ -88,8 +90,11 @@ import type {
   ReadinessStatus,
   ResetPasswordInput,
   Schedule,
+  ScheduleRequestDecisionInput,
+  ScheduleRequestVersionInput,
   ScheduleSummary,
   ScheduleVersionBody,
+  ShiftRequest,
   StartInvitationEmailOtpInput,
   TeamSchedule,
   TotpActivation,
@@ -133,6 +138,386 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getCreateScheduleRequestUrl = () => {
+
+
+
+
+  return `/api/schedule-requests`
+}
+
+/**
+ * The employee identity and facility come only from the authenticated session. Employee-facing feasibility is evaluated against a published roster only; draft existence, identifiers, versions, coverage, and constraint details are never disclosed. Feasibility is a deterministic planning aid, not an automatic approval or a legal, clinical, or staffing-compliance decision. Notes are optional operational context and must not contain medical details.
+ * @summary Submit a scheduling request for the authenticated employee
+ */
+export const createScheduleRequest = async (createShiftRequestInput: CreateShiftRequestInput, options?: Parameters<typeof customFetch>[1]): Promise<ShiftRequest> => {
+
+  return customFetch<ShiftRequest>(getCreateScheduleRequestUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createShiftRequestInput)
+  }
+);}
+
+
+
+
+
+export const getCreateScheduleRequestMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createScheduleRequest>>, TError,{data: BodyType<CreateShiftRequestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createScheduleRequest>>, TError,{data: BodyType<CreateShiftRequestInput>}, TContext> => {
+
+const mutationKey = ['createScheduleRequest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createScheduleRequest>>, {data: BodyType<CreateShiftRequestInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createScheduleRequest(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateScheduleRequestMutationResult = NonNullable<Awaited<ReturnType<typeof createScheduleRequest>>>
+    export type CreateScheduleRequestMutationBody = BodyType<CreateShiftRequestInput>
+    export type CreateScheduleRequestMutationError = ErrorType<void>
+
+    /**
+ * @summary Submit a scheduling request for the authenticated employee
+ */
+export const useCreateScheduleRequest = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createScheduleRequest>>, TError,{data: BodyType<CreateShiftRequestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createScheduleRequest>>,
+        TError,
+        {data: BodyType<CreateShiftRequestInput>},
+        TContext
+      > => {
+      return useMutation(getCreateScheduleRequestMutationOptions(options));
+    }
+
+export const getGetMyScheduleRequestsUrl = () => {
+
+
+
+
+  return `/api/schedule-requests/mine`
+}
+
+/**
+ * Returns the advisory status while replacing detailed reason codes with a generic review message and returning null schedule identifiers and versions. Draft roster state is never exposed.
+ * @summary List the authenticated employee's own requests
+ */
+export const getMyScheduleRequests = async ( options?: Parameters<typeof customFetch>[1]): Promise<ShiftRequest[]> => {
+
+  return customFetch<ShiftRequest[]>(getGetMyScheduleRequestsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMyScheduleRequestsQueryKey = () => {
+    return [
+    `/api/schedule-requests/mine`
+    ] as const;
+    }
+
+
+export const getGetMyScheduleRequestsQueryOptions = <TData = Awaited<ReturnType<typeof getMyScheduleRequests>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMyScheduleRequests>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMyScheduleRequestsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMyScheduleRequests>>> = ({ signal }) => getMyScheduleRequests({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMyScheduleRequests>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMyScheduleRequestsQueryResult = NonNullable<Awaited<ReturnType<typeof getMyScheduleRequests>>>
+export type GetMyScheduleRequestsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the authenticated employee's own requests
+ */
+
+export function useGetMyScheduleRequests<TData = Awaited<ReturnType<typeof getMyScheduleRequests>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMyScheduleRequests>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMyScheduleRequestsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetScheduleRequestsForReviewUrl = (params?: GetScheduleRequestsForReviewParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/schedule-requests/review?${stringifiedParams}` : `/api/schedule-requests/review`
+}
+
+/**
+ * Returns recent history across every status by default and can be filtered by status. Authorized reviewers receive the stored detailed feasibility snapshot. Supervisors see direct reports, department managers see lower-ranked staff in their department, hospital administrators see lower-ranked staff in their facility, and system administrators see lower-ranked staff globally. Self-review is excluded.
+ * @summary List requests for employees within the reviewer's management scope
+ */
+export const getScheduleRequestsForReview = async (params?: GetScheduleRequestsForReviewParams, options?: Parameters<typeof customFetch>[1]): Promise<ShiftRequest[]> => {
+
+  return customFetch<ShiftRequest[]>(getGetScheduleRequestsForReviewUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetScheduleRequestsForReviewQueryKey = (params?: GetScheduleRequestsForReviewParams,) => {
+    return [
+    `/api/schedule-requests/review`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetScheduleRequestsForReviewQueryOptions = <TData = Awaited<ReturnType<typeof getScheduleRequestsForReview>>, TError = ErrorType<void>>(params?: GetScheduleRequestsForReviewParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getScheduleRequestsForReview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetScheduleRequestsForReviewQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getScheduleRequestsForReview>>> = ({ signal }) => getScheduleRequestsForReview(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getScheduleRequestsForReview>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetScheduleRequestsForReviewQueryResult = NonNullable<Awaited<ReturnType<typeof getScheduleRequestsForReview>>>
+export type GetScheduleRequestsForReviewQueryError = ErrorType<void>
+
+
+/**
+ * @summary List requests for employees within the reviewer's management scope
+ */
+
+export function useGetScheduleRequestsForReview<TData = Awaited<ReturnType<typeof getScheduleRequestsForReview>>, TError = ErrorType<void>>(
+ params?: GetScheduleRequestsForReviewParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getScheduleRequestsForReview>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetScheduleRequestsForReviewQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getWithdrawScheduleRequestUrl = (id: number,) => {
+
+
+
+
+  return `/api/schedule-requests/${id}/withdraw`
+}
+
+/**
+ * @summary Withdraw the authenticated employee's pending request
+ */
+export const withdrawScheduleRequest = async (id: number,
+    scheduleRequestVersionInput: ScheduleRequestVersionInput, options?: Parameters<typeof customFetch>[1]): Promise<ShiftRequest> => {
+
+  return customFetch<ShiftRequest>(getWithdrawScheduleRequestUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(scheduleRequestVersionInput)
+  }
+);}
+
+
+
+
+
+export const getWithdrawScheduleRequestMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof withdrawScheduleRequest>>, TError,{id: number;data: BodyType<ScheduleRequestVersionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof withdrawScheduleRequest>>, TError,{id: number;data: BodyType<ScheduleRequestVersionInput>}, TContext> => {
+
+const mutationKey = ['withdrawScheduleRequest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof withdrawScheduleRequest>>, {id: number;data: BodyType<ScheduleRequestVersionInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  withdrawScheduleRequest(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type WithdrawScheduleRequestMutationResult = NonNullable<Awaited<ReturnType<typeof withdrawScheduleRequest>>>
+    export type WithdrawScheduleRequestMutationBody = BodyType<ScheduleRequestVersionInput>
+    export type WithdrawScheduleRequestMutationError = ErrorType<void>
+
+    /**
+ * @summary Withdraw the authenticated employee's pending request
+ */
+export const useWithdrawScheduleRequest = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof withdrawScheduleRequest>>, TError,{id: number;data: BodyType<ScheduleRequestVersionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof withdrawScheduleRequest>>,
+        TError,
+        {id: number;data: BodyType<ScheduleRequestVersionInput>},
+        TContext
+      > => {
+      return useMutation(getWithdrawScheduleRequestMutationOptions(options));
+    }
+
+export const getDecideScheduleRequestUrl = (id: number,) => {
+
+
+
+
+  return `/api/schedule-requests/${id}/decision`
+}
+
+/**
+ * The employee, request and current schedule are rechecked under transactional locks. A pending request may be approved or rejected; an approved request may only be changed to rejected to revoke an erroneous approval. Rejected and withdrawn requests are terminal. Every mutation requires the current expectedVersion, feasibility is recalculated before the human decision is stored, and a decision never edits a published roster automatically.
+ * @summary Decide a pending request or revoke an approval within managerial scope
+ */
+export const decideScheduleRequest = async (id: number,
+    scheduleRequestDecisionInput: ScheduleRequestDecisionInput, options?: Parameters<typeof customFetch>[1]): Promise<ShiftRequest> => {
+
+  return customFetch<ShiftRequest>(getDecideScheduleRequestUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(scheduleRequestDecisionInput)
+  }
+);}
+
+
+
+
+
+export const getDecideScheduleRequestMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof decideScheduleRequest>>, TError,{id: number;data: BodyType<ScheduleRequestDecisionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof decideScheduleRequest>>, TError,{id: number;data: BodyType<ScheduleRequestDecisionInput>}, TContext> => {
+
+const mutationKey = ['decideScheduleRequest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof decideScheduleRequest>>, {id: number;data: BodyType<ScheduleRequestDecisionInput>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  decideScheduleRequest(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DecideScheduleRequestMutationResult = NonNullable<Awaited<ReturnType<typeof decideScheduleRequest>>>
+    export type DecideScheduleRequestMutationBody = BodyType<ScheduleRequestDecisionInput>
+    export type DecideScheduleRequestMutationError = ErrorType<void>
+
+    /**
+ * @summary Decide a pending request or revoke an approval within managerial scope
+ */
+export const useDecideScheduleRequest = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof decideScheduleRequest>>, TError,{id: number;data: BodyType<ScheduleRequestDecisionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof decideScheduleRequest>>,
+        TError,
+        {id: number;data: BodyType<ScheduleRequestDecisionInput>},
+        TContext
+      > => {
+      return useMutation(getDecideScheduleRequestMutationOptions(options));
+    }
 
 export const getListSchedulesUrl = (params?: ListSchedulesParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -619,7 +1004,7 @@ export const getPublishScheduleUrl = (id: number,) => {
 }
 
 /**
- * Rechecks active participants, complete current manager scope, all configured constraints, adjacent rosters and coverage under transactional locks. Published assignments become visible to each participant separately.
+ * Rechecks active participants, complete current manager scope, all configured constraints, adjacent rosters, coverage, and approved schedule requests under transactional locks. A roster that contradicts approved leave, off, EO, or preferred-shift requests cannot be published. Published assignments become visible to each participant separately.
  * @summary Publish a validated, fully covered draft
  */
 export const publishSchedule = async (id: number,

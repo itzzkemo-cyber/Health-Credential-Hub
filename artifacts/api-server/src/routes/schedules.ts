@@ -16,6 +16,7 @@ import {
   usersTable,
   shiftSchedulesTable,
   shiftScheduleMembersTable,
+  scheduleRequestsTable,
   auditLogsTable,
   type User,
   type ShiftScheduleRow,
@@ -40,6 +41,7 @@ import {
   type ShiftAssignment,
   type AdjacentAssignment,
 } from "../lib/shiftScheduling";
+import { assignmentConflictsWithApprovedRequest } from "../lib/scheduleRequestFeasibility";
 
 const router: IRouter = Router();
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -647,6 +649,29 @@ async function mutate(
         );
       if (operation === "publish" && result.shortages.length)
         failure(409, "coverage_shortage");
+      if (operation === "publish") {
+        const approvedRequests = await tx
+          .select()
+          .from(scheduleRequestsTable)
+          .where(
+            and(
+              eq(scheduleRequestsTable.facilityId, current.facilityId),
+              eq(scheduleRequestsTable.status, "approved"),
+              inArray(
+                scheduleRequestsTable.employeeId,
+                current.configuration.employeeIds,
+              ),
+              sql`${scheduleRequestsTable.startDate} like ${`${current.month}-%`}`,
+            ),
+          )
+          .for("share");
+        if (
+          approvedRequests.some((request) =>
+            assignmentConflictsWithApprovedRequest(request, assignments),
+          )
+        )
+          failure(409, "approved_request_conflict");
+      }
     }
     const saved = (
       await tx

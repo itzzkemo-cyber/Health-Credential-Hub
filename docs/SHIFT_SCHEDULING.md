@@ -161,6 +161,48 @@ The existing database, session/TOTP, origin, and production-role configuration
 must be populated through the approved secret manager. Never work around a
 failed production startup by disabling safeguards or enabling test login.
 
+## Employee schedule requests
+
+Employees can open the requests view at `/schedules?view=requests` and submit
+one of four durable request types: leave, a preferred shift, an off day, or EO
+(a day without an assigned shift according to facility policy). Leave may span
+up to 31 days within one calendar month; the other request types use one date.
+Free-form notes are limited to short operational context and must not contain
+medical details, diagnoses, credential data, or other sensitive information.
+
+The availability result is deterministic planning guidance, not an approval or
+a legal, clinical, or staffing-compliance determination. An employee evaluation
+uses published rosters only and exposes only `possible`, `conflict`, or
+`unknown`; it does not disclose draft existence, coverage shortages, constraint
+details, roster identifiers, versions, or the deciding user's identifier.
+Authorized reviewers receive the detailed snapshot needed to make a human
+decision within current facility, department, and supervisor scope.
+
+Pending requests may be approved or rejected. A manager may change an approved
+request only to rejected to revoke an erroneous approval; rejected and
+withdrawn requests are terminal. All changes use `expectedVersion`, fresh
+server-side scope checks, transaction locks, audit events, and generic
+notifications. Overlapping approved requests are rejected conservatively, and
+roster publication fails closed when assignments contradict an approved
+request. A decision never edits a published roster automatically.
+
+Migration `0018_amusing_joseph.sql` creates `schedule_requests`. Apply it only
+through the guarded migrator in `dist/migrate.mjs`; that path reapplies the DML
+boundary after migration and revokes application-table privileges from the
+blocked Supabase roles configured by `DATABASE_BLOCKED_ROLES`. Before a live
+release, retain the migration evidence and prove that `anon`, `authenticated`,
+and `service_role` cannot access the new table. Also run an isolated real-
+PostgreSQL two-facility drill covering concurrent approval, revocation, roster
+publication, stale versions, session revocation, and cross-tenant denial.
+
+Local evidence recorded on 2026-09-02: the focused request API tests passed
+24/24, focused responsive UI/state tests passed 43/43, the complete API suite
+passed 726 with one opt-in PostgreSQL test skipped, and the complete web suite
+passed 225/225. Root typecheck, production API/web builds, OpenAPI regeneration,
+Drizzle schema-drift check, and `git diff --check` passed. A synthetic 390x844
+render review covered Arabic RTL and English LTR without horizontal overflow;
+this is not deployed-database or authenticated production acceptance.
+
 ## Exact verification and viewing commands
 
 Run from the repository root with the required runtimes. These are executable

@@ -12,6 +12,7 @@ import policiesRouter from "./policies";
 import reportsRouter from "./reports";
 import storageRouter from "./storage";
 import schedulesRouter from "./schedules";
+import scheduleRequestsRouter from "./schedule-requests";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(policiesRouter);
 router.use(reportsRouter);
 router.use(storageRouter);
 router.use(schedulesRouter);
+router.use(scheduleRequestsRouter);
 
 export default router;

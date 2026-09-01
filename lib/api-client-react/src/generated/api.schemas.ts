@@ -5,6 +5,141 @@
  * HealthDocs - Healthcare Credential Management Platform API
  * OpenAPI spec version: 0.1.0
  */
+export type CreateShiftRequestInputKind = typeof CreateShiftRequestInputKind[keyof typeof CreateShiftRequestInputKind];
+
+
+export const CreateShiftRequestInputKind = {
+  leave: 'leave',
+  preferred_shift: 'preferred_shift',
+  off: 'off',
+  eo: 'eo',
+} as const;
+
+export interface CreateShiftRequestInput {
+  kind: CreateShiftRequestInputKind;
+  /** @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$ */
+  startDate: string;
+  /** @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$ */
+  endDate: string;
+  /** @pattern ^[A-Z][A-Z0-9_-]{0,7}$ */
+  shiftCode?: string;
+  /**
+     * Optional operational context. Do not include medical details; this field is excluded from audit and notification payloads.
+     * @minLength 1
+     * @maxLength 500
+     */
+  note?: string;
+}
+
+export interface ScheduleRequestVersionInput {
+  /** @minimum 1 */
+  expectedVersion: number;
+}
+
+export type ScheduleRequestDecisionInputDecision = typeof ScheduleRequestDecisionInputDecision[keyof typeof ScheduleRequestDecisionInputDecision];
+
+
+export const ScheduleRequestDecisionInputDecision = {
+  approved: 'approved',
+  rejected: 'rejected',
+} as const;
+
+export interface ScheduleRequestDecisionInput {
+  /** @minimum 1 */
+  expectedVersion: number;
+  decision: ScheduleRequestDecisionInputDecision;
+}
+
+export interface ShiftRequestEmployee {
+  /** @minimum 1 */
+  id: number;
+  name: string;
+  nameAr: string;
+}
+
+export type ScheduleRequestFeasibilityStatus = typeof ScheduleRequestFeasibilityStatus[keyof typeof ScheduleRequestFeasibilityStatus];
+
+
+export const ScheduleRequestFeasibilityStatus = {
+  possible: 'possible',
+  conflict: 'conflict',
+  unknown: 'unknown',
+} as const;
+
+export interface ScheduleRequestFeasibility {
+  status: ScheduleRequestFeasibilityStatus;
+  /** @maxItems 20 */
+  reasonCodes: string[];
+  /**
+     * @minimum 1
+     * @nullable
+     */
+  scheduleId: number | null;
+  /**
+     * @minimum 1
+     * @nullable
+     */
+  scheduleVersion: number | null;
+  evaluatedAt: string;
+}
+
+export type ShiftRequestKind = typeof ShiftRequestKind[keyof typeof ShiftRequestKind];
+
+
+export const ShiftRequestKind = {
+  leave: 'leave',
+  preferred_shift: 'preferred_shift',
+  off: 'off',
+  eo: 'eo',
+} as const;
+
+export type ShiftRequestStatus = typeof ShiftRequestStatus[keyof typeof ShiftRequestStatus];
+
+
+export const ShiftRequestStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  rejected: 'rejected',
+  withdrawn: 'withdrawn',
+} as const;
+
+/**
+ * Employee endpoints preserve the feasibility status but return reasonCodes as [generic], scheduleId/scheduleVersion as null, and decidedBy as null. Authorized review and decision endpoints return the stored detailed snapshot and reviewer identifier.
+ */
+export interface ShiftRequest {
+  /** @minimum 1 */
+  id: number;
+  employee: ShiftRequestEmployee;
+  kind: ShiftRequestKind;
+  /** @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$ */
+  startDate: string;
+  /** @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$ */
+  endDate: string;
+  /**
+     * @nullable
+     * @pattern ^[A-Z][A-Z0-9_-]{0,7}$
+     */
+  shiftCode: string | null;
+  /**
+     * @maxLength 500
+     * @nullable
+     */
+  note: string | null;
+  status: ShiftRequestStatus;
+  /** @minimum 1 */
+  version: number;
+  feasibility: ScheduleRequestFeasibility;
+  /**
+     * @minimum 1
+     * @nullable
+     */
+  decidedBy: number | null;
+  /** @nullable */
+  decidedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /**
  * Facility-local Asia/Riyadh wall-clock times. End at or before start rolls into the next day; duration must be greater than zero and no more than 16 hours. This is not a general DST-aware timezone scheduler.
  */
@@ -1358,6 +1493,20 @@ export interface ComplianceReport {
   overallComplianceRate: number;
   departments: DepartmentComplianceDetail[];
 }
+
+export type GetScheduleRequestsForReviewParams = {
+status?: GetScheduleRequestsForReviewStatus;
+};
+
+export type GetScheduleRequestsForReviewStatus = typeof GetScheduleRequestsForReviewStatus[keyof typeof GetScheduleRequestsForReviewStatus];
+
+
+export const GetScheduleRequestsForReviewStatus = {
+  pending: 'pending',
+  approved: 'approved',
+  rejected: 'rejected',
+  withdrawn: 'withdrawn',
+} as const;
 
 export type ListSchedulesParams = {
 /**

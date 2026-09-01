@@ -13,3 +13,4 @@ export * from "./email-otp-challenges";
 export * from "./upload-grants";
 export * from "./automation-outbox";
 export * from "./shift-schedules";
+export * from "./schedule-requests";

@@ -30,10 +30,127 @@ tags:
     description: Reports and exports
   - name: schedules
     description: Scoped monthly employee shift scheduling
+  - name: schedule-requests
+    description: Employee scheduling requests with scoped managerial review and advisory feasibility
 
   - name: Storage
     description: Object storage upload and serving endpoints.
 paths:
+  /schedule-requests:
+    post:
+      tags: [schedule-requests]
+      operationId: createScheduleRequest
+      summary: Submit a scheduling request for the authenticated employee
+      description: The employee identity and facility come only from the authenticated session. Employee-facing feasibility is evaluated against a published roster only; draft existence, identifiers, versions, coverage, and constraint details are never disclosed. Feasibility is a deterministic planning aid, not an automatic approval or a legal, clinical, or staffing-compliance decision. Notes are optional operational context and must not contain medical details.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateShiftRequestInput" }
+      responses:
+        "201":
+          description: Persisted pending request with an employee-safe advisory status, a generic reason, and null schedule identifiers
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShiftRequest" }
+        "400":
+          description: Invalid request type, dates, shift, or note
+        "401":
+          description: Authentication required
+        "409":
+          description: Another pending request overlaps this date range
+  /schedule-requests/mine:
+    get:
+      tags: [schedule-requests]
+      operationId: getMyScheduleRequests
+      summary: List the authenticated employee's own requests
+      description: Returns the advisory status while replacing detailed reason codes with a generic review message and returning null schedule identifiers and versions. Draft roster state is never exposed.
+      responses:
+        "200":
+          description: Up to 100 newest own requests with employee-safe feasibility projections
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ShiftRequest" }
+  /schedule-requests/review:
+    get:
+      tags: [schedule-requests]
+      operationId: getScheduleRequestsForReview
+      summary: List requests for employees within the reviewer's management scope
+      description: Returns recent history across every status by default and can be filtered by status. Authorized reviewers receive the stored detailed feasibility snapshot. Supervisors see direct reports, department managers see lower-ranked staff in their department, hospital administrators see lower-ranked staff in their facility, and system administrators see lower-ranked staff globally. Self-review is excluded.
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [pending, approved, rejected, withdrawn]
+      responses:
+        "200":
+          description: Up to 100 newest scoped requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ShiftRequest" }
+        "403":
+          description: Manager role required
+  /schedule-requests/{id}/withdraw:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags: [schedule-requests]
+      operationId: withdrawScheduleRequest
+      summary: Withdraw the authenticated employee's pending request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ScheduleRequestVersionInput" }
+      responses:
+        "200":
+          description: Withdrawn request with employee-safe feasibility projection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShiftRequest" }
+        "404":
+          description: Request not found for the authenticated employee
+        "409":
+          description: Stale version or request is no longer pending
+        "428":
+          description: expectedVersion is required
+  /schedule-requests/{id}/decision:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags: [schedule-requests]
+      operationId: decideScheduleRequest
+      summary: Decide a pending request or revoke an approval within managerial scope
+      description: The employee, request and current schedule are rechecked under transactional locks. A pending request may be approved or rejected; an approved request may only be changed to rejected to revoke an erroneous approval. Rejected and withdrawn requests are terminal. Every mutation requires the current expectedVersion, feasibility is recalculated before the human decision is stored, and a decision never edits a published roster automatically.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              { $ref: "#/components/schemas/ScheduleRequestDecisionInput" }
+      responses:
+        "200":
+          description: Decided request with a refreshed feasibility snapshot
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShiftRequest" }
+        "404":
+          description: Request not found in the reviewer's current scope
+        "409":
+          description: Stale version, invalid lifecycle transition, or another approved request overlaps the requested dates
+        "428":
+          description: expectedVersion is required
   /schedules:
     get:
       tags: [schedules]
@@ -165,7 +282,7 @@ paths:
       tags: [schedules]
       operationId: publishSchedule
       summary: Publish a validated, fully covered draft
-      description: Rechecks active participants, complete current manager scope, all configured constraints, adjacent rosters and coverage under transactional locks. Published assignments become visible to each participant separately.
+      description: Rechecks active participants, complete current manager scope, all configured constraints, adjacent rosters, coverage, and approved schedule requests under transactional locks. A roster that contradicts approved leave, off, EO, or preferred-shift requests cannot be published. Published assignments become visible to each participant separately.
       requestBody:
         required: true
         content:
@@ -180,7 +297,7 @@ paths:
         "404":
           description: Roster not found in current scope
         "409":
-          description: Stale version, invalid roster, coverage shortage or already published
+          description: Stale version, invalid roster, coverage shortage, approved-request conflict, or already published
         "428":
           description: expectedVersion is required
   /schedules/{id}/reopen:
@@ -1772,6 +1889,120 @@ paths:
 
 components:
   schemas:
+    CreateShiftRequestInput:
+      type: object
+      additionalProperties: false
+      required: [kind, startDate, endDate]
+      properties:
+        kind:
+          type: string
+          enum: [leave, preferred_shift, off, eo]
+        startDate:
+          {
+            type: string,
+            pattern: "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$",
+          }
+        endDate:
+          {
+            type: string,
+            pattern: "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$",
+          }
+        shiftCode:
+          type: string
+          pattern: "^[A-Z][A-Z0-9_-]{0,7}$"
+        note:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Optional operational context. Do not include medical details; this field is excluded from audit and notification payloads.
+    ScheduleRequestVersionInput:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+    ScheduleRequestDecisionInput:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, decision]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+        decision: { type: string, enum: [approved, rejected] }
+    ShiftRequestEmployee:
+      type: object
+      additionalProperties: false
+      required: [id, name, nameAr]
+      properties:
+        id: { type: integer, minimum: 1 }
+        name: { type: string }
+        nameAr: { type: string }
+    ScheduleRequestFeasibility:
+      type: object
+      additionalProperties: false
+      required: [status, reasonCodes, scheduleId, scheduleVersion, evaluatedAt]
+      properties:
+        status: { type: string, enum: [possible, conflict, unknown] }
+        reasonCodes:
+          type: array
+          maxItems: 20
+          items: { type: string }
+        scheduleId:
+          type: [integer, "null"]
+          minimum: 1
+        scheduleVersion:
+          type: [integer, "null"]
+          minimum: 1
+        evaluatedAt: { type: string, format: date-time }
+    ShiftRequest:
+      type: object
+      additionalProperties: false
+      description: Employee endpoints preserve the feasibility status but return reasonCodes as [generic], scheduleId/scheduleVersion as null, and decidedBy as null. Authorized review and decision endpoints return the stored detailed snapshot and reviewer identifier.
+      required:
+        - id
+        - employee
+        - kind
+        - startDate
+        - endDate
+        - shiftCode
+        - note
+        - status
+        - version
+        - feasibility
+        - decidedBy
+        - decidedAt
+        - createdAt
+        - updatedAt
+      properties:
+        id: { type: integer, minimum: 1 }
+        employee: { $ref: "#/components/schemas/ShiftRequestEmployee" }
+        kind: { type: string, enum: [leave, preferred_shift, off, eo] }
+        startDate:
+          {
+            type: string,
+            pattern: "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$",
+          }
+        endDate:
+          {
+            type: string,
+            pattern: "^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$",
+          }
+        shiftCode:
+          type: [string, "null"]
+          pattern: "^[A-Z][A-Z0-9_-]{0,7}$"
+        note:
+          type: [string, "null"]
+          maxLength: 500
+        status:
+          type: string
+          enum: [pending, approved, rejected, withdrawn]
+        version: { type: integer, minimum: 1 }
+        feasibility: { $ref: "#/components/schemas/ScheduleRequestFeasibility" }
+        decidedBy:
+          type: [integer, "null"]
+          minimum: 1
+        decidedAt: { type: [string, "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     ShiftType:
       type: object
       description: Facility-local Asia/Riyadh wall-clock times. End at or before start rolls into the next day; duration must be greater than zero and no more than 16 hours. This is not a general DST-aware timezone scheduler.
