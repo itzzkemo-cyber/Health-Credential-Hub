@@ -7,6 +7,7 @@
  */
 import type { HealthStatusEmailDelivery } from './healthStatusEmailDelivery';
 import type { HealthStatusOcr } from './healthStatusOcr';
+import type { HealthStatusSmsOtp } from './healthStatusSmsOtp';
 
 export interface HealthStatus {
   status: string;
@@ -18,5 +19,6 @@ export interface HealthStatus {
      */
   releaseSha?: string;
   emailDelivery?: HealthStatusEmailDelivery;
+  smsOtp?: HealthStatusSmsOtp;
   ocr?: HealthStatusOcr;
 }

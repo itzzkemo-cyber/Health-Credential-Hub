@@ -23,6 +23,11 @@ export interface User {
   employeeNumber?: string;
   /** @nullable */
   phone?: string | null;
+  /**
+     * Server-issued timestamp proving control of the stored phone number.
+     * @nullable
+     */
+  phoneVerifiedAt: Date | null;
   /** @nullable */
   avatarUrl?: string | null;
   isActive: boolean;

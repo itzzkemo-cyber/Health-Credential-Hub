@@ -75,6 +75,7 @@ import {
   getSupervisorOptions,
   getAssignableRoles,
   isPasswordDeliveryReady,
+  isEmployeeInvitationPhoneValid,
   requiresEmployeeCreateStepUp,
 } from "./employee-list-state";
 import { getDepartmentQueryParams } from "./department-query";
@@ -257,6 +258,16 @@ export default function EmployeesList() {
 
   const handleCreateEmployee = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (
+      isInvitationMode &&
+      !isEmployeeInvitationPhoneValid(employeeForm.phone)
+    ) {
+      setCreateFeedbackKey("employees_page.phone_invitation_required");
+      requestAnimationFrame(() =>
+        document.getElementById("employee-phone")?.focus(),
+      );
+      return;
+    }
     if (
       !isInvitationMode &&
       !isPasswordDeliveryReady(
@@ -733,17 +744,43 @@ export default function EmployeesList() {
                 }
                 dir="ltr"
               />
-              <EmployeeFormField
-                id="employee-phone"
-                label={t("employees_page.phone")}
-                value={employeeForm.phone ?? ""}
-                onChange={(phone) =>
-                  setEmployeeForm((previous) => ({ ...previous, phone }))
-                }
-                type="tel"
-                dir="ltr"
-                required={false}
-              />
+              <div className="space-y-2">
+                <Label htmlFor="employee-phone">
+                  {t("employees_page.phone")}
+                </Label>
+                <Input
+                  id="employee-phone"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  maxLength={32}
+                  required={isInvitationMode}
+                  value={employeeForm.phone ?? ""}
+                  onChange={(event) => {
+                    setEmployeeForm((previous) => ({
+                      ...previous,
+                      phone: event.target.value,
+                    }));
+                    setCreateFeedbackKey(null);
+                  }}
+                  dir="ltr"
+                  className="min-h-11"
+                  placeholder="05XXXXXXXX"
+                  aria-describedby={
+                    isInvitationMode
+                      ? "employee-phone-invitation-hint"
+                      : undefined
+                  }
+                />
+                {isInvitationMode && (
+                  <p
+                    id="employee-phone-invitation-hint"
+                    className="text-xs leading-5 text-muted-foreground"
+                  >
+                    {t("employees_page.phone_invitation_hint")}
+                  </p>
+                )}
+              </div>
               <EmployeeFormField
                 id="employee-job-title-en"
                 label={t("employees_page.job_title_english")}

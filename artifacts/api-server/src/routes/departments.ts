@@ -9,6 +9,10 @@ import {
   type User,
 } from "@workspace/db";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import {
+  BatchCreateDepartmentsBody,
+  CreateDepartmentBody,
+} from "@workspace/api-zod";
 import { requireAuth, requireRole, getUser, ADMIN_ROLES } from "../lib/auth";
 import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
 import {
@@ -19,6 +23,15 @@ import {
 } from "../lib/helpers";
 
 const router: IRouter = Router();
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+const createDepartmentBody = CreateDepartmentBody.strict();
+const batchCreateDepartmentsBody = BatchCreateDepartmentsBody.strict().extend({
+  departments: BatchCreateDepartmentsBody.shape.departments.element
+    .strict()
+    .array()
+    .min(1)
+    .max(50),
+});
 
 function serializeDepartment(department: Department) {
   return {
@@ -36,6 +49,70 @@ function isCurrentAdmin(actor: User | undefined): actor is User {
     actor?.isActive &&
     ADMIN_ROLES.includes(actor.role as (typeof ADMIN_ROLES)[number]),
   );
+}
+
+function normalizedDepartmentName(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+async function lockDepartmentNames(tx: Transaction, facilityId: number) {
+  // Serialize department-name creation within one facility. Both single and
+  // batch creation take the same actor/user locks before this advisory lock,
+  // so the ordering is stable and concurrent requests cannot create the same
+  // normalized name between the conflict check and insert.
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`health-credential:departments:${facilityId}`}, 0))`,
+  );
+  return tx
+    .select({
+      id: departmentsTable.id,
+      name: departmentsTable.name,
+      nameAr: departmentsTable.nameAr,
+    })
+    .from(departmentsTable)
+    .where(
+      and(
+        eq(departmentsTable.facilityId, facilityId),
+        isNull(departmentsTable.deletedAt),
+      ),
+    );
+}
+
+function departmentNameSets(
+  departments: ReadonlyArray<{ name: string; nameAr: string }>,
+) {
+  return {
+    names: new Set(
+      departments.map((department) =>
+        normalizedDepartmentName(department.name),
+      ),
+    ),
+    namesAr: new Set(
+      departments.map((department) =>
+        normalizedDepartmentName(department.nameAr),
+      ),
+    ),
+  };
+}
+
+function hasDepartmentNameConflict(
+  names: Set<string>,
+  namesAr: Set<string>,
+  department: { name: string; nameAr: string },
+): boolean {
+  return (
+    names.has(normalizedDepartmentName(department.name)) ||
+    namesAr.has(normalizedDepartmentName(department.nameAr))
+  );
+}
+
+function reserveDepartmentName(
+  names: Set<string>,
+  namesAr: Set<string>,
+  department: { name: string; nameAr: string },
+) {
+  names.add(normalizedDepartmentName(department.name));
+  namesAr.add(normalizedDepartmentName(department.nameAr));
 }
 
 function departmentAuditValues(
@@ -118,14 +195,18 @@ router.get("/departments", async (req, res) => {
 
 router.post("/departments", requireRole(...ADMIN_ROLES), async (req, res) => {
   const requestUser = getUser(req);
-  const body = req.body as Record<string, unknown>;
-  const name = typeof body.name === "string" ? body.name.trim() : "";
-  const nameAr = typeof body.nameAr === "string" ? body.nameAr.trim() : "";
+  const parsed = createDepartmentBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid department" });
+    return;
+  }
+  const name = parsed.data.name.trim();
+  const nameAr = parsed.data.nameAr.trim();
   if (!name || !nameAr) {
     res.status(400).json({ message: "name and nameAr are required" });
     return;
   }
-  const headId = body.headId == null ? null : Number(body.headId);
+  const headId = parsed.data.headId == null ? null : parsed.data.headId;
   if (headId != null && (!Number.isSafeInteger(headId) || headId < 1)) {
     res.status(400).json({
       message: "Department head not found in this facility",
@@ -158,6 +239,12 @@ router.post("/departments", requireRole(...ADMIN_ROLES), async (req, res) => {
               candidate.isActive,
           );
     if (headId != null && !head) return { kind: "invalid_head" as const };
+
+    const existingDepartments = await lockDepartmentNames(tx, actor.facilityId);
+    const { names, namesAr } = departmentNameSets(existingDepartments);
+    if (hasDepartmentNameConflict(names, namesAr, { name, nameAr })) {
+      return { kind: "duplicate" as const };
+    }
 
     const department = (
       await tx
@@ -195,8 +282,107 @@ router.post("/departments", requireRole(...ADMIN_ROLES), async (req, res) => {
     });
     return;
   }
+  if (result.kind === "duplicate") {
+    res.status(409).json({
+      message: "An active department with this name already exists",
+      code: "department_name_conflict",
+    });
+    return;
+  }
   res.status(201).json(serializeDepartment(result.department));
 });
+
+router.post(
+  "/departments/batch",
+  requireRole(...ADMIN_ROLES),
+  async (req, res) => {
+    const parsed = batchCreateDepartmentsBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid department batch" });
+      return;
+    }
+    const requestedDepartments = parsed.data.departments.map((department) => ({
+      name: department.name.trim(),
+      nameAr: department.nameAr.trim(),
+    }));
+    if (
+      requestedDepartments.some(
+        (department) => !department.name || !department.nameAr,
+      )
+    ) {
+      res.status(400).json({ message: "name and nameAr are required" });
+      return;
+    }
+
+    const requestUser = getUser(req);
+    const result = await db.transaction(async (tx) => {
+      const actor = (
+        await tx
+          .select()
+          .from(usersTable)
+          .where(eq(usersTable.id, requestUser.id))
+          .for("share")
+      )[0];
+      if (!isFreshActiveSessionActor(actor, requestUser)) {
+        return { kind: "unauthorized" as const };
+      }
+      if (!isCurrentAdmin(actor)) return { kind: "forbidden" as const };
+
+      const existingDepartments = await lockDepartmentNames(
+        tx,
+        actor.facilityId,
+      );
+      const { names, namesAr } = departmentNameSets(existingDepartments);
+      const created: Department[] = [];
+      const skipped: string[] = [];
+
+      for (const requestedDepartment of requestedDepartments) {
+        if (hasDepartmentNameConflict(names, namesAr, requestedDepartment)) {
+          skipped.push(requestedDepartment.name);
+          continue;
+        }
+        const department = (
+          await tx
+            .insert(departmentsTable)
+            .values({
+              ...requestedDepartment,
+              facilityId: actor.facilityId,
+              headId: null,
+            })
+            .returning()
+        )[0];
+        if (!department) throw new Error("Department insert returned no row");
+        await tx
+          .insert(auditLogsTable)
+          .values(
+            departmentAuditValues(
+              actor,
+              "Created department",
+              "إنشاء قسم",
+              department,
+              req.ip,
+            ),
+          );
+        reserveDepartmentName(names, namesAr, requestedDepartment);
+        created.push(department);
+      }
+      return { kind: "ok" as const, created, skipped };
+    });
+
+    if (result.kind === "unauthorized") {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    if (result.kind === "forbidden") {
+      res.status(403).json({ message: "Forbidden" });
+      return;
+    }
+    res.json({
+      created: result.created.map(serializeDepartment),
+      skipped: result.skipped,
+    });
+  },
+);
 
 router.get("/departments/:id", async (req, res) => {
   const user = getUser(req);
@@ -310,6 +496,26 @@ router.patch(
         if (!head) return { kind: "invalid_head" as const };
       }
 
+      if (patch.name != null || patch.nameAr != null) {
+        const existingDepartments = await lockDepartmentNames(
+          tx,
+          department.facilityId,
+        );
+        const { names, namesAr } = departmentNameSets(
+          existingDepartments.filter(
+            (candidate) => candidate.id !== department.id,
+          ),
+        );
+        if (
+          hasDepartmentNameConflict(names, namesAr, {
+            name: patch.name ?? department.name,
+            nameAr: patch.nameAr ?? department.nameAr,
+          })
+        ) {
+          return { kind: "duplicate" as const };
+        }
+      }
+
       const updated = (
         await tx
           .update(departmentsTable)
@@ -354,6 +560,13 @@ router.patch(
     if (result.kind === "invalid_head") {
       res.status(400).json({
         message: "Department head not found in this facility",
+      });
+      return;
+    }
+    if (result.kind === "duplicate") {
+      res.status(409).json({
+        message: "An active department with this name already exists",
+        code: "department_name_conflict",
       });
       return;
     }

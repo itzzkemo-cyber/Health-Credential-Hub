@@ -43,6 +43,7 @@ import {
   employeeInvitationEmail,
   getEmployeeInvitationUrl,
 } from "../lib/email/templates";
+import { isSmsOtpConfigured } from "../lib/sms/provider";
 import { logger } from "../lib/logger";
 import {
   getCredentialScopedUsers,
@@ -507,6 +508,16 @@ router.post(
   requireRole(...ADMIN_ROLES),
   employeeStepUpRateLimit,
   async (req, res) => {
+    if (!isSmsOtpConfigured()) {
+      res.status(503).json({
+        code: "otp_unavailable",
+        message:
+          "Employee invitations are unavailable until SMS verification is configured",
+        messageAr:
+          "دعوات الموظفين غير متاحة حتى يتم إعداد خدمة التحقق عبر الرسائل النصية",
+      });
+      return;
+    }
     if (!isEmailConfigured()) {
       res.status(503).json({
         code: "email_delivery_unavailable",
@@ -547,11 +558,10 @@ router.post(
     const stepUpCode = requiredTrimmedString(body, "code", 128);
     const phoneValue = body.phone;
     const phone =
-      phoneValue == null
-        ? null
-        : typeof phoneValue === "string" && phoneValue.trim().length <= 50
-          ? phoneValue.trim() || null
-          : undefined;
+      typeof phoneValue === "string" &&
+      /^\+9665[0-9]{8}$/.test(phoneValue.trim())
+        ? phoneValue.trim()
+        : undefined;
     if (
       !name ||
       !nameAr ||
@@ -1214,6 +1224,21 @@ router.patch(
       return;
     }
     const body = req.body as Record<string, unknown>;
+    const phoneWasRequested = Object.prototype.hasOwnProperty.call(
+      body,
+      "phone",
+    );
+    const requestedPhone =
+      body.phone === null
+        ? null
+        : typeof body.phone === "string"
+          ? body.phone.trim()
+          : null;
+    const phoneInputIsValid =
+      !phoneWasRequested ||
+      body.phone === null ||
+      (typeof body.phone === "string" &&
+        /^\+9665[0-9]{8}$/.test(requestedPhone ?? ""));
     const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
       ? body.currentPassword
       : "";
@@ -1222,7 +1247,7 @@ router.patch(
       Object.prototype.hasOwnProperty.call(body, field),
     );
     const profilePatch: Record<string, unknown> = {};
-    for (const f of ["name", "nameAr", "jobTitle", "jobTitleAr", "phone"]) {
+    for (const f of ["name", "nameAr", "jobTitle", "jobTitleAr"]) {
       if (typeof body[f] === "string") profilePatch[f] = body[f];
     }
 
@@ -1333,6 +1358,19 @@ router.patch(
       if (!ADMIN_ROLES.includes(actor.role) && changesOrganization) {
         return { kind: "admin_required" as const };
       }
+      if (!phoneInputIsValid) {
+        return { kind: "invalid_phone" as const };
+      }
+      // Keep legacy edit forms working when they echo the existing number. An
+      // unverified contact number may be corrected or cleared, but a verified
+      // identity factor requires a dedicated re-verification flow.
+      if (
+        phoneWasRequested &&
+        requestedPhone !== target.phone &&
+        target.phoneVerifiedAt != null
+      ) {
+        return { kind: "phone_reverification_required" as const };
+      }
 
       // A role change can make an existing supervisor relationship invalid.
       // When a supervisor is already assigned, require the caller to resubmit
@@ -1350,6 +1388,10 @@ router.patch(
 
       const patch: Record<string, unknown> = { ...profilePatch };
       let invalidatesTargetSessions = false;
+      if (phoneWasRequested && requestedPhone !== target.phone) {
+        patch.phone = requestedPhone;
+        patch.phoneVerifiedAt = null;
+      }
       if (roleWasRequested) {
         if (!requestedRole) return { kind: "invalid_role" as const };
         if (requestedRole !== target.role) {
@@ -1511,6 +1553,23 @@ router.patch(
     if (result.kind === "admin_required") {
       res.status(403).json({
         message: "Only administrators may change organizational fields",
+      });
+      return;
+    }
+    if (result.kind === "phone_reverification_required") {
+      res.status(400).json({
+        code: "phone_reverification_required",
+        message:
+          "A verified phone number cannot be changed through the employee profile endpoint",
+        messageAr: "لا يمكن تغيير رقم جوال موثّق من خلال مسار تعديل ملف الموظف",
+      });
+      return;
+    }
+    if (result.kind === "invalid_phone") {
+      res.status(400).json({
+        code: "invalid_phone",
+        message: "Phone must be a Saudi mobile number in E.164 format or null",
+        messageAr: "يجب أن يكون رقم الجوال سعوديًا بصيغة E.164 أو فارغًا",
       });
       return;
     }

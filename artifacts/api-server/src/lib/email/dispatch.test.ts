@@ -116,6 +116,7 @@ function user(overrides: Partial<User>): User {
     jobTitleAr: "دور",
     employeeNumber: "EMP-1",
     phone: null,
+    phoneVerifiedAt: null,
     avatarUrl: null,
     googleId: null,
     isActive: true,

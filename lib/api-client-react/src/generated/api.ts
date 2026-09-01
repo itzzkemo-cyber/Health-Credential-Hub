@@ -25,6 +25,8 @@ import type {
   AdminStepUpInput,
   AuditLogListResponse,
   AuthResponse,
+  BatchDepartmentInput,
+  BatchDepartmentResult,
   ChangePassword400,
   ChangePasswordInput,
   ChangePasswordResult,
@@ -42,6 +44,7 @@ import type {
   Department,
   DepartmentCompliance,
   DepartmentInput,
+  DepartmentNameConflict,
   DepartmentUpdate,
   DepartmentWithStats,
   DuplicateCheckInput,
@@ -80,11 +83,14 @@ import type {
   OcrInput,
   OcrReadiness,
   OcrResult,
+  PhoneOtpStarted,
   ReadinessStatus,
   ResetPasswordInput,
   Schedule,
   ScheduleSummary,
   ScheduleVersionBody,
+  SmsOtpError,
+  StartInvitationPhoneOtpInput,
   TeamSchedule,
   TotpActivation,
   TotpAdminDisableInput,
@@ -1728,6 +1734,78 @@ export const useResetPassword = <TError = ErrorType<void>,
       return useMutation(getResetPasswordMutationOptions(options));
     }
 
+export const getStartInvitationPhoneVerificationUrl = () => {
+
+
+
+
+  return `/api/auth/invitation-phone-otp/start`
+}
+
+/**
+ * Public, rate-limited first step of employee activation. The supplied Saudi E.164 mobile number must exactly match the administrator-issued invitation. OTP state, send cooldowns, attempt budgets, and expiry are durable; no OTP value is stored by this application.
+ * @summary Send an SMS OTP for an employee invitation
+ */
+export const startInvitationPhoneVerification = async (startInvitationPhoneOtpInput: StartInvitationPhoneOtpInput, options?: Parameters<typeof customFetch>[1]): Promise<PhoneOtpStarted> => {
+
+  return customFetch<PhoneOtpStarted>(getStartInvitationPhoneVerificationUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(startInvitationPhoneOtpInput)
+  }
+);}
+
+
+
+
+
+export const getStartInvitationPhoneVerificationMutationOptions = <TError = ErrorType<InvitationError | SmsOtpError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startInvitationPhoneVerification>>, TError,{data: BodyType<StartInvitationPhoneOtpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startInvitationPhoneVerification>>, TError,{data: BodyType<StartInvitationPhoneOtpInput>}, TContext> => {
+
+const mutationKey = ['startInvitationPhoneVerification'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startInvitationPhoneVerification>>, {data: BodyType<StartInvitationPhoneOtpInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  startInvitationPhoneVerification(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartInvitationPhoneVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof startInvitationPhoneVerification>>>
+    export type StartInvitationPhoneVerificationMutationBody = BodyType<StartInvitationPhoneOtpInput>
+    export type StartInvitationPhoneVerificationMutationError = ErrorType<InvitationError | SmsOtpError>
+
+    /**
+ * @summary Send an SMS OTP for an employee invitation
+ */
+export const useStartInvitationPhoneVerification = <TError = ErrorType<InvitationError | SmsOtpError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startInvitationPhoneVerification>>, TError,{data: BodyType<StartInvitationPhoneOtpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startInvitationPhoneVerification>>,
+        TError,
+        {data: BodyType<StartInvitationPhoneOtpInput>},
+        TContext
+      > => {
+      return useMutation(getStartInvitationPhoneVerificationMutationOptions(options));
+    }
+
 export const getAcceptEmployeeInvitationUrl = () => {
 
 
@@ -1737,7 +1815,7 @@ export const getAcceptEmployeeInvitationUrl = () => {
 }
 
 /**
- * Public invite-acceptance endpoint. The bearer token and employee-chosen password are the only accepted fields. Organization scope and profile data come from the administrator-issued invitation. A successful activation does not create a browser session; the employee signs in through the normal login flow.
+ * Public invite-acceptance endpoint. The bearer token, matching Saudi E.164 mobile number, SMS OTP, and employee-chosen password are the only accepted fields. Organization scope and profile data come from the administrator-issued invitation. The OTP is verified before the user row is created. A successful activation does not create a browser session; the employee signs in through the normal login flow.
  * @summary Activate an employee account from a single-use invitation
  */
 export const acceptEmployeeInvitation = async (acceptEmployeeInvitationInput: AcceptEmployeeInvitationInput, options?: Parameters<typeof customFetch>[1]): Promise<EmployeeInvitationAccepted> => {
@@ -1755,7 +1833,7 @@ export const acceptEmployeeInvitation = async (acceptEmployeeInvitationInput: Ac
 
 
 
-export const getAcceptEmployeeInvitationMutationOptions = <TError = ErrorType<InvitationError | void>,
+export const getAcceptEmployeeInvitationMutationOptions = <TError = ErrorType<InvitationError | void | SmsOtpError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptEmployeeInvitation>>, TError,{data: BodyType<AcceptEmployeeInvitationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof acceptEmployeeInvitation>>, TError,{data: BodyType<AcceptEmployeeInvitationInput>}, TContext> => {
 
@@ -1784,12 +1862,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AcceptEmployeeInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof acceptEmployeeInvitation>>>
     export type AcceptEmployeeInvitationMutationBody = BodyType<AcceptEmployeeInvitationInput>
-    export type AcceptEmployeeInvitationMutationError = ErrorType<InvitationError | void>
+    export type AcceptEmployeeInvitationMutationError = ErrorType<InvitationError | void | SmsOtpError>
 
     /**
  * @summary Activate an employee account from a single-use invitation
  */
-export const useAcceptEmployeeInvitation = <TError = ErrorType<InvitationError | void>,
+export const useAcceptEmployeeInvitation = <TError = ErrorType<InvitationError | void | SmsOtpError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptEmployeeInvitation>>, TError,{data: BodyType<AcceptEmployeeInvitationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof acceptEmployeeInvitation>>,
@@ -4163,7 +4241,7 @@ export const createDepartment = async (departmentInput: DepartmentInput, options
 
 
 
-export const getCreateDepartmentMutationOptions = <TError = ErrorType<unknown>,
+export const getCreateDepartmentMutationOptions = <TError = ErrorType<DepartmentNameConflict>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDepartment>>, TError,{data: BodyType<DepartmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createDepartment>>, TError,{data: BodyType<DepartmentInput>}, TContext> => {
 
@@ -4192,12 +4270,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateDepartmentMutationResult = NonNullable<Awaited<ReturnType<typeof createDepartment>>>
     export type CreateDepartmentMutationBody = BodyType<DepartmentInput>
-    export type CreateDepartmentMutationError = ErrorType<unknown>
+    export type CreateDepartmentMutationError = ErrorType<DepartmentNameConflict>
 
     /**
  * @summary Create department
  */
-export const useCreateDepartment = <TError = ErrorType<unknown>,
+export const useCreateDepartment = <TError = ErrorType<DepartmentNameConflict>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDepartment>>, TError,{data: BodyType<DepartmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof createDepartment>>,
@@ -4206,6 +4284,78 @@ export const useCreateDepartment = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateDepartmentMutationOptions(options));
+    }
+
+export const getBatchCreateDepartmentsUrl = () => {
+
+
+
+
+  return `/api/departments/batch`
+}
+
+/**
+ * Atomically creates only departments whose normalized English and Arabic names are not already active in the actor's facility. Duplicate request entries and existing departments are returned in skipped.
+ * @summary Create multiple departments in the current administrator facility
+ */
+export const batchCreateDepartments = async (batchDepartmentInput: BatchDepartmentInput, options?: Parameters<typeof customFetch>[1]): Promise<BatchDepartmentResult> => {
+
+  return customFetch<BatchDepartmentResult>(getBatchCreateDepartmentsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(batchDepartmentInput)
+  }
+);}
+
+
+
+
+
+export const getBatchCreateDepartmentsMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof batchCreateDepartments>>, TError,{data: BodyType<BatchDepartmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof batchCreateDepartments>>, TError,{data: BodyType<BatchDepartmentInput>}, TContext> => {
+
+const mutationKey = ['batchCreateDepartments'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof batchCreateDepartments>>, {data: BodyType<BatchDepartmentInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  batchCreateDepartments(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BatchCreateDepartmentsMutationResult = NonNullable<Awaited<ReturnType<typeof batchCreateDepartments>>>
+    export type BatchCreateDepartmentsMutationBody = BodyType<BatchDepartmentInput>
+    export type BatchCreateDepartmentsMutationError = ErrorType<void>
+
+    /**
+ * @summary Create multiple departments in the current administrator facility
+ */
+export const useBatchCreateDepartments = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof batchCreateDepartments>>, TError,{data: BodyType<BatchDepartmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof batchCreateDepartments>>,
+        TError,
+        {data: BodyType<BatchDepartmentInput>},
+        TContext
+      > => {
+      return useMutation(getBatchCreateDepartmentsMutationOptions(options));
     }
 
 export const getGetDepartmentUrl = (id: number,) => {
@@ -4312,7 +4462,7 @@ export const updateDepartment = async (id: number,
 
 
 
-export const getUpdateDepartmentMutationOptions = <TError = ErrorType<unknown>,
+export const getUpdateDepartmentMutationOptions = <TError = ErrorType<DepartmentNameConflict>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDepartment>>, TError,{id: number;data: BodyType<DepartmentUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateDepartment>>, TError,{id: number;data: BodyType<DepartmentUpdate>}, TContext> => {
 
@@ -4341,12 +4491,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateDepartmentMutationResult = NonNullable<Awaited<ReturnType<typeof updateDepartment>>>
     export type UpdateDepartmentMutationBody = BodyType<DepartmentUpdate>
-    export type UpdateDepartmentMutationError = ErrorType<unknown>
+    export type UpdateDepartmentMutationError = ErrorType<DepartmentNameConflict>
 
     /**
  * @summary Update department
  */
-export const useUpdateDepartment = <TError = ErrorType<unknown>,
+export const useUpdateDepartment = <TError = ErrorType<DepartmentNameConflict>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDepartment>>, TError,{id: number;data: BodyType<DepartmentUpdate>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof updateDepartment>>,

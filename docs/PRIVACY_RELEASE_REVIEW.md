@@ -14,7 +14,7 @@ are collected. Do not invent a company, legal basis, retention period or owner.
 | Backups | Local encrypted archive/restore tests passed with a new PostgreSQL cluster and synthetic documents. Supabase dashboard showed no last backup. | A live capture, independent encrypted destination/key escrow, schedule, retention and a real-provider recovery drill are not yet configured or proven. Database-only backups do not include Storage object bytes. |
 | Administration | 115 added HTTP route tests plus an opt-in real PostgreSQL + HTTP + private filesystem drill cover password/TOTP login, admin delegation with consumed step-up code, replay denial, scope, file denial, session revocation and persisted audit. On August 31 the owner's live Chrome session loaded the dashboard/directory as System Admin; Settings/profile reported 2FA enabled and an active account. | The live check was read-only: role options and step-up form inspected without submission. Delegation/revocation and cross-facility file denial remain synthetic-drill evidence, not live acceptance. The directory contained only the owner account and its document list was empty. |
 | Document processing | Image/PDF reconstruction is server-side with no new external processor; originals are not retained by the upload path. | Rasterization changes PDFs. Disclose loss of selectable text, reject signatures/forms, retain issuer originals outside this service as appropriate. Process isolation is not an OS sandbox or antivirus guarantee. |
-| External processors | Live readiness reported email configured and OCR disabled; n8n is opt-in in code. | Verify Resend sender, data retention, tracking, region/subprocessors and deletion terms. No OCR/n8n enablement is authorized by this review. |
+| External processors | Live readiness reported email configured and OCR disabled; n8n is opt-in in code. SMS OTP support is implemented against Twilio Verify but is not evidence that a Verify account, Saudi sender or production credentials are approved or enabled. | Verify Resend and Twilio contracts, sender setup, data retention, tracking, region/subprocessors, transfer safeguards and deletion terms. No OCR/n8n enablement is authorized by this review. |
 | Availability | After successful GitHub CI/Linux image checks, Render reported deployment `dep-daac2oon74is73afbagg` Live. Readiness returned `ready` for exact release `ff78416265a4b9118bbea4647a59c40b1eefc653`, and the live authenticated form accepted PDF. UptimeRobot monitor `803870616` previously reported Up; DOWN/UP test emails were confirmed in the operations inbox at 23:07 UTC on August 30. | PDF storage round-trip and live cross-facility denial remain separate acceptance gates. A test notification is not an outage simulation or future delivery guarantee. Render Free is not a production availability guarantee. |
 
 ## Required owner decisions
@@ -34,7 +34,8 @@ Before approving production, record an accountable owner and evidence for each:
    audit history; it does not satisfy every deletion request automatically.
 4. **Providers and transfers:** review processor contracts/DPA, subprocessors,
    data region, support access, transfer safeguards and breach terms for
-   Render, Supabase, Resend and any later OCR or workflow recipient.
+   Render, Supabase, Resend, Twilio Verify and any later OCR or workflow
+   recipient.
 5. **Security operations:** MFA for privileged accounts, named backup/key
    custodian and independent recovery reviewer, incident escalation/notification
    procedure, alert delivery tests, secret rotation and least-privilege reviews.

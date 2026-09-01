@@ -10,6 +10,7 @@ import { checkObjectStorageReadiness } from "../lib/gcsReadiness";
 import { safeErrorLogFields } from "../lib/safeError";
 import { getEmailDeliveryReadiness } from "../lib/email/sender";
 import { getOcrOperationalReadiness } from "../lib/ocrConfig";
+import { getSmsOtpReadiness } from "../lib/sms/provider";
 
 const router: IRouter = Router();
 
@@ -38,6 +39,21 @@ router.get("/healthz", (_req, res) => {
 
 router.get("/readyz", async (req, res) => {
   const releaseMetadata = getReleaseMetadata();
+  const smsOtp = getSmsOtpReadiness();
+  if (smsOtp === "misconfigured") {
+    req.log.error(
+      { errorName: "SmsOtpConfigurationError" },
+      "Readiness check failed",
+    );
+    res.status(503).json(
+      HealthCheckResponse.parse({
+        status: "not_ready",
+        ...releaseMetadata,
+        smsOtp,
+      }),
+    );
+    return;
+  }
   const emailDelivery = getEmailDeliveryReadiness();
   if (emailDelivery === "misconfigured") {
     req.log.error(
@@ -78,6 +94,7 @@ router.get("/readyz", async (req, res) => {
         database: "ok",
         objectStorage,
         documentUploads: getDocumentUploadReadiness(),
+        smsOtp,
         emailDelivery,
         ocr,
       }),

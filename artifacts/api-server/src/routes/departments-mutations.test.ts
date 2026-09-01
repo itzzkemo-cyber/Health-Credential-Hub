@@ -43,8 +43,15 @@ const testState = vi.hoisted(() => ({
     createdAt: new Date("2026-08-27T00:00:00.000Z"),
   },
   failAudit: false,
+  activeDepartmentNames: [] as Array<{
+    id?: number;
+    name: string;
+    nameAr: string;
+  }>,
   committedDepartment: null as Record<string, unknown> | null,
   committedAudit: null as Record<string, unknown> | null,
+  committedDepartments: [] as Array<Record<string, unknown>>,
+  committedAudits: [] as Array<Record<string, unknown>>,
   committedDetachedUsers: false,
   detachedUserValues: null as Record<string, unknown> | null,
   committedRetiredPolicies: false,
@@ -69,6 +76,8 @@ vi.mock("@workspace/db", () => {
   };
   const departmentsTable = {
     id: "departments.id",
+    name: "departments.name",
+    nameAr: "departments.nameAr",
     facilityId: "departments.facilityId",
     deletedAt: "departments.deletedAt",
   };
@@ -103,20 +112,25 @@ vi.mock("@workspace/db", () => {
         async (callback: (tx: unknown) => Promise<unknown>) => {
           let stagedDepartment: Record<string, unknown> | null = null;
           let stagedAudit: Record<string, unknown> | null = null;
+          const stagedDepartments: Array<Record<string, unknown>> = [];
+          const stagedAudits: Array<Record<string, unknown>> = [];
           let stagedDetachedUsers = false;
           let stagedRetiredPolicies = false;
           const tx = {
-            select: vi.fn(() => ({
+            select: vi.fn((fields?: Record<string, unknown>) => ({
               from: vi.fn((table: unknown) =>
                 selection(
                   table === usersTable
                     ? [testState.actor]
                     : table === departmentsTable
-                      ? [testState.department]
+                      ? fields?.name === departmentsTable.name
+                        ? testState.activeDepartmentNames
+                        : [testState.department]
                       : [],
                 ),
               ),
             })),
+            execute: vi.fn(async () => []),
             insert: vi.fn((table: unknown) => ({
               values: vi.fn((values: Record<string, unknown>) => {
                 if (table === auditLogsTable) {
@@ -124,14 +138,17 @@ vi.mock("@workspace/db", () => {
                     return Promise.reject(new Error("audit insert failed"));
                   }
                   stagedAudit = values;
+                  stagedAudits.push(values);
                   return Promise.resolve();
                 }
                 if (table !== departmentsTable)
                   throw new Error("Unexpected insert table");
                 stagedDepartment = {
                   ...testState.department,
+                  id: testState.department.id + stagedDepartments.length,
                   ...values,
                 };
+                stagedDepartments.push(stagedDepartment);
                 return { returning: async () => [stagedDepartment] };
               }),
             })),
@@ -165,6 +182,8 @@ vi.mock("@workspace/db", () => {
             const result = await callback(tx);
             testState.committedDepartment = stagedDepartment;
             testState.committedAudit = stagedAudit;
+            testState.committedDepartments = stagedDepartments;
+            testState.committedAudits = stagedAudits;
             testState.committedDetachedUsers = stagedDetachedUsers;
             testState.committedRetiredPolicies = stagedRetiredPolicies;
             return result;
@@ -172,6 +191,8 @@ vi.mock("@workspace/db", () => {
             testState.rolledBack = true;
             testState.committedDepartment = null;
             testState.committedAudit = null;
+            testState.committedDepartments = [];
+            testState.committedAudits = [];
             testState.committedDetachedUsers = false;
             testState.committedRetiredPolicies = false;
             throw error;
@@ -206,8 +227,11 @@ describe("department mutation retention and audit atomicity", () => {
 
   beforeEach(() => {
     testState.failAudit = false;
+    testState.activeDepartmentNames = [];
     testState.committedDepartment = null;
     testState.committedAudit = null;
+    testState.committedDepartments = [];
+    testState.committedAudits = [];
     testState.committedDetachedUsers = false;
     testState.detachedUserValues = null;
     testState.committedRetiredPolicies = false;
@@ -266,6 +290,107 @@ describe("department mutation retention and audit atomicity", () => {
     );
   });
 
+  it("rejects a normalized duplicate during single department creation", async () => {
+    testState.activeDepartmentNames = [
+      { name: "  EMERGENCY ", nameAr: "الطوارئ" },
+    ];
+
+    const response = await request("POST", "/departments", {
+      name: " emergency ",
+      nameAr: "قسم طوارئ آخر",
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ code: "department_name_conflict" }),
+    );
+    expect(testState.committedDepartments).toHaveLength(0);
+    expect(testState.committedAudits).toHaveLength(0);
+  });
+
+  it("creates a facility-scoped batch while skipping existing and request duplicates", async () => {
+    testState.activeDepartmentNames = [{ name: " ER ", nameAr: "الطوارئ" }];
+
+    const response = await request("POST", "/departments/batch", {
+      departments: [
+        { name: "er", nameAr: "قسم طوارئ آخر" },
+        { name: "2A", nameAr: "جناح 2A" },
+        { name: " 2a ", nameAr: "جناح بديل" },
+        { name: "OR", nameAr: "العمليات" },
+        { name: "Endoscopy", nameAr: " العمليات " },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      created: [
+        expect.objectContaining({ name: "2A", nameAr: "جناح 2A" }),
+        expect.objectContaining({ name: "OR", nameAr: "العمليات" }),
+      ],
+      skipped: ["er", "2a", "Endoscopy"],
+    });
+    expect(testState.committedDepartments).toEqual([
+      expect.objectContaining({ name: "2A", facilityId: 10, headId: null }),
+      expect.objectContaining({ name: "OR", facilityId: 10, headId: null }),
+    ]);
+    expect(testState.committedAudits).toHaveLength(2);
+    expect(testState.committedAudits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "Created department",
+          facilityId: 10,
+        }),
+      ]),
+    );
+  });
+
+  it("is idempotent when every requested department already exists", async () => {
+    testState.activeDepartmentNames = [
+      { name: "2A", nameAr: "جناح 2A" },
+      { name: "OR", nameAr: "العمليات" },
+    ];
+
+    const response = await request("POST", "/departments/batch", {
+      departments: [
+        { name: "2a", nameAr: "جناح 2A" },
+        { name: "OR", nameAr: "العمليات" },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      created: [],
+      skipped: ["2a", "OR"],
+    });
+    expect(testState.committedDepartments).toHaveLength(0);
+    expect(testState.committedAudits).toHaveLength(0);
+  });
+
+  it("rejects head assignments and unknown fields in a batch item", async () => {
+    const response = await request("POST", "/departments/batch", {
+      departments: [{ name: "IR", nameAr: "الأشعة التداخلية", headId: 7 }],
+    });
+
+    expect(response.status).toBe(400);
+    expect(testState.committedDepartments).toHaveLength(0);
+  });
+
+  it("rolls the whole department batch back when an audit insert fails", async () => {
+    testState.failAudit = true;
+
+    const response = await request("POST", "/departments/batch", {
+      departments: [
+        { name: "IR", nameAr: "الأشعة التداخلية" },
+        { name: "Endoscopy", nameAr: "المناظير" },
+      ],
+    });
+
+    expect(response.status).toBe(500);
+    expect(testState.rolledBack).toBe(true);
+    expect(testState.committedDepartments).toHaveLength(0);
+    expect(testState.committedAudits).toHaveLength(0);
+  });
+
   it("commits department update and audit together", async () => {
     const response = await request("PATCH", "/departments/100", {
       name: "Emergency Care",
@@ -278,6 +403,23 @@ describe("department mutation retention and audit atomicity", () => {
     expect(testState.committedAudit).toEqual(
       expect.objectContaining({ action: "Updated department" }),
     );
+  });
+
+  it("rejects a normalized duplicate during department rename", async () => {
+    testState.activeDepartmentNames = [
+      { id: 101, name: "  EMERGENCY CARE ", nameAr: "العناية الطارئة" },
+    ];
+
+    const response = await request("PATCH", "/departments/100", {
+      name: "emergency care",
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ code: "department_name_conflict" }),
+    );
+    expect(testState.committedDepartment).toBeNull();
+    expect(testState.committedAudit).toBeNull();
   });
 
   it("soft-deletes the department, retires policies, detaches users, and audits atomically", async () => {

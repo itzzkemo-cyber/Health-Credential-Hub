@@ -9,7 +9,15 @@
 export interface EmployeeInvitation {
   id: number;
   email: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
   name: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
   nameAr: string;
   jobTitle: string;
   jobTitleAr: string;

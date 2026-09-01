@@ -19,7 +19,12 @@ export interface EmployeeUpdate {
   supervisorId?: number | null;
   jobTitle?: string;
   jobTitleAr?: string;
-  phone?: string;
+  /**
+     * May update or clear an unverified phone. Changing a verified phone requires a dedicated re-verification flow.
+     * @nullable
+     * @pattern ^\+9665[0-9]{8}$
+     */
+  phone?: string | null;
   isActive?: boolean;
   /**
      * Required with code when role, departmentId, supervisorId, or isActive actually changes.

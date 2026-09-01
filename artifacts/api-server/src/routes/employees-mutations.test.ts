@@ -44,6 +44,8 @@ const testState = vi.hoisted(() => ({
     departmentId: null as number | null,
     supervisorId: null as number | null,
     sessionVersion: 1,
+    phone: "+966500000000",
+    phoneVerifiedAt: new Date("2026-08-27T01:00:00.000Z") as Date | null,
     createdAt: new Date("2026-08-27T00:00:00.000Z"),
   },
   extraUsers: [] as Array<Record<string, unknown>>,
@@ -293,6 +295,8 @@ describe("administrative employee mutations", () => {
     testState.target.supervisorId = null;
     testState.target.isActive = true;
     testState.target.sessionVersion = 1;
+    testState.target.phone = "+966500000000";
+    testState.target.phoneVerifiedAt = new Date("2026-08-27T01:00:00.000Z");
     testState.extraUsers = [];
     testState.departmentRows = [{ id: 7, facilityId: 10 }];
     testState.lockSequence = [];
@@ -347,6 +351,70 @@ describe("administrative employee mutations", () => {
         : {}),
     });
   }
+
+  it("rejects changes to a verified phone until a dedicated re-verification flow exists", async () => {
+    const response = await request("PATCH", "/employees/2", {
+      phone: "+966511111111",
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "phone_reverification_required" }),
+    );
+    expect(testState.transactionCount).toBe(1);
+    expect(testState.committedUpdate).toBeNull();
+  });
+
+  it("accepts an unchanged phone echoed by an existing edit form", async () => {
+    const response = await request("PATCH", "/employees/2", {
+      phone: "+966500000000",
+    });
+
+    expect(response.status).toBe(200);
+    expect(testState.transactionCount).toBe(1);
+    expect(testState.committedUpdate).toBeNull();
+  });
+
+  it("allows a valid unverified phone correction and keeps it unverified", async () => {
+    testState.target.phoneVerifiedAt = null;
+
+    const response = await request("PATCH", "/employees/2", {
+      phone: "+966511111111",
+    });
+
+    expect(response.status).toBe(200);
+    expect(testState.committedUpdate).toEqual(
+      expect.objectContaining({
+        phone: "+966511111111",
+        phoneVerifiedAt: null,
+      }),
+    );
+  });
+
+  it("allows clearing an unverified phone", async () => {
+    testState.target.phoneVerifiedAt = null;
+
+    const response = await request("PATCH", "/employees/2", { phone: null });
+
+    expect(response.status).toBe(200);
+    expect(testState.committedUpdate).toEqual(
+      expect.objectContaining({ phone: null, phoneVerifiedAt: null }),
+    );
+  });
+
+  it("rejects a malformed unverified phone", async () => {
+    testState.target.phoneVerifiedAt = null;
+
+    const response = await request("PATCH", "/employees/2", {
+      phone: "0500000000",
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "invalid_phone" }),
+    );
+    expect(testState.committedUpdate).toBeNull();
+  });
 
   it.each(["activate", "deactivate"])(
     "rejects a hidden %s API call from a non-admin manager",

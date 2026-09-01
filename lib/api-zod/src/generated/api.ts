@@ -776,6 +776,7 @@ export const HealthCheckResponse = zod.object({
   "status": zod.string(),
   "releaseSha": zod.string().min(healthCheckResponseReleaseShaMin).max(healthCheckResponseReleaseShaMax).regex(healthCheckResponseReleaseShaRegExp).optional().describe('Public Git commit identifier for the running release, when available.'),
   "emailDelivery": zod.enum(['configured', 'disabled', 'misconfigured']).optional(),
+  "smsOtp": zod.enum(['configured', 'disabled', 'misconfigured']).optional(),
   "ocr": zod.enum(['configured', 'disabled', 'misconfigured']).optional()
 })
 
@@ -797,6 +798,7 @@ export const ReadinessCheckResponse = zod.object({
   "objectStorage": zod.string(),
   "documentUploads": zod.enum(['enabled', 'disabled']),
   "emailDelivery": zod.enum(['configured', 'disabled']),
+  "smsOtp": zod.enum(['configured', 'disabled']),
   "ocr": zod.enum(['configured', 'disabled'])
 })
 
@@ -827,6 +829,7 @@ export const LoginResponse = zod.object({
   "jobTitleAr": zod.string().optional(),
   "employeeNumber": zod.string().optional(),
   "phone": zod.string().nullish(),
+  "phoneVerifiedAt": zod.coerce.date().nullable().describe('Server-issued timestamp proving control of the stored phone number.'),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
   "mustChangePassword": zod.boolean(),
@@ -870,6 +873,7 @@ export const GetMeResponse = zod.object({
   "jobTitleAr": zod.string().optional(),
   "employeeNumber": zod.string().optional(),
   "phone": zod.string().nullish(),
+  "phoneVerifiedAt": zod.coerce.date().nullable().describe('Server-issued timestamp proving control of the stored phone number.'),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
   "mustChangePassword": zod.boolean(),
@@ -935,6 +939,7 @@ export const ResetPasswordResponse = zod.object({
   "jobTitleAr": zod.string().optional(),
   "employeeNumber": zod.string().optional(),
   "phone": zod.string().nullish(),
+  "phoneVerifiedAt": zod.coerce.date().nullable().describe('Server-issued timestamp proving control of the stored phone number.'),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
   "mustChangePassword": zod.boolean(),
@@ -945,18 +950,46 @@ export const ResetPasswordResponse = zod.object({
 
 
 /**
- * Public invite-acceptance endpoint. The bearer token and employee-chosen password are the only accepted fields. Organization scope and profile data come from the administrator-issued invitation. A successful activation does not create a browser session; the employee signs in through the normal login flow.
+ * Public, rate-limited first step of employee activation. The supplied Saudi E.164 mobile number must exactly match the administrator-issued invitation. OTP state, send cooldowns, attempt budgets, and expiry are durable; no OTP value is stored by this application.
+ * @summary Send an SMS OTP for an employee invitation
+ */
+export const startInvitationPhoneVerificationBodyTokenRegExp = new RegExp('^[0-9a-f]{64}$');
+export const startInvitationPhoneVerificationBodyPhoneRegExp = new RegExp('^\\+9665[0-9]{8}$');
+
+
+export const StartInvitationPhoneVerificationBody = zod.object({
+  "token": zod.string().regex(startInvitationPhoneVerificationBodyTokenRegExp),
+  "phone": zod.string().regex(startInvitationPhoneVerificationBodyPhoneRegExp).describe('Saudi mobile number in E.164 format matching the invitation.')
+})
+
+
+
+
+
+export const StartInvitationPhoneVerificationResponse = zod.object({
+  "status": zod.enum(['sent']),
+  "expiresInSeconds": zod.number().int().min(1),
+  "retryAfterSeconds": zod.number().int().min(1)
+})
+
+
+/**
+ * Public invite-acceptance endpoint. The bearer token, matching Saudi E.164 mobile number, SMS OTP, and employee-chosen password are the only accepted fields. Organization scope and profile data come from the administrator-issued invitation. The OTP is verified before the user row is created. A successful activation does not create a browser session; the employee signs in through the normal login flow.
  * @summary Activate an employee account from a single-use invitation
  */
 export const acceptEmployeeInvitationBodyTokenRegExp = new RegExp('^[0-9a-f]{64}$');
 export const acceptEmployeeInvitationBodyPasswordMin = 12;
 export const acceptEmployeeInvitationBodyPasswordMax = 1024;
 
+export const acceptEmployeeInvitationBodyPhoneRegExp = new RegExp('^\\+9665[0-9]{8}$');
+export const acceptEmployeeInvitationBodyCodeRegExp = new RegExp('^[0-9]{6}$');
 
 
 export const AcceptEmployeeInvitationBody = zod.object({
   "token": zod.string().regex(acceptEmployeeInvitationBodyTokenRegExp),
-  "password": zod.string().min(acceptEmployeeInvitationBodyPasswordMin).max(acceptEmployeeInvitationBodyPasswordMax)
+  "password": zod.string().min(acceptEmployeeInvitationBodyPasswordMin).max(acceptEmployeeInvitationBodyPasswordMax),
+  "phone": zod.string().regex(acceptEmployeeInvitationBodyPhoneRegExp).describe('Saudi mobile number in E.164 format matching the invitation.'),
+  "code": zod.string().regex(acceptEmployeeInvitationBodyCodeRegExp).describe('Six-digit SMS one-time verification code.')
 })
 
 export const AcceptEmployeeInvitationResponse = zod.object({
@@ -1028,6 +1061,7 @@ export const TotpChallengeResponse = zod.object({
   "jobTitleAr": zod.string().optional(),
   "employeeNumber": zod.string().optional(),
   "phone": zod.string().nullish(),
+  "phoneVerifiedAt": zod.coerce.date().nullable().describe('Server-issued timestamp proving control of the stored phone number.'),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
   "mustChangePassword": zod.boolean(),
@@ -1670,6 +1704,7 @@ export const ListEmployeesResponseItem = zod.object({
   "jobTitleAr": zod.string().optional(),
   "employeeNumber": zod.string().optional(),
   "phone": zod.string().nullish(),
+  "phoneVerifiedAt": zod.coerce.date().nullish(),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
   "createdAt": zod.string()
@@ -1733,6 +1768,7 @@ export const CreateEmployeeResponse = zod.object({
   "jobTitleAr": zod.string().optional(),
   "employeeNumber": zod.string().optional(),
   "phone": zod.string().nullish(),
+  "phoneVerifiedAt": zod.coerce.date().nullish(),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
   "createdAt": zod.string()
@@ -1750,11 +1786,17 @@ export const ListEmployeeInvitationsQueryParams = zod.object({
   "facilityId": zod.coerce.number().int().min(1).optional().describe('Optional facility selector honored only for system administrators.')
 })
 
+export const listEmployeeInvitationsResponseNameMax = 120;
+
+export const listEmployeeInvitationsResponseNameArMax = 120;
+
+
+
 export const ListEmployeeInvitationsResponseItem = zod.object({
   "id": zod.number().int(),
   "email": zod.string().email(),
-  "name": zod.string(),
-  "nameAr": zod.string(),
+  "name": zod.string().min(1).max(listEmployeeInvitationsResponseNameMax),
+  "nameAr": zod.string().min(1).max(listEmployeeInvitationsResponseNameArMax),
   "jobTitle": zod.string(),
   "jobTitleAr": zod.string(),
   "employeeNumber": zod.string(),
@@ -1784,8 +1826,7 @@ export const createEmployeeInvitationBodyJobTitleArMax = 200;
 
 export const createEmployeeInvitationBodyEmployeeNumberMax = 100;
 
-export const createEmployeeInvitationBodyPhoneMax = 50;
-
+export const createEmployeeInvitationBodyPhoneRegExp = new RegExp('^\\+9665[0-9]{8}$');
 
 
 
@@ -1802,7 +1843,7 @@ export const CreateEmployeeInvitationBody = zod.object({
   "jobTitle": zod.string().min(1).max(createEmployeeInvitationBodyJobTitleMax),
   "jobTitleAr": zod.string().min(1).max(createEmployeeInvitationBodyJobTitleArMax),
   "employeeNumber": zod.string().min(1).max(createEmployeeInvitationBodyEmployeeNumberMax),
-  "phone": zod.string().max(createEmployeeInvitationBodyPhoneMax).nullish(),
+  "phone": zod.string().regex(createEmployeeInvitationBodyPhoneRegExp).describe('Saudi mobile number in E.164 format; the employee must verify it before activation.'),
   "facilityId": zod.number().int().min(1).nullish().describe('Optional target facility; honored only for system administrators.'),
   "departmentId": zod.number().int().min(1).nullish(),
   "supervisorId": zod.number().int().min(1).nullish(),
@@ -1868,6 +1909,7 @@ export const GetEmployeeResponse = zod.object({
   "jobTitleAr": zod.string().optional(),
   "employeeNumber": zod.string().optional(),
   "phone": zod.string().nullish(),
+  "phoneVerifiedAt": zod.coerce.date().nullish(),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
   "createdAt": zod.string()
@@ -1937,6 +1979,7 @@ export const UpdateEmployeeParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateEmployeeBodyPhoneRegExp = new RegExp('^\\+9665[0-9]{8}$');
 export const updateEmployeeBodyCurrentPasswordMax = 1024;
 
 export const updateEmployeeBodyCodeMax = 128;
@@ -1951,7 +1994,7 @@ export const UpdateEmployeeBody = zod.object({
   "supervisorId": zod.number().nullish().describe('Required when changing the role of an employee who already has a supervisor; send the existing supervisor ID to revalidate it atomically, or null to clear it.'),
   "jobTitle": zod.string().optional(),
   "jobTitleAr": zod.string().optional(),
-  "phone": zod.string().optional(),
+  "phone": zod.string().regex(updateEmployeeBodyPhoneRegExp).nullish().describe('May update or clear an unverified phone. Changing a verified phone requires a dedicated re-verification flow.'),
   "isActive": zod.boolean().optional(),
   "currentPassword": zod.string().min(1).max(updateEmployeeBodyCurrentPasswordMax).optional().describe('Required with code when role, departmentId, supervisorId, or isActive actually changes.'),
   "code": zod.string().min(1).max(updateEmployeeBodyCodeMax).optional().describe('Required with currentPassword when role, departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code.')
@@ -1971,6 +2014,7 @@ export const UpdateEmployeeResponse = zod.object({
   "jobTitleAr": zod.string().optional(),
   "employeeNumber": zod.string().optional(),
   "phone": zod.string().nullish(),
+  "phoneVerifiedAt": zod.coerce.date().nullish(),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
   "createdAt": zod.string()
@@ -2030,6 +2074,7 @@ export const ActivateEmployeeResponse = zod.object({
   "jobTitleAr": zod.string().optional(),
   "employeeNumber": zod.string().optional(),
   "phone": zod.string().nullish(),
+  "phoneVerifiedAt": zod.coerce.date().nullish(),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
   "createdAt": zod.string()
@@ -2068,6 +2113,7 @@ export const DeactivateEmployeeResponse = zod.object({
   "jobTitleAr": zod.string().optional(),
   "employeeNumber": zod.string().optional(),
   "phone": zod.string().nullish(),
+  "phoneVerifiedAt": zod.coerce.date().nullish(),
   "avatarUrl": zod.string().nullish(),
   "isActive": zod.boolean(),
   "createdAt": zod.string()
@@ -2103,9 +2149,15 @@ export const ListDepartmentsResponse = zod.array(ListDepartmentsResponseItem)
 /**
  * @summary Create department
  */
+export const createDepartmentBodyNameMax = 120;
+
+export const createDepartmentBodyNameArMax = 120;
+
+
+
 export const CreateDepartmentBody = zod.object({
-  "name": zod.string(),
-  "nameAr": zod.string(),
+  "name": zod.string().min(1).max(createDepartmentBodyNameMax),
+  "nameAr": zod.string().min(1).max(createDepartmentBodyNameArMax),
   "headId": zod.number().nullish()
 })
 
@@ -2116,6 +2168,42 @@ export const CreateDepartmentResponse = zod.object({
   "facilityId": zod.number(),
   "headId": zod.number().nullish(),
   "createdAt": zod.string()
+})
+
+
+/**
+ * Atomically creates only departments whose normalized English and Arabic names are not already active in the actor's facility. Duplicate request entries and existing departments are returned in skipped.
+ * @summary Create multiple departments in the current administrator facility
+ */
+export const batchCreateDepartmentsBodyDepartmentsItemNameMax = 120;
+
+export const batchCreateDepartmentsBodyDepartmentsItemNameArMax = 120;
+
+export const batchCreateDepartmentsBodyDepartmentsMax = 50;
+
+
+
+export const BatchCreateDepartmentsBody = zod.object({
+  "departments": zod.array(zod.object({
+  "name": zod.string().min(1).max(batchCreateDepartmentsBodyDepartmentsItemNameMax),
+  "nameAr": zod.string().min(1).max(batchCreateDepartmentsBodyDepartmentsItemNameArMax)
+})).min(1).max(batchCreateDepartmentsBodyDepartmentsMax)
+})
+
+export const batchCreateDepartmentsResponseSkippedItemMax = 120;
+
+
+
+export const BatchCreateDepartmentsResponse = zod.object({
+  "created": zod.array(zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "nameAr": zod.string(),
+  "facilityId": zod.number(),
+  "headId": zod.number().nullish(),
+  "createdAt": zod.string()
+})),
+  "skipped": zod.array(zod.string().max(batchCreateDepartmentsResponseSkippedItemMax))
 })
 
 
@@ -2148,9 +2236,15 @@ export const UpdateDepartmentParams = zod.object({
   "id": zod.coerce.number()
 })
 
+export const updateDepartmentBodyNameMax = 120;
+
+export const updateDepartmentBodyNameArMax = 120;
+
+
+
 export const UpdateDepartmentBody = zod.object({
-  "name": zod.string().optional(),
-  "nameAr": zod.string().optional(),
+  "name": zod.string().min(1).max(updateDepartmentBodyNameMax).optional(),
+  "nameAr": zod.string().min(1).max(updateDepartmentBodyNameArMax).optional(),
   "headId": zod.number().nullish()
 })
 

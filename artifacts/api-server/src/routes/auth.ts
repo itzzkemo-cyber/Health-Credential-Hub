@@ -1,11 +1,17 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { createHash, randomBytes } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 import {
   db,
   auditLogsTable,
   usersTable,
   passwordResetTokensTable,
   employeeInvitationsTable,
+  phoneOtpChallengesTable,
   departmentsTable,
   facilitiesTable,
   type User,
@@ -46,6 +52,12 @@ import { logger } from "../lib/logger";
 import { safeErrorLogFields } from "../lib/safeError";
 import { rateLimit } from "../lib/rateLimit";
 import {
+  SmsOtpNotConfiguredError,
+  checkPhoneOtp,
+  isSmsOtpConfigured,
+  startPhoneOtp,
+} from "../lib/sms/provider";
+import {
   hasAllowedPasswordInputLength,
   hasAllowedPasswordLength,
 } from "../lib/passwordPolicy";
@@ -81,6 +93,14 @@ const recoveryRateLimit = rateLimit({
 const invitationAcceptanceRateLimit = rateLimit({
   name: "accept-invitation",
   max: 10,
+  windowMs: 15 * 60_000,
+});
+const invitationOtpStartRateLimit = rateLimit({
+  name: "invitation-phone-otp-start",
+  // Shared hospital networks commonly place many employees behind one NAT.
+  // The invitation row enforces the strict durable 5/hour budget; this higher
+  // IP ceiling is only a single-instance volumetric safety net.
+  max: 60,
   windowMs: 15 * 60_000,
 });
 const changePasswordRateLimit = rateLimit({
@@ -1022,6 +1042,382 @@ const INVALID_INVITATION_RESPONSE = {
   messageAr: "دعوة الموظف غير صالحة أو منتهية أو مستخدمة مسبقًا",
 } as const;
 
+const INVALID_PHONE_OTP_RESPONSE = {
+  code: "invalid_phone_otp",
+  message: "The verification code is invalid, expired, or no longer active",
+  messageAr: "رمز التحقق غير صحيح أو منتهي أو لم يعد نشطًا",
+} as const;
+const SAUDI_E164_MOBILE = /^\+9665[0-9]{8}$/;
+const PHONE_OTP_CODE = /^[0-9]{6}$/;
+const PHONE_OTP_TTL_MS = 10 * 60_000;
+const PHONE_OTP_COOLDOWN_MS = 60_000;
+const PHONE_OTP_SEND_WINDOW_MS = 60 * 60_000;
+const PHONE_OTP_MAX_SENDS = 5;
+const PHONE_OTP_MAX_ATTEMPTS = 5;
+const PHONE_OTP_DISPATCH_LEASE_MS = 30_000;
+const PHONE_OTP_VERIFICATION_LEASE_MS = 30_000;
+
+function phoneOtpApprovalProof(
+  token: string,
+  phone: string,
+  code: string,
+): string {
+  return createHmac("sha256", token)
+    .update(`healthdocs-invitation-phone-otp\0${phone}\0${code}`)
+    .digest("hex");
+}
+
+function approvalProofMatches(
+  stored: string | null,
+  expected: string,
+): boolean {
+  if (!stored || !/^[0-9a-f]{64}$/.test(stored)) return false;
+  return timingSafeEqual(
+    Buffer.from(stored, "hex"),
+    Buffer.from(expected, "hex"),
+  );
+}
+
+function otpProviderUnavailable(res: Response): void {
+  res.status(503).json({
+    code: "otp_unavailable",
+    message: "SMS verification is not configured",
+    messageAr: "خدمة التحقق بالرسائل النصية غير مهيأة",
+  });
+}
+
+router.post(
+  "/auth/invitation-phone-otp/start",
+  invitationOtpStartRateLimit,
+  sessionIssuanceCsrfGuard,
+  async (req, res) => {
+    const body =
+      typeof req.body === "object" && req.body !== null
+        ? (req.body as Record<string, unknown>)
+        : {};
+    if (
+      Object.keys(body).some((field) => field !== "token" && field !== "phone")
+    ) {
+      res.status(400).json(INVALID_INVITATION_RESPONSE);
+      return;
+    }
+    const token = typeof body.token === "string" ? body.token : "";
+    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+    if (!/^[0-9a-f]{64}$/.test(token) || !SAUDI_E164_MOBILE.test(phone)) {
+      res.status(400).json(INVALID_INVITATION_RESPONSE);
+      return;
+    }
+    if (!isSmsOtpConfigured()) {
+      otpProviderUnavailable(res);
+      return;
+    }
+
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    const prepared = await db.transaction(async (tx) => {
+      const candidate = (
+        await tx
+          .select()
+          .from(employeeInvitationsTable)
+          .where(eq(employeeInvitationsTable.tokenHash, tokenHash))
+      )[0];
+      if (!candidate) return { kind: "invalid" as const };
+
+      const department =
+        candidate.departmentId == null
+          ? null
+          : (
+              await tx
+                .select({
+                  id: departmentsTable.id,
+                  facilityId: departmentsTable.facilityId,
+                })
+                .from(departmentsTable)
+                .where(
+                  and(
+                    eq(departmentsTable.id, candidate.departmentId),
+                    isNull(departmentsTable.deletedAt),
+                  ),
+                )
+                .for("key share")
+            )[0];
+      const relatedUserIds = [
+        candidate.invitedBy,
+        ...(candidate.supervisorId == null ? [] : [candidate.supervisorId]),
+      ]
+        .filter((value, index, values) => values.indexOf(value) === index)
+        .sort((left, right) => left - right);
+      const relatedUsers = await tx
+        .select()
+        .from(usersTable)
+        .where(inArray(usersTable.id, relatedUserIds))
+        .orderBy(usersTable.id)
+        .for("update");
+      const invitation = (
+        await tx
+          .select()
+          .from(employeeInvitationsTable)
+          .where(eq(employeeInvitationsTable.id, candidate.id))
+          .for("update")
+      )[0];
+      const now = new Date();
+      if (
+        !invitation ||
+        invitation.tokenHash !== tokenHash ||
+        invitation.phone !== phone ||
+        invitation.acceptedAt ||
+        invitation.revokedAt ||
+        invitation.expiresAt.getTime() <= now.getTime()
+      ) {
+        return { kind: "invalid" as const };
+      }
+
+      const inviter = relatedUsers.find(
+        (candidateUser) => candidateUser.id === invitation.invitedBy,
+      );
+      if (
+        !inviter ||
+        !inviter.isActive ||
+        (inviter.role !== "hospital_admin" &&
+          inviter.role !== "system_admin") ||
+        (inviter.role === "hospital_admin" &&
+          inviter.facilityId !== invitation.facilityId)
+      ) {
+        return { kind: "invalid" as const };
+      }
+      const facility = await tx
+        .select({ id: facilitiesTable.id })
+        .from(facilitiesTable)
+        .where(eq(facilitiesTable.id, invitation.facilityId));
+      if (
+        facility.length === 0 ||
+        (invitation.departmentId != null &&
+          (!department || department.facilityId !== invitation.facilityId))
+      ) {
+        return { kind: "invalid" as const };
+      }
+      if (invitation.supervisorId != null) {
+        const supervisor = relatedUsers.find(
+          (candidateUser) => candidateUser.id === invitation.supervisorId,
+        );
+        if (
+          !supervisor ||
+          !canSuperviseTarget(supervisor, {
+            facilityId: invitation.facilityId,
+            role: "employee",
+          })
+        ) {
+          return { kind: "invalid" as const };
+        }
+      }
+
+      const existing = (
+        await tx
+          .select()
+          .from(phoneOtpChallengesTable)
+          .where(eq(phoneOtpChallengesTable.invitationId, invitation.id))
+          .for("update")
+      )[0];
+      const activeDispatchLease = Boolean(
+        existing?.status === "dispatching" &&
+        existing.dispatchStartedAt &&
+        existing.dispatchStartedAt.getTime() + PHONE_OTP_DISPATCH_LEASE_MS >
+          now.getTime(),
+      );
+      const activeVerificationLease = Boolean(
+        existing?.status === "verifying" &&
+        existing.verificationStartedAt &&
+        existing.verificationStartedAt.getTime() +
+          PHONE_OTP_VERIFICATION_LEASE_MS >
+          now.getTime(),
+      );
+      if (activeDispatchLease || activeVerificationLease) {
+        const leaseStartedAt = activeDispatchLease
+          ? existing!.dispatchStartedAt!
+          : existing!.verificationStartedAt!;
+        const leaseMs = activeDispatchLease
+          ? PHONE_OTP_DISPATCH_LEASE_MS
+          : PHONE_OTP_VERIFICATION_LEASE_MS;
+        return {
+          kind: "in_progress" as const,
+          retryAfterSeconds: Math.max(
+            1,
+            Math.ceil(
+              (leaseStartedAt.getTime() + leaseMs - now.getTime()) / 1000,
+            ),
+          ),
+        };
+      }
+      if (
+        existing?.status === "approved" &&
+        existing.expiresAt.getTime() > now.getTime()
+      ) {
+        return { kind: "already_approved" as const };
+      }
+      if (existing && existing.nextSendAt.getTime() > now.getTime()) {
+        return {
+          kind: "rate_limited" as const,
+          retryAfterSeconds: Math.max(
+            1,
+            Math.ceil((existing.nextSendAt.getTime() - now.getTime()) / 1000),
+          ),
+        };
+      }
+
+      const sameWindow =
+        existing &&
+        existing.sendWindowStartedAt.getTime() + PHONE_OTP_SEND_WINDOW_MS >
+          now.getTime();
+      if (sameWindow && existing!.attemptCount >= PHONE_OTP_MAX_ATTEMPTS) {
+        const retryAt =
+          existing!.sendWindowStartedAt.getTime() + PHONE_OTP_SEND_WINDOW_MS;
+        return {
+          kind: "rate_limited" as const,
+          retryAfterSeconds: Math.max(
+            1,
+            Math.ceil((retryAt - now.getTime()) / 1000),
+          ),
+        };
+      }
+      const sendCount = sameWindow ? existing.sendCount + 1 : 1;
+      if (sendCount > PHONE_OTP_MAX_SENDS) {
+        const retryAt =
+          existing!.sendWindowStartedAt.getTime() + PHONE_OTP_SEND_WINDOW_MS;
+        return {
+          kind: "rate_limited" as const,
+          retryAfterSeconds: Math.max(
+            1,
+            Math.ceil((retryAt - now.getTime()) / 1000),
+          ),
+        };
+      }
+
+      const values = {
+        provider: "twilio_verify",
+        providerVerificationSid: null,
+        status: "dispatching",
+        sendCount,
+        sendWindowStartedAt: sameWindow ? existing!.sendWindowStartedAt : now,
+        attemptCount: sameWindow ? existing!.attemptCount : 0,
+        dispatchStartedAt: now,
+        verificationStartedAt: null,
+        expiresAt: new Date(now.getTime() + PHONE_OTP_TTL_MS),
+        nextSendAt: new Date(now.getTime() + PHONE_OTP_COOLDOWN_MS),
+        verifiedAt: null,
+        approvalProofHash: null,
+        consumedAt: null,
+        updatedAt: now,
+      };
+      const challenge = existing
+        ? (
+            await tx
+              .update(phoneOtpChallengesTable)
+              .set(values)
+              .where(eq(phoneOtpChallengesTable.id, existing.id))
+              .returning({ id: phoneOtpChallengesTable.id })
+          )[0]
+        : (
+            await tx
+              .insert(phoneOtpChallengesTable)
+              .values({ invitationId: invitation.id, ...values })
+              .returning({ id: phoneOtpChallengesTable.id })
+          )[0];
+      if (!challenge) throw new Error("OTP challenge persistence failed");
+      return { kind: "prepared" as const, challengeId: challenge.id };
+    });
+
+    if (prepared.kind === "invalid") {
+      res.status(400).json(INVALID_INVITATION_RESPONSE);
+      return;
+    }
+    if (prepared.kind === "rate_limited") {
+      res.setHeader("Retry-After", String(prepared.retryAfterSeconds));
+      res.status(429).json({
+        code: "otp_rate_limited",
+        message: "Wait before requesting another verification code",
+        messageAr: "انتظر قبل طلب رمز تحقق آخر",
+        retryAfterSeconds: prepared.retryAfterSeconds,
+      });
+      return;
+    }
+    if (prepared.kind === "in_progress") {
+      res.setHeader("Retry-After", String(prepared.retryAfterSeconds));
+      res.status(409).json({
+        code: "otp_operation_in_progress",
+        message: "An SMS verification operation is already in progress",
+        messageAr: "توجد عملية تحقق بالرسائل النصية قيد التنفيذ",
+        retryAfterSeconds: prepared.retryAfterSeconds,
+      });
+      return;
+    }
+    if (prepared.kind === "already_approved") {
+      res.status(409).json({
+        code: "otp_already_approved",
+        message:
+          "The current verification code was already approved; finish activation",
+        messageAr: "تم اعتماد رمز التحقق الحالي؛ أكمل تفعيل الحساب",
+      });
+      return;
+    }
+
+    try {
+      const providerVerificationSid = await startPhoneOtp(phone);
+      const activated = await db
+        .update(phoneOtpChallengesTable)
+        .set({
+          status: "pending",
+          providerVerificationSid,
+          dispatchStartedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(phoneOtpChallengesTable.id, prepared.challengeId),
+            eq(phoneOtpChallengesTable.status, "dispatching"),
+          ),
+        )
+        .returning({ id: phoneOtpChallengesTable.id });
+      if (activated.length === 0) {
+        throw new Error("OTP challenge activation lost its state");
+      }
+    } catch (error) {
+      await db
+        .update(phoneOtpChallengesTable)
+        .set({
+          status: "failed",
+          providerVerificationSid: null,
+          dispatchStartedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(phoneOtpChallengesTable.id, prepared.challengeId),
+            eq(phoneOtpChallengesTable.status, "dispatching"),
+          ),
+        );
+      logger.error(
+        { challengeId: prepared.challengeId, ...safeErrorLogFields(error) },
+        "Employee invitation SMS OTP delivery failed",
+      );
+      if (error instanceof SmsOtpNotConfiguredError) {
+        otpProviderUnavailable(res);
+        return;
+      }
+      res.status(502).json({
+        code: "otp_delivery_failed",
+        message: "The verification code could not be delivered",
+        messageAr: "تعذر إرسال رمز التحقق",
+      });
+      return;
+    }
+
+    res.status(202).json({
+      status: "sent",
+      expiresInSeconds: PHONE_OTP_TTL_MS / 1000,
+      retryAfterSeconds: PHONE_OTP_COOLDOWN_MS / 1000,
+    });
+  },
+);
+
 router.post(
   "/auth/accept-invitation",
   invitationAcceptanceRateLimit,
@@ -1033,7 +1429,11 @@ router.post(
         : {};
     if (
       Object.keys(body).some(
-        (field) => field !== "token" && field !== "password",
+        (field) =>
+          field !== "token" &&
+          field !== "password" &&
+          field !== "phone" &&
+          field !== "code",
       )
     ) {
       res.status(400).json(INVALID_INVITATION_RESPONSE);
@@ -1041,6 +1441,8 @@ router.post(
     }
     const token = typeof body.token === "string" ? body.token : "";
     const password = typeof body.password === "string" ? body.password : "";
+    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+    const code = typeof body.code === "string" ? body.code.trim() : "";
     if (!hasAllowedPasswordLength(password)) {
       res.status(400).json({
         code: "weak_password",
@@ -1051,12 +1453,306 @@ router.post(
     }
     // Tokens are fixed-width lowercase hex. Do not trim: any mutation of the
     // bearer value must fail rather than silently accepting a modified token.
-    if (!/^[0-9a-f]{64}$/.test(token)) {
+    if (
+      !/^[0-9a-f]{64}$/.test(token) ||
+      !SAUDI_E164_MOBILE.test(phone) ||
+      !PHONE_OTP_CODE.test(code)
+    ) {
       res.status(400).json(INVALID_INVITATION_RESPONSE);
       return;
     }
 
     const tokenHash = createHash("sha256").update(token).digest("hex");
+    const approvalProof = phoneOtpApprovalProof(token, phone, code);
+    if (!isSmsOtpConfigured()) {
+      otpProviderUnavailable(res);
+      return;
+    }
+
+    const reservation = await db.transaction(async (tx) => {
+      const candidate = (
+        await tx
+          .select()
+          .from(employeeInvitationsTable)
+          .where(eq(employeeInvitationsTable.tokenHash, tokenHash))
+      )[0];
+      if (!candidate) return { kind: "invalid" as const };
+      const invitation = (
+        await tx
+          .select()
+          .from(employeeInvitationsTable)
+          .where(eq(employeeInvitationsTable.id, candidate.id))
+          .for("update")
+      )[0];
+      const now = new Date();
+      if (
+        !invitation ||
+        invitation.tokenHash !== tokenHash ||
+        invitation.phone !== phone ||
+        invitation.acceptedAt ||
+        invitation.revokedAt ||
+        invitation.expiresAt.getTime() <= now.getTime()
+      ) {
+        return { kind: "invalid" as const };
+      }
+      const challenge = (
+        await tx
+          .select()
+          .from(phoneOtpChallengesTable)
+          .where(eq(phoneOtpChallengesTable.invitationId, invitation.id))
+          .for("update")
+      )[0];
+      if (
+        !challenge ||
+        challenge.consumedAt ||
+        challenge.expiresAt.getTime() <= now.getTime() ||
+        challenge.status === "failed" ||
+        challenge.status === "consumed"
+      ) {
+        if (
+          challenge &&
+          challenge.status !== "consumed" &&
+          challenge.status !== "failed"
+        ) {
+          await tx
+            .update(phoneOtpChallengesTable)
+            .set({
+              status: "failed",
+              providerVerificationSid: null,
+              dispatchStartedAt: null,
+              verificationStartedAt: null,
+              verifiedAt: null,
+              approvalProofHash: null,
+              consumedAt: null,
+              updatedAt: now,
+            })
+            .where(eq(phoneOtpChallengesTable.id, challenge.id));
+        }
+        return { kind: "invalid_otp" as const };
+      }
+      if (challenge.status === "approved") {
+        if (!approvalProofMatches(challenge.approvalProofHash, approvalProof)) {
+          const attemptNumber = challenge.attemptCount + 1;
+          const exhausted = attemptNumber >= PHONE_OTP_MAX_ATTEMPTS;
+          await tx
+            .update(phoneOtpChallengesTable)
+            .set({
+              status: exhausted ? "failed" : "approved",
+              attemptCount: attemptNumber,
+              providerVerificationSid: exhausted
+                ? null
+                : challenge.providerVerificationSid,
+              dispatchStartedAt: null,
+              verificationStartedAt: null,
+              verifiedAt: exhausted ? null : challenge.verifiedAt,
+              approvalProofHash: exhausted ? null : challenge.approvalProofHash,
+              consumedAt: null,
+              updatedAt: now,
+            })
+            .where(eq(phoneOtpChallengesTable.id, challenge.id));
+          return { kind: "invalid_otp" as const };
+        }
+        return {
+          kind: "approved" as const,
+          challengeId: challenge.id,
+          invitationId: invitation.id,
+          attemptNumber: challenge.attemptCount,
+        };
+      }
+      if (challenge.attemptCount >= PHONE_OTP_MAX_ATTEMPTS) {
+        await tx
+          .update(phoneOtpChallengesTable)
+          .set({
+            status: "failed",
+            providerVerificationSid: null,
+            dispatchStartedAt: null,
+            verificationStartedAt: null,
+            updatedAt: now,
+          })
+          .where(eq(phoneOtpChallengesTable.id, challenge.id));
+        return { kind: "invalid_otp" as const };
+      }
+      if (challenge.status === "dispatching") {
+        return { kind: "in_progress" as const };
+      }
+      if (
+        challenge.status === "verifying" &&
+        challenge.verificationStartedAt &&
+        challenge.verificationStartedAt.getTime() +
+          PHONE_OTP_VERIFICATION_LEASE_MS >
+          now.getTime()
+      ) {
+        return { kind: "in_progress" as const };
+      }
+      if (challenge.status !== "pending" && challenge.status !== "verifying") {
+        return { kind: "invalid_otp" as const };
+      }
+      if (
+        typeof challenge.providerVerificationSid !== "string" ||
+        !/^VE[0-9a-fA-F]{32}$/.test(challenge.providerVerificationSid)
+      ) {
+        await tx
+          .update(phoneOtpChallengesTable)
+          .set({
+            status: "failed",
+            providerVerificationSid: null,
+            dispatchStartedAt: null,
+            verificationStartedAt: null,
+            verifiedAt: null,
+            approvalProofHash: null,
+            consumedAt: null,
+            updatedAt: now,
+          })
+          .where(eq(phoneOtpChallengesTable.id, challenge.id));
+        return { kind: "invalid_otp" as const };
+      }
+      const attemptNumber = challenge.attemptCount + 1;
+      const claimed = (
+        await tx
+          .update(phoneOtpChallengesTable)
+          .set({
+            status: "verifying",
+            attemptCount: attemptNumber,
+            dispatchStartedAt: null,
+            verificationStartedAt: now,
+            updatedAt: now,
+          })
+          .where(eq(phoneOtpChallengesTable.id, challenge.id))
+          .returning({ id: phoneOtpChallengesTable.id })
+      )[0];
+      if (!claimed) throw new Error("OTP attempt reservation failed");
+      return {
+        kind: "reserved" as const,
+        challengeId: challenge.id,
+        invitationId: invitation.id,
+        attemptNumber,
+        providerVerificationSid: challenge.providerVerificationSid,
+      };
+    });
+
+    if (reservation.kind === "invalid") {
+      res.status(400).json(INVALID_INVITATION_RESPONSE);
+      return;
+    }
+    if (reservation.kind === "invalid_otp") {
+      res.status(400).json(INVALID_PHONE_OTP_RESPONSE);
+      return;
+    }
+    if (reservation.kind === "in_progress") {
+      res.status(409).json({
+        code: "otp_verification_in_progress",
+        message: "Another verification attempt is in progress",
+        messageAr: "توجد محاولة تحقق أخرى قيد التنفيذ",
+      });
+      return;
+    }
+
+    if (reservation.kind === "reserved") {
+      let otpResult: "approved" | "rejected";
+      try {
+        otpResult = await checkPhoneOtp(
+          reservation.providerVerificationSid,
+          code,
+        );
+      } catch (error) {
+        await db
+          .update(phoneOtpChallengesTable)
+          .set({
+            status: "pending",
+            attemptCount: sql`greatest(${phoneOtpChallengesTable.attemptCount} - 1, 0)`,
+            dispatchStartedAt: null,
+            verificationStartedAt: null,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(phoneOtpChallengesTable.id, reservation.challengeId),
+              eq(phoneOtpChallengesTable.status, "verifying"),
+              eq(
+                phoneOtpChallengesTable.attemptCount,
+                reservation.attemptNumber,
+              ),
+            ),
+          );
+        logger.error(
+          {
+            challengeId: reservation.challengeId,
+            ...safeErrorLogFields(error),
+          },
+          "Employee invitation SMS OTP verification failed at provider",
+        );
+        if (error instanceof SmsOtpNotConfiguredError) {
+          otpProviderUnavailable(res);
+          return;
+        }
+        res.status(502).json({
+          code: "otp_provider_failed",
+          message: "The verification provider is temporarily unavailable",
+          messageAr: "خدمة التحقق غير متاحة مؤقتًا",
+        });
+        return;
+      }
+      if (otpResult !== "approved") {
+        await db
+          .update(phoneOtpChallengesTable)
+          .set({
+            status:
+              reservation.attemptNumber >= PHONE_OTP_MAX_ATTEMPTS
+                ? "failed"
+                : "pending",
+            providerVerificationSid:
+              reservation.attemptNumber >= PHONE_OTP_MAX_ATTEMPTS
+                ? null
+                : reservation.providerVerificationSid,
+            dispatchStartedAt: null,
+            verificationStartedAt: null,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(phoneOtpChallengesTable.id, reservation.challengeId),
+              eq(phoneOtpChallengesTable.status, "verifying"),
+              eq(
+                phoneOtpChallengesTable.attemptCount,
+                reservation.attemptNumber,
+              ),
+            ),
+          );
+        res.status(400).json(INVALID_PHONE_OTP_RESPONSE);
+        return;
+      }
+
+      const approvedAt = new Date();
+      const persistedApproval = await db
+        .update(phoneOtpChallengesTable)
+        .set({
+          status: "approved",
+          dispatchStartedAt: null,
+          verificationStartedAt: null,
+          verifiedAt: approvedAt,
+          approvalProofHash: approvalProof,
+          updatedAt: approvedAt,
+        })
+        .where(
+          and(
+            eq(phoneOtpChallengesTable.id, reservation.challengeId),
+            eq(phoneOtpChallengesTable.status, "verifying"),
+            eq(phoneOtpChallengesTable.attemptCount, reservation.attemptNumber),
+            gt(phoneOtpChallengesTable.expiresAt, approvedAt),
+            isNull(phoneOtpChallengesTable.consumedAt),
+          ),
+        )
+        .returning({ id: phoneOtpChallengesTable.id });
+      if (persistedApproval.length === 0) {
+        res.status(409).json({
+          code: "otp_state_changed",
+          message: "The verification state changed; request a new code",
+          messageAr: "تغيرت حالة التحقق؛ اطلب رمزًا جديدًا",
+        });
+        return;
+      }
+    }
+
     const passwordHash = await hashPassword(password);
     let result;
     try {
@@ -1114,11 +1810,23 @@ router.post(
             .where(eq(employeeInvitationsTable.id, candidate.id))
             .for("update")
         )[0];
-        if (!invitation || invitation.tokenHash !== tokenHash) {
+        if (
+          !invitation ||
+          invitation.tokenHash !== tokenHash ||
+          invitation.id !== reservation.invitationId ||
+          invitation.phone !== phone
+        ) {
           return { kind: "invalid" as const };
         }
 
         const now = new Date();
+        const challenge = (
+          await tx
+            .select()
+            .from(phoneOtpChallengesTable)
+            .where(eq(phoneOtpChallengesTable.id, reservation.challengeId))
+            .for("update")
+        )[0];
         const invalidate = async () => {
           if (!invitation.acceptedAt && !invitation.revokedAt) {
             await tx
@@ -1132,12 +1840,37 @@ router.post(
                 ),
               );
           }
+          if (
+            challenge &&
+            challenge.status !== "consumed" &&
+            challenge.consumedAt == null
+          ) {
+            await tx
+              .update(phoneOtpChallengesTable)
+              .set({
+                status: "failed",
+                providerVerificationSid: null,
+                dispatchStartedAt: null,
+                verificationStartedAt: null,
+                verifiedAt: null,
+                approvalProofHash: null,
+                updatedAt: now,
+              })
+              .where(eq(phoneOtpChallengesTable.id, challenge.id));
+          }
           return { kind: "invalid" as const };
         };
         if (
           invitation.acceptedAt ||
           invitation.revokedAt ||
-          invitation.expiresAt.getTime() <= now.getTime()
+          invitation.expiresAt.getTime() <= now.getTime() ||
+          !challenge ||
+          challenge.invitationId !== invitation.id ||
+          challenge.status !== "approved" ||
+          challenge.attemptCount !== reservation.attemptNumber ||
+          !approvalProofMatches(challenge.approvalProofHash, approvalProof) ||
+          challenge.consumedAt != null ||
+          challenge.expiresAt.getTime() <= now.getTime()
         ) {
           return invalidate();
         }
@@ -1203,6 +1936,7 @@ router.post(
               jobTitleAr: invitation.jobTitleAr,
               employeeNumber: invitation.employeeNumber,
               phone: invitation.phone,
+              phoneVerifiedAt: now,
               isActive: true,
               mustChangePassword: false,
               // No session is issued here. Starting at version 1 also makes
@@ -1230,6 +1964,37 @@ router.post(
         )[0];
         if (!acceptedInvitation) {
           throw new Error("Invitation terminal-state update lost its lock");
+        }
+        const consumedChallenge = (
+          await tx
+            .update(phoneOtpChallengesTable)
+            .set({
+              status: "consumed",
+              providerVerificationSid: null,
+              verifiedAt: now,
+              approvalProofHash: null,
+              consumedAt: now,
+              dispatchStartedAt: null,
+              verificationStartedAt: null,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(phoneOtpChallengesTable.id, challenge.id),
+                eq(phoneOtpChallengesTable.status, "approved"),
+                eq(
+                  phoneOtpChallengesTable.attemptCount,
+                  reservation.attemptNumber,
+                ),
+                gt(phoneOtpChallengesTable.expiresAt, now),
+                eq(phoneOtpChallengesTable.approvalProofHash, approvalProof),
+                isNull(phoneOtpChallengesTable.consumedAt),
+              ),
+            )
+            .returning({ id: phoneOtpChallengesTable.id })
+        )[0];
+        if (!consumedChallenge) {
+          throw new Error("OTP challenge consumption lost its lock");
         }
         await tx.insert(auditLogsTable).values({
           userId: acceptedUser.id,

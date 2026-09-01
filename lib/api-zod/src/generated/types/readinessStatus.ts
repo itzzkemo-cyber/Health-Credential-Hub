@@ -8,6 +8,7 @@
 import type { ReadinessStatusDocumentUploads } from './readinessStatusDocumentUploads';
 import type { ReadinessStatusEmailDelivery } from './readinessStatusEmailDelivery';
 import type { ReadinessStatusOcr } from './readinessStatusOcr';
+import type { ReadinessStatusSmsOtp } from './readinessStatusSmsOtp';
 
 export interface ReadinessStatus {
   status: string;
@@ -22,5 +23,6 @@ export interface ReadinessStatus {
   objectStorage: string;
   documentUploads: ReadinessStatusDocumentUploads;
   emailDelivery: ReadinessStatusEmailDelivery;
+  smsOtp: ReadinessStatusSmsOtp;
   ocr: ReadinessStatusOcr;
 }

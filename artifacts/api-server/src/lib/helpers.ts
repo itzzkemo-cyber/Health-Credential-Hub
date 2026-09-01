@@ -63,6 +63,7 @@ export function serializeUser(u: User) {
     jobTitleAr: u.jobTitleAr,
     employeeNumber: u.employeeNumber,
     phone: u.phone,
+    phoneVerifiedAt: u.phoneVerifiedAt?.toISOString() ?? null,
     avatarUrl: u.avatarUrl,
     isActive: u.isActive,
     mustChangePassword: u.mustChangePassword,

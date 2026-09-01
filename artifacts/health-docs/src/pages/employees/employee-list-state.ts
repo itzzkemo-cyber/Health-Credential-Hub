@@ -9,6 +9,7 @@ import type {
 } from "@workspace/api-client-react";
 
 import type { AdminMfaStepUpCredentials } from "./admin-mfa-step-up";
+import { normalizeSaudiRegistrationPhone } from "../register-state";
 
 const TEMPORARY_PASSWORD_LENGTH = 20;
 const PASSWORD_CHARACTER_GROUPS = [
@@ -130,12 +131,16 @@ export function buildEmployeeInvitationInput(
     jobTitle: form.jobTitle.trim(),
     jobTitleAr: form.jobTitleAr.trim(),
     employeeNumber: form.employeeNumber.trim(),
-    phone: form.phone?.trim() || null,
+    phone: normalizeSaudiRegistrationPhone(form.phone ?? "") ?? "",
     facilityId: form.facilityId ? Number(form.facilityId) : null,
     departmentId: form.departmentId ? Number(form.departmentId) : null,
     supervisorId: form.supervisorId ? Number(form.supervisorId) : null,
     ...stepUp,
   };
+}
+
+export function isEmployeeInvitationPhoneValid(phone?: string): boolean {
+  return normalizeSaudiRegistrationPhone(phone ?? "") != null;
 }
 
 export function createEmployeeEditForm(employee: Employee): EmployeeEditForm {

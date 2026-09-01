@@ -72,6 +72,17 @@ services:
         sync: false
       - key: EMAIL_ALERTS_DISABLED
         value: "1"
+      # Employee activation remains fail-closed until a Twilio Verify service
+      # and its server-only API key are configured. Saudi SMS sender and
+      # compliance approval are operator responsibilities.
+      - key: SMS_OTP_PROVIDER
+        value: twilio_verify
+      - key: TWILIO_VERIFY_SERVICE_SID
+        sync: false
+      - key: TWILIO_API_KEY_SID
+        sync: false
+      - key: TWILIO_API_KEY_SECRET
+        sync: false
       - key: AUTOMATION_OUTBOX_ENABLED
         value: "false"
       - key: AUTOMATION_WEBHOOK_ENABLED

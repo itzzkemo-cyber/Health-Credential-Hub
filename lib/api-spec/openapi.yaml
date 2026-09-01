@@ -550,17 +550,72 @@ paths:
         "400":
           description: Invalid or expired token, or password too short
 
+  /auth/invitation-phone-otp/start:
+    post:
+      operationId: startInvitationPhoneVerification
+      tags: [auth]
+      summary: Send an SMS OTP for an employee invitation
+      description: >-
+        Public, rate-limited first step of employee activation. The supplied
+        Saudi E.164 mobile number must exactly match the administrator-issued
+        invitation. OTP state, send cooldowns, attempt budgets, and expiry are
+        durable; no OTP value is stored by this application.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartInvitationPhoneOtpInput"
+      responses:
+        "202":
+          description: OTP dispatch accepted by the configured SMS provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhoneOtpStarted"
+        "400":
+          description: Generic invalid, expired, replayed, revoked, or phone-mismatched invitation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationError"
+        "409":
+          description: An OTP dispatch or verification lease is active, or the current OTP was already approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsOtpError"
+        "429":
+          description: Durable invitation cooldown or send budget reached, or client rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsOtpError"
+        "502":
+          description: SMS provider rejected or failed the delivery request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsOtpError"
+        "503":
+          description: SMS OTP provider is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsOtpError"
+
   /auth/accept-invitation:
     post:
       operationId: acceptEmployeeInvitation
       tags: [auth]
       summary: Activate an employee account from a single-use invitation
       description: >-
-        Public invite-acceptance endpoint. The bearer token and employee-chosen
-        password are the only accepted fields. Organization scope and profile
-        data come from the administrator-issued invitation. A successful
-        activation does not create a browser session; the employee signs in
-        through the normal login flow.
+        Public invite-acceptance endpoint. The bearer token, matching Saudi
+        E.164 mobile number, SMS OTP, and employee-chosen password are the only
+        accepted fields. Organization scope and profile data come from the
+        administrator-issued invitation. The OTP is verified before the user
+        row is created. A successful activation does not create a browser
+        session; the employee signs in through the normal login flow.
       requestBody:
         required: true
         content:
@@ -575,15 +630,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/EmployeeInvitationAccepted"
         "400":
-          description: Weak password or a generic invalid, expired, replayed, or revoked invitation
+          description: Weak password, rejected OTP, or a generic invalid, expired, replayed, or revoked invitation
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/InvitationError"
         "403":
           description: Browser request verification failed
+        "409":
+          description: Another verification attempt is currently in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsOtpError"
         "429":
           description: Too many acceptance attempts from this client
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsOtpError"
+        "502":
+          description: SMS verification provider failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsOtpError"
+        "503":
+          description: SMS OTP provider is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsOtpError"
 
   # Two-factor authentication (TOTP)
   /auth/totp/setup:
@@ -1212,7 +1289,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvitationError"
         "503":
-          description: Email delivery or the public application URL is not configured
+          description: Email delivery, SMS verification, or the public application URL is not configured
           content:
             application/json:
               schema:
@@ -1299,6 +1376,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Employee"
+        "400":
+          description: Invalid update, including phone changes that require a dedicated re-verification flow
         "409":
           description: Employee changed concurrently; reload before retrying
 
@@ -1418,6 +1497,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Department"
+        "409":
+          description: An active department with the same normalized English or Arabic name already exists in the actor's facility
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepartmentNameConflict"
+
+  /departments/batch:
+    post:
+      operationId: batchCreateDepartments
+      tags: [departments]
+      summary: Create multiple departments in the current administrator facility
+      description: Atomically creates only departments whose normalized English and Arabic names are not already active in the actor's facility. Duplicate request entries and existing departments are returned in skipped.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchDepartmentInput"
+      responses:
+        "200":
+          description: Batch processed atomically
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchDepartmentResult"
+        "400":
+          description: Invalid or duplicate department payload
+        "401":
+          description: Authentication required
+        "403":
+          description: Facility administrator role required
 
   /departments/{id}:
     get:
@@ -1461,6 +1572,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Department"
+        "409":
+          description: An active department with the same normalized English or Arabic name already exists in the actor's facility
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepartmentNameConflict"
 
     delete:
       operationId: deleteDepartment
@@ -1921,6 +2038,9 @@ components:
         emailDelivery:
           type: string
           enum: [configured, disabled, misconfigured]
+        smsOtp:
+          type: string
+          enum: [configured, disabled, misconfigured]
         ocr:
           type: string
           enum: [configured, disabled, misconfigured]
@@ -1946,11 +2066,22 @@ components:
         emailDelivery:
           type: string
           enum: [configured, disabled]
+        smsOtp:
+          type: string
+          enum: [configured, disabled]
         ocr:
           type: string
           enum: [configured, disabled]
       required:
-        [status, database, objectStorage, documentUploads, emailDelivery, ocr]
+        [
+          status,
+          database,
+          objectStorage,
+          documentUploads,
+          emailDelivery,
+          smsOtp,
+          ocr,
+        ]
 
     # Auth
     LoginInput:
@@ -2124,7 +2255,7 @@ components:
     AcceptEmployeeInvitationInput:
       type: object
       additionalProperties: false
-      required: [token, password]
+      required: [token, password, phone, code]
       properties:
         token:
           type: string
@@ -2134,6 +2265,56 @@ components:
           format: password
           minLength: 12
           maxLength: 1024
+        phone:
+          type: string
+          pattern: "^\\+9665[0-9]{8}$"
+          description: Saudi mobile number in E.164 format matching the invitation.
+        code:
+          type: string
+          pattern: "^[0-9]{6}$"
+          description: Six-digit SMS one-time verification code.
+
+    StartInvitationPhoneOtpInput:
+      type: object
+      additionalProperties: false
+      required: [token, phone]
+      properties:
+        token:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+        phone:
+          type: string
+          pattern: "^\\+9665[0-9]{8}$"
+          description: Saudi mobile number in E.164 format matching the invitation.
+
+    PhoneOtpStarted:
+      type: object
+      additionalProperties: false
+      required: [status, expiresInSeconds, retryAfterSeconds]
+      properties:
+        status:
+          type: string
+          enum: [sent]
+        expiresInSeconds:
+          type: integer
+          minimum: 1
+        retryAfterSeconds:
+          type: integer
+          minimum: 1
+
+    SmsOtpError:
+      type: object
+      required: [code, message, messageAr]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        messageAr:
+          type: string
+        retryAfterSeconds:
+          type: integer
+          minimum: 1
 
     EmployeeInvitationAccepted:
       type: object
@@ -2185,8 +2366,12 @@ components:
           format: email
         name:
           type: string
+          minLength: 1
+          maxLength: 120
         nameAr:
           type: string
+          minLength: 1
+          maxLength: 120
         jobTitle:
           type: string
         jobTitleAr:
@@ -2230,6 +2415,7 @@ components:
           nameAr,
           role,
           facilityId,
+          phoneVerifiedAt,
           isActive,
           mustChangePassword,
           totpEnabled,
@@ -2268,6 +2454,10 @@ components:
           type: string
         phone:
           type: ["string", "null"]
+        phoneVerifiedAt:
+          type: ["string", "null"]
+          format: date-time
+          description: Server-issued timestamp proving control of the stored phone number.
         avatarUrl:
           type: ["string", "null"]
         isActive:
@@ -2691,6 +2881,9 @@ components:
           type: string
         phone:
           type: ["string", "null"]
+        phoneVerifiedAt:
+          type: ["string", "null"]
+          format: date-time
         avatarUrl:
           type: ["string", "null"]
         isActive:
@@ -2800,6 +2993,7 @@ components:
           jobTitle,
           jobTitleAr,
           employeeNumber,
+          phone,
           currentPassword,
           code,
         ]
@@ -2829,8 +3023,9 @@ components:
           minLength: 1
           maxLength: 100
         phone:
-          type: ["string", "null"]
-          maxLength: 50
+          type: string
+          pattern: "^\\+9665[0-9]{8}$"
+          description: Saudi mobile number in E.164 format; the employee must verify it before activation.
         facilityId:
           type: ["integer", "null"]
           minimum: 1
@@ -2883,7 +3078,9 @@ components:
         jobTitleAr:
           type: string
         phone:
-          type: string
+          type: ["string", "null"]
+          pattern: "^\\+9665[0-9]{8}$"
+          description: May update or clear an unverified phone. Changing a verified phone requires a dedicated re-verification flow.
         isActive:
           type: boolean
         currentPassword:
@@ -2947,20 +3144,78 @@ components:
       properties:
         name:
           type: string
+          minLength: 1
+          maxLength: 120
         nameAr:
           type: string
+          minLength: 1
+          maxLength: 120
         headId:
           type: ["number", "null"]
 
+    BatchDepartmentInput:
+      type: object
+      additionalProperties: false
+      required: [departments]
+      properties:
+        departments:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, nameAr]
+            properties:
+              name:
+                type: string
+                minLength: 1
+                maxLength: 120
+              nameAr:
+                type: string
+                minLength: 1
+                maxLength: 120
+
+    BatchDepartmentResult:
+      type: object
+      additionalProperties: false
+      required: [created, skipped]
+      properties:
+        created:
+          type: array
+          items:
+            $ref: "#/components/schemas/Department"
+        skipped:
+          type: array
+          items:
+            type: string
+            maxLength: 120
+
     DepartmentUpdate:
       type: object
+      additionalProperties: false
       properties:
         name:
           type: string
+          minLength: 1
+          maxLength: 120
         nameAr:
           type: string
+          minLength: 1
+          maxLength: 120
         headId:
           type: ["number", "null"]
+
+    DepartmentNameConflict:
+      type: object
+      additionalProperties: false
+      required: [message, code]
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+          enum: [department_name_conflict]
 
     # Notifications
     Notification:

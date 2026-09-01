@@ -256,14 +256,14 @@ export default function EmployeeDetail() {
           toast.success(t("employees_page.update_success"));
         },
         onError: (error) => {
+          const code = apiErrorCode(error);
           const fallbackKey =
-            error instanceof ApiError && error.status === 403
-              ? "employees_page.update_forbidden"
-              : "employees_page.update_failed";
-          const errorKey = getAdminMfaStepUpErrorKey(
-            apiErrorCode(error),
-            fallbackKey,
-          );
+            code === "phone_reverification_required"
+              ? "employees_page.phone_reverification_required"
+              : error instanceof ApiError && error.status === 403
+                ? "employees_page.update_forbidden"
+                : "employees_page.update_failed";
+          const errorKey = getAdminMfaStepUpErrorKey(code, fallbackKey);
           clearEditStepUpSecrets();
           updateEmployee.reset();
           setEditFeedbackKey(errorKey);
@@ -973,6 +973,12 @@ export default function EmployeeDetail() {
                   }
                   dir="ltr"
                   required={false}
+                  disabled={Boolean(emp.phoneVerifiedAt)}
+                  description={
+                    emp.phoneVerifiedAt
+                      ? t("employees_page.phone_verified_readonly")
+                      : undefined
+                  }
                 />
 
                 <div className="space-y-2">
@@ -1260,6 +1266,8 @@ function EditField({
   onChange,
   dir,
   required = true,
+  disabled = false,
+  description,
 }: {
   id: string;
   label: string;
@@ -1267,6 +1275,8 @@ function EditField({
   onChange: (value: string) => void;
   dir: "ltr" | "rtl";
   required?: boolean;
+  disabled?: boolean;
+  description?: string;
 }) {
   return (
     <div className="space-y-2">
@@ -1277,8 +1287,15 @@ function EditField({
         onChange={(event) => onChange(event.target.value)}
         dir={dir}
         required={required}
+        disabled={disabled}
+        aria-describedby={description ? `${id}-description` : undefined}
         className="min-h-11"
       />
+      {description && (
+        <p id={`${id}-description`} className="text-xs text-muted-foreground">
+          {description}
+        </p>
+      )}
     </div>
   );
 }

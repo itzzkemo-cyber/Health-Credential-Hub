@@ -35,10 +35,10 @@ export interface CreateEmployeeInvitationInput {
      */
   employeeNumber: string;
   /**
-     * @maxLength 50
-     * @nullable
+     * Saudi mobile number in E.164 format; the employee must verify it before activation.
+     * @pattern ^\+9665[0-9]{8}$
      */
-  phone?: string | null;
+  phone: string;
   /**
      * Optional target facility; honored only for system administrators.
      * @minimum 1

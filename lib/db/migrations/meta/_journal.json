@@ -85,6 +85,34 @@
       "when": 1788187402843,
       "tag": "0011_futuristic_exiles",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788221520669,
+      "tag": "0012_sudden_meggan",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788222779919,
+      "tag": "0013_sticky_darkstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788222836312,
+      "tag": "0014_minor_lyja",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1788223495561,
+      "tag": "0015_nifty_captain_stacy",
+      "breakpoints": true
     }
   ]
 }

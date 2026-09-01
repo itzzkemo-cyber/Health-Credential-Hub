@@ -1,0 +1,1 @@
+ALTER TABLE "phone_otp_challenges" ADD CONSTRAINT "phone_otp_challenges_approval_proof_valid" CHECK ("phone_otp_challenges"."approval_proof_hash" is null or "phone_otp_challenges"."approval_proof_hash" ~ '^[0-9a-f]{64}$');

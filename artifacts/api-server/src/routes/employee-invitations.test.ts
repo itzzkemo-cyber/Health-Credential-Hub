@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   emailConfigured: true,
+  smsOtpConfigured: true,
   actor: {
     id: 1,
     role: "hospital_admin",
@@ -295,6 +296,10 @@ vi.mock("../lib/email/templates", () => ({
   ),
 }));
 
+vi.mock("../lib/sms/provider", () => ({
+  isSmsOtpConfigured: vi.fn(() => state.smsOtpConfigured),
+}));
+
 vi.mock("../lib/logger", () => ({
   logger: { error: vi.fn() },
 }));
@@ -355,6 +360,7 @@ describe("invite-only employee registration provisioning", () => {
     });
     state.lockedActor = { ...state.actor };
     state.emailConfigured = true;
+    state.smsOtpConfigured = true;
     state.extraUsers = [];
     state.departmentRows = [];
     state.facilityRows = [{ id: 10 }];
@@ -412,6 +418,7 @@ describe("invite-only employee registration provisioning", () => {
         jobTitle: "Nurse",
         jobTitleAr: "ممرض",
         employeeNumber: "EMP-2",
+        phone: "+966500000000",
         currentPassword: " admin password ",
         code: "123456",
         ...overrides,
@@ -449,6 +456,7 @@ describe("invite-only employee registration provisioning", () => {
         email: "new.worker@example.sa",
         invitedBy: 1,
         facilityId: 10,
+        phone: "+966500000000",
       }),
     );
     expect(state.invitationValues?.tokenHash).toMatch(/^[0-9a-f]{64}$/);
@@ -480,6 +488,19 @@ describe("invite-only employee registration provisioning", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual(
       expect.objectContaining({ code: "email_delivery_unavailable" }),
+    );
+    expect(state.transactionCount).toBe(0);
+    expect(state.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before persistence when SMS verification is unavailable", async () => {
+    state.smsOtpConfigured = false;
+
+    const response = await invite();
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "otp_unavailable" }),
     );
     expect(state.transactionCount).toBe(0);
     expect(state.sendEmail).not.toHaveBeenCalled();

@@ -24,6 +24,8 @@ export interface Employee {
   /** @nullable */
   phone?: string | null;
   /** @nullable */
+  phoneVerifiedAt?: Date | null;
+  /** @nullable */
   avatarUrl?: string | null;
   isActive: boolean;
   createdAt: string;

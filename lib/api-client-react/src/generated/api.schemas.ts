@@ -245,6 +245,15 @@ export const HealthStatusEmailDelivery = {
   misconfigured: 'misconfigured',
 } as const;
 
+export type HealthStatusSmsOtp = typeof HealthStatusSmsOtp[keyof typeof HealthStatusSmsOtp];
+
+
+export const HealthStatusSmsOtp = {
+  configured: 'configured',
+  disabled: 'disabled',
+  misconfigured: 'misconfigured',
+} as const;
+
 export type HealthStatusOcr = typeof HealthStatusOcr[keyof typeof HealthStatusOcr];
 
 
@@ -264,6 +273,7 @@ export interface HealthStatus {
      */
   releaseSha?: string;
   emailDelivery?: HealthStatusEmailDelivery;
+  smsOtp?: HealthStatusSmsOtp;
   ocr?: HealthStatusOcr;
 }
 
@@ -279,6 +289,14 @@ export type ReadinessStatusEmailDelivery = typeof ReadinessStatusEmailDelivery[k
 
 
 export const ReadinessStatusEmailDelivery = {
+  configured: 'configured',
+  disabled: 'disabled',
+} as const;
+
+export type ReadinessStatusSmsOtp = typeof ReadinessStatusSmsOtp[keyof typeof ReadinessStatusSmsOtp];
+
+
+export const ReadinessStatusSmsOtp = {
   configured: 'configured',
   disabled: 'disabled',
 } as const;
@@ -304,6 +322,7 @@ export interface ReadinessStatus {
   objectStorage: string;
   documentUploads: ReadinessStatusDocumentUploads;
   emailDelivery: ReadinessStatusEmailDelivery;
+  smsOtp: ReadinessStatusSmsOtp;
   ocr: ReadinessStatusOcr;
 }
 
@@ -343,6 +362,11 @@ export interface User {
   employeeNumber?: string;
   /** @nullable */
   phone?: string | null;
+  /**
+     * Server-issued timestamp proving control of the stored phone number.
+     * @nullable
+     */
+  phoneVerifiedAt: string | null;
   /** @nullable */
   avatarUrl?: string | null;
   isActive: boolean;
@@ -477,6 +501,49 @@ export interface AcceptEmployeeInvitationInput {
      * @maxLength 1024
      */
   password: string;
+  /**
+     * Saudi mobile number in E.164 format matching the invitation.
+     * @pattern ^\+9665[0-9]{8}$
+     */
+  phone: string;
+  /**
+     * Six-digit SMS one-time verification code.
+     * @pattern ^[0-9]{6}$
+     */
+  code: string;
+}
+
+export interface StartInvitationPhoneOtpInput {
+  /** @pattern ^[0-9a-f]{64}$ */
+  token: string;
+  /**
+     * Saudi mobile number in E.164 format matching the invitation.
+     * @pattern ^\+9665[0-9]{8}$
+     */
+  phone: string;
+}
+
+export type PhoneOtpStartedStatus = typeof PhoneOtpStartedStatus[keyof typeof PhoneOtpStartedStatus];
+
+
+export const PhoneOtpStartedStatus = {
+  sent: 'sent',
+} as const;
+
+export interface PhoneOtpStarted {
+  status: PhoneOtpStartedStatus;
+  /** @minimum 1 */
+  expiresInSeconds: number;
+  /** @minimum 1 */
+  retryAfterSeconds: number;
+}
+
+export interface SmsOtpError {
+  code: string;
+  message: string;
+  messageAr: string;
+  /** @minimum 1 */
+  retryAfterSeconds?: number;
 }
 
 export interface EmployeeInvitationAccepted {
@@ -494,7 +561,15 @@ export interface InvitationError {
 export interface EmployeeInvitation {
   id: number;
   email: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
   name: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
   nameAr: string;
   jobTitle: string;
   jobTitleAr: string;
@@ -799,6 +874,8 @@ export interface Employee {
   /** @nullable */
   phone?: string | null;
   /** @nullable */
+  phoneVerifiedAt?: string | null;
+  /** @nullable */
   avatarUrl?: string | null;
   isActive: boolean;
   createdAt: string;
@@ -889,10 +966,10 @@ export interface CreateEmployeeInvitationInput {
      */
   employeeNumber: string;
   /**
-     * @maxLength 50
-     * @nullable
+     * Saudi mobile number in E.164 format; the employee must verify it before activation.
+     * @pattern ^\+9665[0-9]{8}$
      */
-  phone?: string | null;
+  phone: string;
   /**
      * Optional target facility; honored only for system administrators.
      * @minimum 1
@@ -948,7 +1025,12 @@ export interface EmployeeUpdate {
   supervisorId?: number | null;
   jobTitle?: string;
   jobTitleAr?: string;
-  phone?: string;
+  /**
+     * May update or clear an unverified phone. Changing a verified phone requires a dedicated re-verification flow.
+     * @nullable
+     * @pattern ^\+9665[0-9]{8}$
+     */
+  phone?: string | null;
   isActive?: boolean;
   /**
      * Required with code when role, departmentId, supervisorId, or isActive actually changes.
@@ -982,17 +1064,72 @@ export type DepartmentWithStats = Department & {
 };
 
 export interface DepartmentInput {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
   name: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
   nameAr: string;
   /** @nullable */
   headId?: number | null;
 }
 
+export type BatchDepartmentInputDepartmentsItem = {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  name: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
+  nameAr: string;
+};
+
+export interface BatchDepartmentInput {
+  /**
+     * @minItems 1
+     * @maxItems 50
+     */
+  departments: BatchDepartmentInputDepartmentsItem[];
+}
+
+export interface BatchDepartmentResult {
+  created: Department[];
+  /** @items.maxLength 120 */
+  skipped: string[];
+}
+
 export interface DepartmentUpdate {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
   name?: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
   nameAr?: string;
   /** @nullable */
   headId?: number | null;
+}
+
+export type DepartmentNameConflictCode = typeof DepartmentNameConflictCode[keyof typeof DepartmentNameConflictCode];
+
+
+export const DepartmentNameConflictCode = {
+  department_name_conflict: 'department_name_conflict',
+} as const;
+
+export interface DepartmentNameConflict {
+  message: string;
+  code: DepartmentNameConflictCode;
 }
 
 export type NotificationType = typeof NotificationType[keyof typeof NotificationType];

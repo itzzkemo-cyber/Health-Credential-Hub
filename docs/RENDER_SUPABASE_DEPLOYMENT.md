@@ -249,6 +249,10 @@ the same runtime without granting Render write access to GitHub.
 | `S3_OBJECT_STORAGE_ENDPOINT`          | Supabase project S3 endpoint                                   |
 | `S3_OBJECT_STORAGE_ACCESS_KEY_ID`     | server-only S3 access key                                      |
 | `S3_OBJECT_STORAGE_SECRET_ACCESS_KEY` | server-only S3 secret key                                      |
+| `SMS_OTP_PROVIDER`                    | `twilio_verify`                                                |
+| `TWILIO_VERIFY_SERVICE_SID`           | server-only Verify service SID                                 |
+| `TWILIO_API_KEY_SID`                  | restricted server-only API key SID                             |
+| `TWILIO_API_KEY_SECRET`               | matching server-only API key secret                            |
 
 The non-secret runtime boundary must remain exactly:
 
@@ -275,6 +279,13 @@ that `PUBLIC_APP_URL` is the canonical HTTPS application URL, then change
 The readiness response never contains the sender address or API key. Bounce
 and complaint monitoring remains an operator responsibility until a verified,
 replay-safe webhook is implemented.
+
+Employee SMS activation is fail-closed until the Twilio Verify service and all
+three server-only credentials above are configured. Apply the matching database
+migration first, complete Saudi sender/compliance setup, keep the Verify code at
+six digits with a lifetime no longer than ten minutes, enable provider fraud and
+spend controls, then deploy and exercise a synthetic invitation end to end. Do
+not place a phone, OTP or invitation token in Render logs or environment names.
 
 Do not place the migration URL, project-owner URL, database passwords,
 bootstrap values, service-role keys, or document data in the Blueprint.

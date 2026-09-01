@@ -36,6 +36,12 @@ const originalOcrEnvironment = {
   AI_INTEGRATIONS_GEMINI_BASE_URL: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL,
   AI_INTEGRATIONS_GEMINI_API_KEY: process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
 };
+const originalSmsOtpEnvironment = {
+  SMS_OTP_PROVIDER: process.env.SMS_OTP_PROVIDER,
+  TWILIO_VERIFY_SERVICE_SID: process.env.TWILIO_VERIFY_SERVICE_SID,
+  TWILIO_API_KEY_SID: process.env.TWILIO_API_KEY_SID,
+  TWILIO_API_KEY_SECRET: process.env.TWILIO_API_KEY_SECRET,
+};
 const originalReleaseEnvironment = {
   RELEASE_SHA: process.env.RELEASE_SHA,
   RENDER_GIT_COMMIT: process.env.RENDER_GIT_COMMIT,
@@ -52,6 +58,10 @@ describe("health routes", () => {
     state.logError.mockReset();
     process.env.EMAIL_ALERTS_DISABLED = "1";
     delete process.env.OCR_ENABLED;
+    delete process.env.SMS_OTP_PROVIDER;
+    delete process.env.TWILIO_VERIFY_SERVICE_SID;
+    delete process.env.TWILIO_API_KEY_SID;
+    delete process.env.TWILIO_API_KEY_SECRET;
     delete process.env.RELEASE_SHA;
     delete process.env.RENDER_GIT_COMMIT;
   });
@@ -67,6 +77,10 @@ describe("health routes", () => {
       else process.env[name] = value;
     }
     for (const [name, value] of Object.entries(originalOcrEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    for (const [name, value] of Object.entries(originalSmsOtpEnvironment)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
@@ -151,6 +165,7 @@ describe("health routes", () => {
       database: "ok",
       objectStorage: "verified",
       documentUploads: "disabled",
+      smsOtp: "disabled",
       emailDelivery: "disabled",
       ocr: "disabled",
     });
@@ -169,6 +184,7 @@ describe("health routes", () => {
       database: "ok",
       objectStorage: "verified",
       documentUploads: "disabled",
+      smsOtp: "disabled",
       emailDelivery: "disabled",
       ocr: "disabled",
     });
@@ -189,6 +205,41 @@ describe("health routes", () => {
     expect(state.checkObjectStorageReadiness).not.toHaveBeenCalled();
     expect(state.logError).toHaveBeenCalledWith(
       { errorName: "EmailConfigurationError" },
+      "Readiness check failed",
+    );
+  });
+
+  it("reports configured SMS OTP readiness", async () => {
+    process.env.DOCUMENT_UPLOADS_ENABLED = "false";
+    process.env.SMS_OTP_PROVIDER = "twilio_verify";
+    process.env.TWILIO_VERIFY_SERVICE_SID = `VA${"a".repeat(32)}`;
+    process.env.TWILIO_API_KEY_SID = `SK${"b".repeat(32)}`;
+    process.env.TWILIO_API_KEY_SECRET = "secret-value-long-enough";
+
+    const response = await request("/readyz");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ smsOtp: "configured" }),
+    );
+    expect(state.execute).toHaveBeenCalledOnce();
+    expect(state.checkObjectStorageReadiness).toHaveBeenCalledOnce();
+  });
+
+  it("fails readiness before dependencies when SMS OTP opt-in is malformed", async () => {
+    process.env.SMS_OTP_PROVIDER = "twilio_verify";
+
+    const response = await request("/readyz");
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      status: "not_ready",
+      smsOtp: "misconfigured",
+    });
+    expect(state.execute).not.toHaveBeenCalled();
+    expect(state.checkObjectStorageReadiness).not.toHaveBeenCalled();
+    expect(state.logError).toHaveBeenCalledWith(
+      { errorName: "SmsOtpConfigurationError" },
       "Readiness check failed",
     );
   });

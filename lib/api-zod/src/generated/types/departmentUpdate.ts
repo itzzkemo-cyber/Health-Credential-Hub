@@ -7,7 +7,15 @@
  */
 
 export interface DepartmentUpdate {
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
   name?: string;
+  /**
+     * @minLength 1
+     * @maxLength 120
+     */
   nameAr?: string;
   /** @nullable */
   headId?: number | null;
