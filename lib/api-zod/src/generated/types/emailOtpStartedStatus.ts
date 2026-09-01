@@ -6,9 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type PhoneOtpStartedStatus = typeof PhoneOtpStartedStatus[keyof typeof PhoneOtpStartedStatus];
+export type EmailOtpStartedStatus = typeof EmailOtpStartedStatus[keyof typeof EmailOtpStartedStatus];
 
 
-export const PhoneOtpStartedStatus = {
+export const EmailOtpStartedStatus = {
   sent: 'sent',
 } as const;

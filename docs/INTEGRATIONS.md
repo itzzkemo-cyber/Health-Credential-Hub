@@ -18,8 +18,7 @@ Every enabled integration below must use the reviewed production controls.
 | Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                                 | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | **No-go for real documents in this release.** Signed direct PUT has no provider-ingress byte cap and no malware quarantine. Keep synthetic-only until bounded ingress, AV/quarantine, orphan cleanup, and restore drills are accepted.                                                                                |
 | Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.                       | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | **No-go for real documents in this release.** Keep disabled until the same bounded-ingress, AV/quarantine, lifecycle, tenancy, IAM/CORS, and synthetic restore gates pass.                                                                                                                                            |
 | Gemini OCR                         | Authenticated users can send an authorized stored file to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields.               | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                        |
-| Resend email                       | Password resets, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API.                                               | No. The bootstrap explicitly deploys with email disabled and does not create the Resend secret.                                                                                                                         | Optional and fail-closed until an operator enables it. Subprocessor approval, data-region/retention confirmation, bounce handling, and delivery reconciliation remain required.                                                                                                                                       |
-| Twilio Verify SMS OTP              | Employee invitation activation sends and checks a Saudi mobile OTP through Twilio Verify; PostgreSQL enforces invitation binding, cooldown, attempt budget, expiry, concurrency and single use without storing the OTP. | No. The operator must provision a Verify service, server-only API key and Saudi-compliant sender setup. | **Required for SMS employee activation and fail-closed when absent.** Phone numbers and verification metadata cross Twilio. Approve the processor, retention, transfer, sender registration, fraud controls, quotas and incident handling before inviting real employees. |
+| Resend email                       | Password resets, invitations, employee activation email OTP, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API. | The Render manifest declares operator-supplied `EMAIL_FROM` and `RESEND_API_KEY`; it cannot create or verify the sender domain. | **Required for employee invitation and activation.** Fail-closed until configured. Approve Resend retention, region/subprocessors, tracking, bounce handling, delivery reconciliation, quotas and incident handling. |
 | Signed automation webhook          | A PostgreSQL transactional outbox and optional HMAC-signed worker emit three minimized credential lifecycle events.                                  | Partly. The bootstrap provisions or updates an inert one-shot Cloud Run Job, dedicated worker/scheduler identities, a regional HMAC secret, and a paused five-minute Scheduler job. It does not provision the receiver. | Disabled by default. Supports explicit facility routing, exact-host/public-IP enforcement, idempotency, bounded timeout, retry/backoff, stale-claim recovery, dead-letter retention, and no document/token fields. The recipient remains an operator-approved subprocessor and must verify signatures/replay windows. |
 
 "Implemented" does not mean that the provider has been enabled in a deployed
@@ -344,8 +343,8 @@ body. Four message types are relevant:
 - Employee invitation: recipient address, invited employee Arabic/English
   names, and a raw single-use registration link valid for 24 hours. Only the
   SHA-256 token hash is stored. The accepting browser supplies the token, the
-  administrator-recorded mobile number, its SMS OTP, and a new password; role
-  and organization fields remain server-authoritative.
+  code emailed to the locked invitation address, and a new password; role,
+  recipient, and organization fields remain server-authoritative.
 - Expiry alert: recipient address, credential type label, expiry date, status,
   and days remaining/overdue. It does not attach the credential document.
 - Weekly manager digest: manager address/name, team-member Arabic/English names,
@@ -365,8 +364,9 @@ this ledger.
   workforce data or reset links are sent.
 - `RESEND_API_KEY` and `EMAIL_FROM` are server-only. Delivery additionally
   requires the exact opt-in `EMAIL_ALERTS_DISABLED=0`; missing or malformed
-  configuration remains off. The supplied bootstrap sets
-  `EMAIL_ALERTS_DISABLED=1` and does not provision the Resend key.
+  configuration remains off. The Render manifest enables the integration but
+  declares `EMAIL_FROM` and `RESEND_API_KEY` as operator-supplied values, so
+  readiness fails closed until both are present and valid.
 - The operator must verify the sender domain and publish/monitor SPF, DKIM, and
   DMARC. Seeded fixture domains are suppressed by the application and must never
   receive real mail.
@@ -436,67 +436,57 @@ this ledger.
    duplicate scheduler execution, backlog catch-up, reset-token expiry and
    single use, bounce/complaint response, and log redaction.
 
-## 5. Twilio Verify employee SMS OTP
+## 5. Resend employee activation email OTP
 
 ### Current data flow and security boundary
 
-1. A stepped-up administrator creates an employee invitation with an exact
-   Saudi mobile number in E.164 form (`+9665XXXXXXXX`). The invitation email
-   continues to carry the single-use registration token in its URL fragment.
-2. The invited employee submits the token and matching phone to
-   `POST /api/auth/invitation-phone-otp/start`. The API revalidates the active
-   inviter, facility, department, supervisor and invitation before calling
-   Twilio Verify over HTTPS.
-3. Twilio creates and sends the SMS code. The application stores no OTP value.
-   PostgreSQL stores only an invitation-linked challenge state, the non-PII
-   Twilio Verification SID for the exact send, send window, cooldown, attempt
-   budget, expiry, concurrency lease and terminal timestamps. Code checks use
-   that SID rather than a phone-only lookup.
-   After provider approval it also stores a temporary HMAC proof keyed by the
-   raw invitation token; this proof cannot reveal the code and is cleared on
-   successful consumption.
-4. Account activation submits token, phone, code and the new password. Provider
-   approval is followed by one database transaction that revalidates scope,
-   marks the challenge consumed, records `phone_verified_at`, creates the
-   employee and consumes the invitation. No browser session is issued.
+1. A stepped-up administrator creates an employee invitation. Phone is optional
+   and, when supplied, remains unverified. The initial invitation email carries
+   the single-use registration token in its URL fragment.
+2. The invited employee submits only the token to
+   `POST /api/auth/invitation-email-otp/start`. The API revalidates the active
+   inviter, facility, department, supervisor and invitation, then takes a
+   durable PostgreSQL dispatch claim.
+3. The API generates a CSPRNG six-digit code and sends it through the existing
+   Resend adapter only to the locked invitation email. Caller-supplied recipient
+   addresses are rejected. PostgreSQL stores a random salt and a
+   `SESSION_SECRET`-derived, domain-separated HMAC bound to the token digest,
+   challenge ID, normalized invitation email, salt and code.
+4. Account activation submits token, code and a new password. A single database
+   transaction revalidates scope, consumes the challenge, creates the employee,
+   consumes the invitation, and writes an audit event. No browser session is
+   issued and `phone_verified_at` remains null.
 
-Phone mismatch, expired/revoked invitations, wrong/expired codes, exhausted
-attempts, replay and parallel verification fail closed. TOTP remains the
-stronger second factor for managers and privileged actions; SMS does not replace
-it. Logs may contain internal invitation/challenge IDs and bounded error class,
-but never the phone, OTP, raw invitation token, credentials or provider body.
+Expired/revoked invitations, wrong/expired codes, exhausted attempts, replay,
+recipient injection and parallel verification fail closed. TOTP remains the
+stronger second factor for managers and privileged actions; email activation
+does not replace it. Logs may contain internal invitation/challenge IDs and a
+bounded error class, but never email, OTP, raw invitation token, credentials or
+provider response body.
 
-### Destination, retention and failure handling
+### Retention and failure handling
 
-- The hard-coded destination is `https://verify.twilio.com`; arbitrary provider
-  URLs are not accepted. `TWILIO_VERIFY_SERVICE_SID`, `TWILIO_API_KEY_SID` and
-  `TWILIO_API_KEY_SECRET` are server-only. The API returns 503 when configuration
-  is absent/malformed and 502 on provider failure; no account is created.
 - Challenges expire after ten minutes, enforce a 60-second resend cooldown,
-  allow five sends per hour and five verification attempts, and are deleted by
-  cascade when the associated old invitation is removed. This application
-  retention does not determine Twilio's provider-side retention.
-- Twilio requires E.164 numbers. For Saudi delivery, the operator must validate
-  the applicable sender-ID registration and content requirements before launch;
-  provider acceptance is not evidence of regulatory approval or delivery.
-- Review Twilio's current [Verify API documentation](https://www.twilio.com/docs/verify/api),
-  [verification resource/PII notes](https://www.twilio.com/docs/verify/api/verification),
-  and [Saudi SMS guidelines](https://www.twilio.com/en-us/guidelines/sa/sms)
-  under the exact production account and contract.
+  allow five sends per hour and five wrong-code attempts, and cascade with the
+  invitation. Codes are never stored in plaintext.
+- The 75-second durable dispatch lease exceeds the adapter's bounded retry path.
+  A stable idempotency key is derived per code generation. Provider failure
+  clears code material and cannot create an account.
+- Rotating `SESSION_SECRET` deliberately invalidates pending codes. This is
+  bounded by their ten-minute expiry and must be included in the rotation runbook.
+- Migration `0016_black_silver_centurion.sql` fails closed every unconsumed
+  challenge from the retired SMS flow; consumed audit history is retained.
 
 ### Operator setup
 
-1. Approve Twilio as an authentication-data processor, including region,
-   subprocessors, PII retention/deletion, support access, cross-border transfer,
-   breach terms and DPA.
-2. Create a Verify service configured for a six-digit SMS code with a lifetime
-   no longer than ten minutes. Complete Saudi sender registration and enable
-   provider-side fraud/rate controls and spend alerts.
-3. Create a restricted API key, store all three Twilio secrets only in the
-   deployment secret manager, and set `SMS_OTP_PROVIDER=twilio_verify`.
-4. Apply the reviewed OTP database migration before deploying the matching API.
-   Test a synthetic Saudi number end-to-end, wrong/expired/replayed codes,
-   cooldown/exhaustion, provider outage, parallel submissions and log redaction.
+1. Approve Resend for the invitation/activation data flow, verify the dedicated
+   sender domain, and disable click/open tracking.
+2. Store `RESEND_API_KEY` and `EMAIL_FROM` in the deployment secret manager and
+   set `EMAIL_ALERTS_DISABLED=0` only after verification.
+3. Apply migration `0016`, deploy, and verify `/api/readyz` reports
+   `emailDelivery` and `invitationEmailOtp` as `configured`.
+4. Test successful, wrong, expired, replayed and parallel codes, cooldown/send
+   exhaustion, provider outage, and log redaction before real employee rollout.
 
 ## 6. Durable workflow automation / n8n-compatible webhook
 

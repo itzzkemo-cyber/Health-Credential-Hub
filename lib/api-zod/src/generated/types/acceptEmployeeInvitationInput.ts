@@ -15,12 +15,7 @@ export interface AcceptEmployeeInvitationInput {
      */
   password: string;
   /**
-     * Saudi mobile number in E.164 format matching the invitation.
-     * @pattern ^\+9665[0-9]{8}$
-     */
-  phone: string;
-  /**
-     * Six-digit SMS one-time verification code.
+     * Six-digit one-time code sent to the invitation email.
      * @pattern ^[0-9]{6}$
      */
   code: string;

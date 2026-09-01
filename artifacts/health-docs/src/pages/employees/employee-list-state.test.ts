@@ -16,7 +16,6 @@ import {
   getInvitationListParams,
   getSupervisorOptions,
   hasEmployeeOrganizationalChanges,
-  isEmployeeInvitationPhoneValid,
   isPasswordDeliveryReady,
   requiresEmployeeCreateStepUp,
 } from "./employee-list-state";
@@ -169,7 +168,6 @@ describe("employee list presentation", () => {
         jobTitle: " Nurse ",
         jobTitleAr: " ممرضة ",
         employeeNumber: " N-204 ",
-        phone: " 0500000000 ",
       },
       { currentPassword: "admin password", code: "123456" },
     );
@@ -181,7 +179,6 @@ describe("employee list presentation", () => {
       jobTitle: "Nurse",
       jobTitleAr: "ممرضة",
       employeeNumber: "N-204",
-      phone: "+966500000000",
       facilityId: 3,
       departmentId: 4,
       supervisorId: 8,
@@ -190,13 +187,6 @@ describe("employee list presentation", () => {
     });
     expect(payload).not.toHaveProperty("role");
     expect(payload).not.toHaveProperty("password");
-  });
-
-  it("requires a valid Saudi mobile number for employee invitations", () => {
-    expect(isEmployeeInvitationPhoneValid("0500000000")).toBe(true);
-    expect(isEmployeeInvitationPhoneValid("+966500000000")).toBe(true);
-    expect(isEmployeeInvitationPhoneValid("+971500000000")).toBe(false);
-    expect(isEmployeeInvitationPhoneValid("")).toBe(false);
   });
 
   it("generates a strong temporary password without a fixed value", () => {

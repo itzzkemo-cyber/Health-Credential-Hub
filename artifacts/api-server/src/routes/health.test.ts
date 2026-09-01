@@ -36,12 +36,6 @@ const originalOcrEnvironment = {
   AI_INTEGRATIONS_GEMINI_BASE_URL: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL,
   AI_INTEGRATIONS_GEMINI_API_KEY: process.env.AI_INTEGRATIONS_GEMINI_API_KEY,
 };
-const originalSmsOtpEnvironment = {
-  SMS_OTP_PROVIDER: process.env.SMS_OTP_PROVIDER,
-  TWILIO_VERIFY_SERVICE_SID: process.env.TWILIO_VERIFY_SERVICE_SID,
-  TWILIO_API_KEY_SID: process.env.TWILIO_API_KEY_SID,
-  TWILIO_API_KEY_SECRET: process.env.TWILIO_API_KEY_SECRET,
-};
 const originalReleaseEnvironment = {
   RELEASE_SHA: process.env.RELEASE_SHA,
   RENDER_GIT_COMMIT: process.env.RENDER_GIT_COMMIT,
@@ -58,10 +52,6 @@ describe("health routes", () => {
     state.logError.mockReset();
     process.env.EMAIL_ALERTS_DISABLED = "1";
     delete process.env.OCR_ENABLED;
-    delete process.env.SMS_OTP_PROVIDER;
-    delete process.env.TWILIO_VERIFY_SERVICE_SID;
-    delete process.env.TWILIO_API_KEY_SID;
-    delete process.env.TWILIO_API_KEY_SECRET;
     delete process.env.RELEASE_SHA;
     delete process.env.RENDER_GIT_COMMIT;
   });
@@ -77,10 +67,6 @@ describe("health routes", () => {
       else process.env[name] = value;
     }
     for (const [name, value] of Object.entries(originalOcrEnvironment)) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-    for (const [name, value] of Object.entries(originalSmsOtpEnvironment)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
@@ -165,7 +151,7 @@ describe("health routes", () => {
       database: "ok",
       objectStorage: "verified",
       documentUploads: "disabled",
-      smsOtp: "disabled",
+      invitationEmailOtp: "disabled",
       emailDelivery: "disabled",
       ocr: "disabled",
     });
@@ -184,7 +170,7 @@ describe("health routes", () => {
       database: "ok",
       objectStorage: "verified",
       documentUploads: "disabled",
-      smsOtp: "disabled",
+      invitationEmailOtp: "disabled",
       emailDelivery: "disabled",
       ocr: "disabled",
     });
@@ -209,39 +195,34 @@ describe("health routes", () => {
     );
   });
 
-  it("reports configured SMS OTP readiness", async () => {
+  it("reports configured invitation email OTP readiness", async () => {
     process.env.DOCUMENT_UPLOADS_ENABLED = "false";
-    process.env.SMS_OTP_PROVIDER = "twilio_verify";
-    process.env.TWILIO_VERIFY_SERVICE_SID = `VA${"a".repeat(32)}`;
-    process.env.TWILIO_API_KEY_SID = `SK${"b".repeat(32)}`;
-    process.env.TWILIO_API_KEY_SECRET = "secret-value-long-enough";
+    process.env.EMAIL_ALERTS_DISABLED = "0";
+    process.env.EMAIL_FROM = "HealthDocs <noreply@wathaiqihealth.com>";
+    process.env.RESEND_API_KEY = "re_test_key_1234567890";
+    process.env.PUBLIC_APP_URL = "https://app.wathaiqihealth.com";
 
     const response = await request("/readyz");
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(
-      expect.objectContaining({ smsOtp: "configured" }),
+      expect.objectContaining({
+        emailDelivery: "configured",
+        invitationEmailOtp: "configured",
+      }),
     );
     expect(state.execute).toHaveBeenCalledOnce();
     expect(state.checkObjectStorageReadiness).toHaveBeenCalledOnce();
   });
 
-  it("fails readiness before dependencies when SMS OTP opt-in is malformed", async () => {
+  it("ignores retired Twilio configuration", async () => {
     process.env.SMS_OTP_PROVIDER = "twilio_verify";
 
     const response = await request("/readyz");
 
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      status: "not_ready",
-      smsOtp: "misconfigured",
-    });
-    expect(state.execute).not.toHaveBeenCalled();
-    expect(state.checkObjectStorageReadiness).not.toHaveBeenCalled();
-    expect(state.logError).toHaveBeenCalledWith(
-      { errorName: "SmsOtpConfigurationError" },
-      "Readiness check failed",
-    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).not.toHaveProperty("smsOtp");
+    expect(state.execute).toHaveBeenCalledOnce();
   });
 
   it("fails readiness without contacting dependencies when OCR opt-in is incomplete", async () => {

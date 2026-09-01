@@ -245,10 +245,10 @@ export const HealthStatusEmailDelivery = {
   misconfigured: 'misconfigured',
 } as const;
 
-export type HealthStatusSmsOtp = typeof HealthStatusSmsOtp[keyof typeof HealthStatusSmsOtp];
+export type HealthStatusInvitationEmailOtp = typeof HealthStatusInvitationEmailOtp[keyof typeof HealthStatusInvitationEmailOtp];
 
 
-export const HealthStatusSmsOtp = {
+export const HealthStatusInvitationEmailOtp = {
   configured: 'configured',
   disabled: 'disabled',
   misconfigured: 'misconfigured',
@@ -273,7 +273,7 @@ export interface HealthStatus {
      */
   releaseSha?: string;
   emailDelivery?: HealthStatusEmailDelivery;
-  smsOtp?: HealthStatusSmsOtp;
+  invitationEmailOtp?: HealthStatusInvitationEmailOtp;
   ocr?: HealthStatusOcr;
 }
 
@@ -293,10 +293,10 @@ export const ReadinessStatusEmailDelivery = {
   disabled: 'disabled',
 } as const;
 
-export type ReadinessStatusSmsOtp = typeof ReadinessStatusSmsOtp[keyof typeof ReadinessStatusSmsOtp];
+export type ReadinessStatusInvitationEmailOtp = typeof ReadinessStatusInvitationEmailOtp[keyof typeof ReadinessStatusInvitationEmailOtp];
 
 
-export const ReadinessStatusSmsOtp = {
+export const ReadinessStatusInvitationEmailOtp = {
   configured: 'configured',
   disabled: 'disabled',
 } as const;
@@ -322,7 +322,7 @@ export interface ReadinessStatus {
   objectStorage: string;
   documentUploads: ReadinessStatusDocumentUploads;
   emailDelivery: ReadinessStatusEmailDelivery;
-  smsOtp: ReadinessStatusSmsOtp;
+  invitationEmailOtp: ReadinessStatusInvitationEmailOtp;
   ocr: ReadinessStatusOcr;
 }
 
@@ -502,43 +502,33 @@ export interface AcceptEmployeeInvitationInput {
      */
   password: string;
   /**
-     * Saudi mobile number in E.164 format matching the invitation.
-     * @pattern ^\+9665[0-9]{8}$
-     */
-  phone: string;
-  /**
-     * Six-digit SMS one-time verification code.
+     * Six-digit one-time code sent to the invitation email.
      * @pattern ^[0-9]{6}$
      */
   code: string;
 }
 
-export interface StartInvitationPhoneOtpInput {
+export interface StartInvitationEmailOtpInput {
   /** @pattern ^[0-9a-f]{64}$ */
   token: string;
-  /**
-     * Saudi mobile number in E.164 format matching the invitation.
-     * @pattern ^\+9665[0-9]{8}$
-     */
-  phone: string;
 }
 
-export type PhoneOtpStartedStatus = typeof PhoneOtpStartedStatus[keyof typeof PhoneOtpStartedStatus];
+export type EmailOtpStartedStatus = typeof EmailOtpStartedStatus[keyof typeof EmailOtpStartedStatus];
 
 
-export const PhoneOtpStartedStatus = {
+export const EmailOtpStartedStatus = {
   sent: 'sent',
 } as const;
 
-export interface PhoneOtpStarted {
-  status: PhoneOtpStartedStatus;
+export interface EmailOtpStarted {
+  status: EmailOtpStartedStatus;
   /** @minimum 1 */
   expiresInSeconds: number;
   /** @minimum 1 */
   retryAfterSeconds: number;
 }
 
-export interface SmsOtpError {
+export interface EmailOtpError {
   code: string;
   message: string;
   messageAr: string;
@@ -966,10 +956,11 @@ export interface CreateEmployeeInvitationInput {
      */
   employeeNumber: string;
   /**
-     * Saudi mobile number in E.164 format; the employee must verify it before activation.
+     * Optional Saudi mobile number in E.164 format. Email OTP does not verify this number.
+     * @nullable
      * @pattern ^\+9665[0-9]{8}$
      */
-  phone: string;
+  phone?: string | null;
   /**
      * Optional target facility; honored only for system administrators.
      * @minimum 1

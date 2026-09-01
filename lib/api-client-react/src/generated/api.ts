@@ -49,6 +49,8 @@ import type {
   DepartmentWithStats,
   DuplicateCheckInput,
   DuplicateCheckResult,
+  EmailOtpError,
+  EmailOtpStarted,
   Employee,
   EmployeeDetail,
   EmployeeInput,
@@ -83,14 +85,12 @@ import type {
   OcrInput,
   OcrReadiness,
   OcrResult,
-  PhoneOtpStarted,
   ReadinessStatus,
   ResetPasswordInput,
   Schedule,
   ScheduleSummary,
   ScheduleVersionBody,
-  SmsOtpError,
-  StartInvitationPhoneOtpInput,
+  StartInvitationEmailOtpInput,
   TeamSchedule,
   TotpActivation,
   TotpAdminDisableInput,
@@ -1734,26 +1734,26 @@ export const useResetPassword = <TError = ErrorType<void>,
       return useMutation(getResetPasswordMutationOptions(options));
     }
 
-export const getStartInvitationPhoneVerificationUrl = () => {
+export const getStartInvitationEmailVerificationUrl = () => {
 
 
 
 
-  return `/api/auth/invitation-phone-otp/start`
+  return `/api/auth/invitation-email-otp/start`
 }
 
 /**
- * Public, rate-limited first step of employee activation. The supplied Saudi E.164 mobile number must exactly match the administrator-issued invitation. OTP state, send cooldowns, attempt budgets, and expiry are durable; no OTP value is stored by this application.
- * @summary Send an SMS OTP for an employee invitation
+ * Public, rate-limited first step of employee activation. The supplied bearer token resolves the server-side invitation email; no recipient address is accepted from the caller. OTP state, send cooldowns, attempt budgets, and expiry are durable; only a secret-keyed HMAC is stored.
+ * @summary Email an OTP for an employee invitation
  */
-export const startInvitationPhoneVerification = async (startInvitationPhoneOtpInput: StartInvitationPhoneOtpInput, options?: Parameters<typeof customFetch>[1]): Promise<PhoneOtpStarted> => {
+export const startInvitationEmailVerification = async (startInvitationEmailOtpInput: StartInvitationEmailOtpInput, options?: Parameters<typeof customFetch>[1]): Promise<EmailOtpStarted> => {
 
-  return customFetch<PhoneOtpStarted>(getStartInvitationPhoneVerificationUrl(),
+  return customFetch<EmailOtpStarted>(getStartInvitationEmailVerificationUrl(),
   {
     ...options,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(startInvitationPhoneOtpInput)
+    body: JSON.stringify(startInvitationEmailOtpInput)
   }
 );}
 
@@ -1761,11 +1761,11 @@ export const startInvitationPhoneVerification = async (startInvitationPhoneOtpIn
 
 
 
-export const getStartInvitationPhoneVerificationMutationOptions = <TError = ErrorType<InvitationError | SmsOtpError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startInvitationPhoneVerification>>, TError,{data: BodyType<StartInvitationPhoneOtpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof startInvitationPhoneVerification>>, TError,{data: BodyType<StartInvitationPhoneOtpInput>}, TContext> => {
+export const getStartInvitationEmailVerificationMutationOptions = <TError = ErrorType<InvitationError | EmailOtpError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startInvitationEmailVerification>>, TError,{data: BodyType<StartInvitationEmailOtpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startInvitationEmailVerification>>, TError,{data: BodyType<StartInvitationEmailOtpInput>}, TContext> => {
 
-const mutationKey = ['startInvitationPhoneVerification'];
+const mutationKey = ['startInvitationEmailVerification'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -1775,10 +1775,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startInvitationPhoneVerification>>, {data: BodyType<StartInvitationPhoneOtpInput>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startInvitationEmailVerification>>, {data: BodyType<StartInvitationEmailOtpInput>}> = (props) => {
           const {data} = props ?? {};
 
-          return  startInvitationPhoneVerification(data,requestOptions)
+          return  startInvitationEmailVerification(data,requestOptions)
         }
 
 
@@ -1788,22 +1788,22 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
   return  { mutationFn, ...mutationOptions }}
 
-    export type StartInvitationPhoneVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof startInvitationPhoneVerification>>>
-    export type StartInvitationPhoneVerificationMutationBody = BodyType<StartInvitationPhoneOtpInput>
-    export type StartInvitationPhoneVerificationMutationError = ErrorType<InvitationError | SmsOtpError>
+    export type StartInvitationEmailVerificationMutationResult = NonNullable<Awaited<ReturnType<typeof startInvitationEmailVerification>>>
+    export type StartInvitationEmailVerificationMutationBody = BodyType<StartInvitationEmailOtpInput>
+    export type StartInvitationEmailVerificationMutationError = ErrorType<InvitationError | EmailOtpError>
 
     /**
- * @summary Send an SMS OTP for an employee invitation
+ * @summary Email an OTP for an employee invitation
  */
-export const useStartInvitationPhoneVerification = <TError = ErrorType<InvitationError | SmsOtpError>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startInvitationPhoneVerification>>, TError,{data: BodyType<StartInvitationPhoneOtpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useStartInvitationEmailVerification = <TError = ErrorType<InvitationError | EmailOtpError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startInvitationEmailVerification>>, TError,{data: BodyType<StartInvitationEmailOtpInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
-        Awaited<ReturnType<typeof startInvitationPhoneVerification>>,
+        Awaited<ReturnType<typeof startInvitationEmailVerification>>,
         TError,
-        {data: BodyType<StartInvitationPhoneOtpInput>},
+        {data: BodyType<StartInvitationEmailOtpInput>},
         TContext
       > => {
-      return useMutation(getStartInvitationPhoneVerificationMutationOptions(options));
+      return useMutation(getStartInvitationEmailVerificationMutationOptions(options));
     }
 
 export const getAcceptEmployeeInvitationUrl = () => {
@@ -1815,7 +1815,7 @@ export const getAcceptEmployeeInvitationUrl = () => {
 }
 
 /**
- * Public invite-acceptance endpoint. The bearer token, matching Saudi E.164 mobile number, SMS OTP, and employee-chosen password are the only accepted fields. Organization scope and profile data come from the administrator-issued invitation. The OTP is verified before the user row is created. A successful activation does not create a browser session; the employee signs in through the normal login flow.
+ * Public invite-acceptance endpoint. The bearer token, emailed OTP, and employee-chosen password are the only accepted fields. Organization scope and profile data come from the administrator-issued invitation. The OTP is verified before the user row is created. A successful activation does not create a browser session; the employee signs in through the normal login flow.
  * @summary Activate an employee account from a single-use invitation
  */
 export const acceptEmployeeInvitation = async (acceptEmployeeInvitationInput: AcceptEmployeeInvitationInput, options?: Parameters<typeof customFetch>[1]): Promise<EmployeeInvitationAccepted> => {
@@ -1833,7 +1833,7 @@ export const acceptEmployeeInvitation = async (acceptEmployeeInvitationInput: Ac
 
 
 
-export const getAcceptEmployeeInvitationMutationOptions = <TError = ErrorType<InvitationError | void | SmsOtpError>,
+export const getAcceptEmployeeInvitationMutationOptions = <TError = ErrorType<InvitationError | void | EmailOtpError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptEmployeeInvitation>>, TError,{data: BodyType<AcceptEmployeeInvitationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof acceptEmployeeInvitation>>, TError,{data: BodyType<AcceptEmployeeInvitationInput>}, TContext> => {
 
@@ -1862,12 +1862,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AcceptEmployeeInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof acceptEmployeeInvitation>>>
     export type AcceptEmployeeInvitationMutationBody = BodyType<AcceptEmployeeInvitationInput>
-    export type AcceptEmployeeInvitationMutationError = ErrorType<InvitationError | void | SmsOtpError>
+    export type AcceptEmployeeInvitationMutationError = ErrorType<InvitationError | void | EmailOtpError>
 
     /**
  * @summary Activate an employee account from a single-use invitation
  */
-export const useAcceptEmployeeInvitation = <TError = ErrorType<InvitationError | void | SmsOtpError>,
+export const useAcceptEmployeeInvitation = <TError = ErrorType<InvitationError | void | EmailOtpError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptEmployeeInvitation>>, TError,{data: BodyType<AcceptEmployeeInvitationInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof acceptEmployeeInvitation>>,

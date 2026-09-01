@@ -71,17 +71,13 @@ services:
       - key: S3_OBJECT_STORAGE_SECRET_ACCESS_KEY
         sync: false
       - key: EMAIL_ALERTS_DISABLED
-        value: "1"
-      # Employee activation remains fail-closed until a Twilio Verify service
-      # and its server-only API key are configured. Saudi SMS sender and
-      # compliance approval are operator responsibilities.
-      - key: SMS_OTP_PROVIDER
-        value: twilio_verify
-      - key: TWILIO_VERIFY_SERVICE_SID
+        value: "0"
+      # Resend is shared by invitations, password recovery, alerts, and the
+      # employee activation email OTP. Both values remain server-only/operator
+      # supplied; readiness fails closed until the sender domain is verified.
+      - key: EMAIL_FROM
         sync: false
-      - key: TWILIO_API_KEY_SID
-        sync: false
-      - key: TWILIO_API_KEY_SECRET
+      - key: RESEND_API_KEY
         sync: false
       - key: AUTOMATION_OUTBOX_ENABLED
         value: "false"

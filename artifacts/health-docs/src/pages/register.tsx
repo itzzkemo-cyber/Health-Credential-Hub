@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   ApiError,
   useAcceptEmployeeInvitation,
-  useStartInvitationPhoneVerification,
+  useStartInvitationEmailVerification,
 } from "@workspace/api-client-react";
 import {
   KeyRound,
   Languages,
+  Mail,
   MailCheck,
-  MessageSquareText,
   ShieldCheck,
 } from "lucide-react";
 import { Link } from "wouter";
@@ -25,21 +25,19 @@ import { Label } from "@/components/ui/label";
 import { useLanguage } from "@/lib/language-context";
 import {
   consumeRegistrationToken,
-  createRegistrationPhoneOtpStart,
+  createRegistrationEmailOtpStart,
   createRegistrationSubmission,
   focusRegistrationSuccess,
   getRegistrationApiFailure,
-  getRegistrationPhoneOtpStartFailure,
+  getRegistrationEmailOtpStartFailure,
   getRegistrationResendSeconds,
   isRegistrationOtpComplete,
-  maskRegistrationPhone,
   normalizeRegistrationOtp,
   REGISTRATION_OTP_LENGTH,
   REGISTRATION_PASSWORD_MAX_LENGTH,
-  REGISTRATION_PHONE_MAX_LENGTH,
 } from "./register-state";
 
-type RegistrationStep = "phone" | "code" | "password";
+type RegistrationStep = "email" | "code" | "password";
 
 function formatCountdown(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -55,9 +53,7 @@ export default function Register() {
   const [token, setToken] = useState(() =>
     consumeRegistrationToken(window.location, window.history),
   );
-  const [step, setStep] = useState<RegistrationStep>("phone");
-  const [phoneInput, setPhoneInput] = useState("");
-  const [phone, setPhone] = useState("");
+  const [step, setStep] = useState<RegistrationStep>("email");
   const [otp, setOtp] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -68,7 +64,7 @@ export default function Register() {
   const [resendDeadlineMs, setResendDeadlineMs] = useState(0);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const successHeadingRef = useRef<HTMLHeadingElement>(null);
-  const startPhoneOtp = useStartInvitationPhoneVerification({
+  const startEmailOtp = useStartInvitationEmailVerification({
     mutation: { gcTime: 0 },
   });
   const acceptInvitation = useAcceptEmployeeInvitation({
@@ -99,16 +95,15 @@ export default function Register() {
   const invalidateInvitation = () => {
     setInvitationInvalid(true);
     setToken("");
-    setPhone("");
     setOtp("");
     setPassword("");
     setConfirmation("");
   };
 
-  const requestPhoneOtp = (requestedPhone: string, isResend: boolean) => {
-    if (startPhoneOtp.isPending || resendSeconds > 0) return;
+  const requestEmailOtp = (isResend: boolean) => {
+    if (startEmailOtp.isPending || resendSeconds > 0) return;
 
-    const submission = createRegistrationPhoneOtpStart(token, requestedPhone);
+    const submission = createRegistrationEmailOtpStart(token);
     if (!submission.ok) {
       setFeedbackKey(submission.feedbackKey);
       setAnnouncementKey(null);
@@ -116,18 +111,16 @@ export default function Register() {
     }
 
     clearFeedback();
-    startPhoneOtp.mutate(
+    startEmailOtp.mutate(
       { data: submission.data },
       {
         onSuccess: (result) => {
           const currentTime = Date.now();
           setNowMs(currentTime);
           setResendDeadlineMs(currentTime + result.retryAfterSeconds * 1_000);
-          setPhone(submission.data.phone);
-          setPhoneInput(submission.data.phone);
           setOtp("");
           setStep("code");
-          startPhoneOtp.reset();
+          startEmailOtp.reset();
           setAnnouncementKey(isResend ? "register.code_sent" : null);
         },
         onError: (error: unknown) => {
@@ -148,7 +141,7 @@ export default function Register() {
               : Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
                 ? retryAfterHeader
                 : undefined;
-          const failure = getRegistrationPhoneOtpStartFailure(
+          const failure = getRegistrationEmailOtpStartFailure(
             data?.code,
             retryAfterSeconds,
           );
@@ -162,11 +155,9 @@ export default function Register() {
             );
           }
           if (data?.code === "otp_already_approved") {
-            setPhone(submission.data.phone);
-            setPhoneInput(submission.data.phone);
             setStep("code");
           }
-          startPhoneOtp.reset();
+          startEmailOtp.reset();
           setAnnouncementKey(null);
           setFeedbackKey(failure.feedbackKey);
         },
@@ -174,33 +165,20 @@ export default function Register() {
     );
   };
 
-  const handlePhoneSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleEmailSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    requestPhoneOtp(phoneInput, false);
+    requestEmailOtp(false);
   };
 
   const handleCodeSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!isRegistrationOtpComplete(otp)) {
-      setFeedbackKey("register.invalid_phone_otp");
+      setFeedbackKey("register.invalid_email_otp");
       setAnnouncementKey(null);
       return;
     }
     clearFeedback();
     setStep("password");
-  };
-
-  const changePhone = () => {
-    startPhoneOtp.reset();
-    acceptInvitation.reset();
-    setStep("phone");
-    setPhone("");
-    setOtp("");
-    setPassword("");
-    setConfirmation("");
-    setResendDeadlineMs(0);
-    setNowMs(Date.now());
-    clearFeedback();
   };
 
   const handleRegistrationSubmit = (
@@ -211,7 +189,6 @@ export default function Register() {
       token,
       password,
       confirmation,
-      phone,
       otp,
     );
     if (!submission.ok) {
@@ -225,8 +202,6 @@ export default function Register() {
       {
         onSuccess: () => {
           setToken("");
-          setPhoneInput("");
-          setPhone("");
           setOtp("");
           setPassword("");
           setConfirmation("");
@@ -260,7 +235,7 @@ export default function Register() {
           if (failure.invalidatesInvitation) {
             invalidateInvitation();
           } else if (
-            code === "invalid_phone_otp" ||
+            code === "invalid_email_otp" ||
             code === "otp_rate_limited" ||
             code === "rate_limited" ||
             code === "otp_state_changed" ||
@@ -268,7 +243,7 @@ export default function Register() {
             code === "otp_unavailable"
           ) {
             if (
-              code === "invalid_phone_otp" ||
+              code === "invalid_email_otp" ||
               code === "otp_rate_limited" ||
               code === "rate_limited" ||
               code === "otp_state_changed"
@@ -293,16 +268,16 @@ export default function Register() {
   };
 
   const activeTitle =
-    step === "phone"
-      ? t("register.phone_title")
+    step === "email"
+      ? t("register.email_title")
       : step === "code"
         ? t("register.code_title")
         : t("register.password_title");
   const activeSubtitle =
-    step === "phone"
-      ? t("register.phone_subtitle")
+    step === "email"
+      ? t("register.email_subtitle")
       : step === "code"
-        ? `${t("register.code_subtitle")} ${maskRegistrationPhone(phone)}`
+        ? t("register.code_subtitle")
         : t("register.password_subtitle");
 
   const feedback = feedbackKey ? (
@@ -359,8 +334,8 @@ export default function Register() {
               <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
                 {registrationComplete ? (
                   <MailCheck className="h-7 w-7" aria-hidden="true" />
-                ) : step === "phone" || step === "code" ? (
-                  <MessageSquareText className="h-7 w-7" aria-hidden="true" />
+                ) : step === "email" || step === "code" ? (
+                  <Mail className="h-7 w-7" aria-hidden="true" />
                 ) : (
                   <KeyRound className="h-7 w-7" aria-hidden="true" />
                 )}
@@ -409,47 +384,25 @@ export default function Register() {
                   {t("register.invitation_required")}
                 </p>
 
-                {step === "phone" && (
+                {step === "email" && (
                   <form
-                    onSubmit={handlePhoneSubmit}
+                    onSubmit={handleEmailSubmit}
                     className="space-y-5"
-                    aria-describedby="registration-invitation-notice registration-phone-hint"
+                    aria-describedby="registration-invitation-notice registration-email-hint"
                   >
-                    <div className="space-y-2">
-                      <Label htmlFor="registration-phone">
-                        {t("register.phone")}
-                      </Label>
-                      <Input
-                        id="registration-phone"
-                        type="tel"
-                        inputMode="tel"
-                        autoComplete="tel-national"
-                        required
-                        maxLength={REGISTRATION_PHONE_MAX_LENGTH}
-                        dir="ltr"
-                        className="min-h-12 text-base"
-                        placeholder={t("register.phone_placeholder")}
-                        value={phoneInput}
-                        onChange={(event) => {
-                          setPhoneInput(event.target.value);
-                          clearFeedback();
-                        }}
-                        aria-describedby="registration-phone-hint"
-                      />
-                      <p
-                        id="registration-phone-hint"
-                        className="text-xs leading-5 text-muted-foreground"
-                      >
-                        {t("register.phone_hint")}
-                      </p>
+                    <div
+                      id="registration-email-hint"
+                      className="rounded-xl border bg-muted/30 p-4 text-sm leading-6 text-muted-foreground"
+                    >
+                      {t("register.email_hint")}
                     </div>
                     {feedback}
                     <Button
                       type="submit"
                       className="min-h-12 w-full text-base font-semibold"
-                      disabled={startPhoneOtp.isPending || resendSeconds > 0}
+                      disabled={startEmailOtp.isPending || resendSeconds > 0}
                     >
-                      {startPhoneOtp.isPending
+                      {startEmailOtp.isPending
                         ? t("common.loading")
                         : t("register.send_code")}
                     </Button>
@@ -524,26 +477,18 @@ export default function Register() {
                       {t("register.continue_to_password")}
                     </Button>
 
-                    <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="min-h-11"
-                        onClick={changePhone}
-                      >
-                        {t("register.change_phone")}
-                      </Button>
-                      <div className="text-center sm:text-end">
+                    <div className="text-center">
+                      <div>
                         <Button
                           type="button"
                           variant="link"
                           className="min-h-11 px-2"
                           disabled={
-                            resendSeconds > 0 || startPhoneOtp.isPending
+                            resendSeconds > 0 || startEmailOtp.isPending
                           }
-                          onClick={() => requestPhoneOtp(phone, true)}
+                          onClick={() => requestEmailOtp(true)}
                         >
-                          {startPhoneOtp.isPending
+                          {startEmailOtp.isPending
                             ? t("common.loading")
                             : t("register.resend_code")}
                         </Button>
@@ -568,11 +513,8 @@ export default function Register() {
                     className="space-y-5"
                     aria-describedby="registration-invitation-notice registration-password-hint"
                   >
-                    <div
-                      className="rounded-lg border bg-muted/30 p-3 text-center text-sm text-muted-foreground"
-                      dir="ltr"
-                    >
-                      {maskRegistrationPhone(phone)}
+                    <div className="rounded-lg border bg-muted/30 p-3 text-center text-sm leading-6 text-muted-foreground">
+                      {t("register.code_entered_pending_verification")}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="registration-password">

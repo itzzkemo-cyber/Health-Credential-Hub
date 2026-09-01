@@ -5,10 +5,10 @@
  * HealthDocs - Healthcare Credential Management Platform API
  * OpenAPI spec version: 0.1.0
  */
-import type { PhoneOtpStartedStatus } from './phoneOtpStartedStatus';
+import type { EmailOtpStartedStatus } from './emailOtpStartedStatus';
 
-export interface PhoneOtpStarted {
-  status: PhoneOtpStartedStatus;
+export interface EmailOtpStarted {
+  status: EmailOtpStartedStatus;
   /** @minimum 1 */
   expiresInSeconds: number;
   /** @minimum 1 */

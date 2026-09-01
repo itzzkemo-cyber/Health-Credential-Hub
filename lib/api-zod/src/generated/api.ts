@@ -776,7 +776,7 @@ export const HealthCheckResponse = zod.object({
   "status": zod.string(),
   "releaseSha": zod.string().min(healthCheckResponseReleaseShaMin).max(healthCheckResponseReleaseShaMax).regex(healthCheckResponseReleaseShaRegExp).optional().describe('Public Git commit identifier for the running release, when available.'),
   "emailDelivery": zod.enum(['configured', 'disabled', 'misconfigured']).optional(),
-  "smsOtp": zod.enum(['configured', 'disabled', 'misconfigured']).optional(),
+  "invitationEmailOtp": zod.enum(['configured', 'disabled', 'misconfigured']).optional(),
   "ocr": zod.enum(['configured', 'disabled', 'misconfigured']).optional()
 })
 
@@ -798,7 +798,7 @@ export const ReadinessCheckResponse = zod.object({
   "objectStorage": zod.string(),
   "documentUploads": zod.enum(['enabled', 'disabled']),
   "emailDelivery": zod.enum(['configured', 'disabled']),
-  "smsOtp": zod.enum(['configured', 'disabled']),
+  "invitationEmailOtp": zod.enum(['configured', 'disabled']),
   "ocr": zod.enum(['configured', 'disabled'])
 })
 
@@ -950,23 +950,21 @@ export const ResetPasswordResponse = zod.object({
 
 
 /**
- * Public, rate-limited first step of employee activation. The supplied Saudi E.164 mobile number must exactly match the administrator-issued invitation. OTP state, send cooldowns, attempt budgets, and expiry are durable; no OTP value is stored by this application.
- * @summary Send an SMS OTP for an employee invitation
+ * Public, rate-limited first step of employee activation. The supplied bearer token resolves the server-side invitation email; no recipient address is accepted from the caller. OTP state, send cooldowns, attempt budgets, and expiry are durable; only a secret-keyed HMAC is stored.
+ * @summary Email an OTP for an employee invitation
  */
-export const startInvitationPhoneVerificationBodyTokenRegExp = new RegExp('^[0-9a-f]{64}$');
-export const startInvitationPhoneVerificationBodyPhoneRegExp = new RegExp('^\\+9665[0-9]{8}$');
+export const startInvitationEmailVerificationBodyTokenRegExp = new RegExp('^[0-9a-f]{64}$');
 
 
-export const StartInvitationPhoneVerificationBody = zod.object({
-  "token": zod.string().regex(startInvitationPhoneVerificationBodyTokenRegExp),
-  "phone": zod.string().regex(startInvitationPhoneVerificationBodyPhoneRegExp).describe('Saudi mobile number in E.164 format matching the invitation.')
+export const StartInvitationEmailVerificationBody = zod.object({
+  "token": zod.string().regex(startInvitationEmailVerificationBodyTokenRegExp)
 })
 
 
 
 
 
-export const StartInvitationPhoneVerificationResponse = zod.object({
+export const StartInvitationEmailVerificationResponse = zod.object({
   "status": zod.enum(['sent']),
   "expiresInSeconds": zod.number().int().min(1),
   "retryAfterSeconds": zod.number().int().min(1)
@@ -974,22 +972,20 @@ export const StartInvitationPhoneVerificationResponse = zod.object({
 
 
 /**
- * Public invite-acceptance endpoint. The bearer token, matching Saudi E.164 mobile number, SMS OTP, and employee-chosen password are the only accepted fields. Organization scope and profile data come from the administrator-issued invitation. The OTP is verified before the user row is created. A successful activation does not create a browser session; the employee signs in through the normal login flow.
+ * Public invite-acceptance endpoint. The bearer token, emailed OTP, and employee-chosen password are the only accepted fields. Organization scope and profile data come from the administrator-issued invitation. The OTP is verified before the user row is created. A successful activation does not create a browser session; the employee signs in through the normal login flow.
  * @summary Activate an employee account from a single-use invitation
  */
 export const acceptEmployeeInvitationBodyTokenRegExp = new RegExp('^[0-9a-f]{64}$');
 export const acceptEmployeeInvitationBodyPasswordMin = 12;
 export const acceptEmployeeInvitationBodyPasswordMax = 1024;
 
-export const acceptEmployeeInvitationBodyPhoneRegExp = new RegExp('^\\+9665[0-9]{8}$');
 export const acceptEmployeeInvitationBodyCodeRegExp = new RegExp('^[0-9]{6}$');
 
 
 export const AcceptEmployeeInvitationBody = zod.object({
   "token": zod.string().regex(acceptEmployeeInvitationBodyTokenRegExp),
   "password": zod.string().min(acceptEmployeeInvitationBodyPasswordMin).max(acceptEmployeeInvitationBodyPasswordMax),
-  "phone": zod.string().regex(acceptEmployeeInvitationBodyPhoneRegExp).describe('Saudi mobile number in E.164 format matching the invitation.'),
-  "code": zod.string().regex(acceptEmployeeInvitationBodyCodeRegExp).describe('Six-digit SMS one-time verification code.')
+  "code": zod.string().regex(acceptEmployeeInvitationBodyCodeRegExp).describe('Six-digit one-time code sent to the invitation email.')
 })
 
 export const AcceptEmployeeInvitationResponse = zod.object({
@@ -1843,7 +1839,7 @@ export const CreateEmployeeInvitationBody = zod.object({
   "jobTitle": zod.string().min(1).max(createEmployeeInvitationBodyJobTitleMax),
   "jobTitleAr": zod.string().min(1).max(createEmployeeInvitationBodyJobTitleArMax),
   "employeeNumber": zod.string().min(1).max(createEmployeeInvitationBodyEmployeeNumberMax),
-  "phone": zod.string().regex(createEmployeeInvitationBodyPhoneRegExp).describe('Saudi mobile number in E.164 format; the employee must verify it before activation.'),
+  "phone": zod.string().regex(createEmployeeInvitationBodyPhoneRegExp).nullish().describe('Optional Saudi mobile number in E.164 format. Email OTP does not verify this number.'),
   "facilityId": zod.number().int().min(1).nullish().describe('Optional target facility; honored only for system administrators.'),
   "departmentId": zod.number().int().min(1).nullish(),
   "supervisorId": zod.number().int().min(1).nullish(),

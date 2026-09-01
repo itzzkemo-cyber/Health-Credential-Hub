@@ -6,8 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { HealthStatusEmailDelivery } from './healthStatusEmailDelivery';
+import type { HealthStatusInvitationEmailOtp } from './healthStatusInvitationEmailOtp';
 import type { HealthStatusOcr } from './healthStatusOcr';
-import type { HealthStatusSmsOtp } from './healthStatusSmsOtp';
 
 export interface HealthStatus {
   status: string;
@@ -19,6 +19,6 @@ export interface HealthStatus {
      */
   releaseSha?: string;
   emailDelivery?: HealthStatusEmailDelivery;
-  smsOtp?: HealthStatusSmsOtp;
+  invitationEmailOtp?: HealthStatusInvitationEmailOtp;
   ocr?: HealthStatusOcr;
 }

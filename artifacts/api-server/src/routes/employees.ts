@@ -43,7 +43,6 @@ import {
   employeeInvitationEmail,
   getEmployeeInvitationUrl,
 } from "../lib/email/templates";
-import { isSmsOtpConfigured } from "../lib/sms/provider";
 import { logger } from "../lib/logger";
 import {
   getCredentialScopedUsers,
@@ -508,16 +507,6 @@ router.post(
   requireRole(...ADMIN_ROLES),
   employeeStepUpRateLimit,
   async (req, res) => {
-    if (!isSmsOtpConfigured()) {
-      res.status(503).json({
-        code: "otp_unavailable",
-        message:
-          "Employee invitations are unavailable until SMS verification is configured",
-        messageAr:
-          "دعوات الموظفين غير متاحة حتى يتم إعداد خدمة التحقق عبر الرسائل النصية",
-      });
-      return;
-    }
     if (!isEmailConfigured()) {
       res.status(503).json({
         code: "email_delivery_unavailable",
@@ -558,10 +547,12 @@ router.post(
     const stepUpCode = requiredTrimmedString(body, "code", 128);
     const phoneValue = body.phone;
     const phone =
-      typeof phoneValue === "string" &&
-      /^\+9665[0-9]{8}$/.test(phoneValue.trim())
-        ? phoneValue.trim()
-        : undefined;
+      phoneValue == null || phoneValue === ""
+        ? null
+        : typeof phoneValue === "string" &&
+            /^\+9665[0-9]{8}$/.test(phoneValue.trim())
+          ? phoneValue.trim()
+          : undefined;
     if (
       !name ||
       !nameAr ||

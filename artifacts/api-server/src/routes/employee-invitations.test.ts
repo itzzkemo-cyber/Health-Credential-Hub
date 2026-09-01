@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   emailConfigured: true,
-  smsOtpConfigured: true,
   actor: {
     id: 1,
     role: "hospital_admin",
@@ -296,10 +295,6 @@ vi.mock("../lib/email/templates", () => ({
   ),
 }));
 
-vi.mock("../lib/sms/provider", () => ({
-  isSmsOtpConfigured: vi.fn(() => state.smsOtpConfigured),
-}));
-
 vi.mock("../lib/logger", () => ({
   logger: { error: vi.fn() },
 }));
@@ -360,7 +355,6 @@ describe("invite-only employee registration provisioning", () => {
     });
     state.lockedActor = { ...state.actor };
     state.emailConfigured = true;
-    state.smsOtpConfigured = true;
     state.extraUsers = [];
     state.departmentRows = [];
     state.facilityRows = [{ id: 10 }];
@@ -480,6 +474,19 @@ describe("invite-only employee registration provisioning", () => {
     );
   });
 
+  it("allows an invitation without a phone and stores no verified phone claim", async () => {
+    const response = await invite({ phone: undefined });
+
+    expect(response.status).toBe(201);
+    expect(state.invitationValues).toEqual(
+      expect.objectContaining({
+        email: "new.worker@example.sa",
+        phone: null,
+      }),
+    );
+    expect(state.sendEmail).toHaveBeenCalledOnce();
+  });
+
   it("fails closed before persistence when email delivery is unavailable", async () => {
     state.emailConfigured = false;
 
@@ -488,19 +495,6 @@ describe("invite-only employee registration provisioning", () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual(
       expect.objectContaining({ code: "email_delivery_unavailable" }),
-    );
-    expect(state.transactionCount).toBe(0);
-    expect(state.sendEmail).not.toHaveBeenCalled();
-  });
-
-  it("fails closed before persistence when SMS verification is unavailable", async () => {
-    state.smsOtpConfigured = false;
-
-    const response = await invite();
-
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({ code: "otp_unavailable" }),
     );
     expect(state.transactionCount).toBe(0);
     expect(state.sendEmail).not.toHaveBeenCalled();

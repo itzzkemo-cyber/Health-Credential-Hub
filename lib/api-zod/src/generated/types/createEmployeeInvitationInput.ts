@@ -35,10 +35,11 @@ export interface CreateEmployeeInvitationInput {
      */
   employeeNumber: string;
   /**
-     * Saudi mobile number in E.164 format; the employee must verify it before activation.
+     * Optional Saudi mobile number in E.164 format. Email OTP does not verify this number.
+     * @nullable
      * @pattern ^\+9665[0-9]{8}$
      */
-  phone: string;
+  phone?: string | null;
   /**
      * Optional target facility; honored only for system administrators.
      * @minimum 1

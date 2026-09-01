@@ -1,17 +1,12 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import {
-  createHash,
-  createHmac,
-  randomBytes,
-  timingSafeEqual,
-} from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   db,
   auditLogsTable,
   usersTable,
   passwordResetTokensTable,
   employeeInvitationsTable,
-  phoneOtpChallengesTable,
+  emailOtpChallengesTable,
   departmentsTable,
   facilitiesTable,
   type User,
@@ -52,12 +47,6 @@ import { logger } from "../lib/logger";
 import { safeErrorLogFields } from "../lib/safeError";
 import { rateLimit } from "../lib/rateLimit";
 import {
-  SmsOtpNotConfiguredError,
-  checkPhoneOtp,
-  isSmsOtpConfigured,
-  startPhoneOtp,
-} from "../lib/sms/provider";
-import {
   hasAllowedPasswordInputLength,
   hasAllowedPasswordLength,
 } from "../lib/passwordPolicy";
@@ -70,8 +59,14 @@ import {
 } from "../lib/email/sender";
 import {
   getPasswordResetUrl,
+  employeeInvitationOtpEmail,
   passwordResetEmail,
 } from "../lib/email/templates";
+import {
+  generateInvitationEmailOtp,
+  hashInvitationEmailOtp,
+  invitationEmailOtpMatches,
+} from "../lib/email/invitationOtp";
 
 const router: IRouter = Router();
 
@@ -96,7 +91,7 @@ const invitationAcceptanceRateLimit = rateLimit({
   windowMs: 15 * 60_000,
 });
 const invitationOtpStartRateLimit = rateLimit({
-  name: "invitation-phone-otp-start",
+  name: "invitation-email-otp-start",
   // Shared hospital networks commonly place many employees behind one NAT.
   // The invitation row enforces the strict durable 5/hour budget; this higher
   // IP ceiling is only a single-instance volumetric safety net.
@@ -1042,52 +1037,32 @@ const INVALID_INVITATION_RESPONSE = {
   messageAr: "دعوة الموظف غير صالحة أو منتهية أو مستخدمة مسبقًا",
 } as const;
 
-const INVALID_PHONE_OTP_RESPONSE = {
-  code: "invalid_phone_otp",
+const INVALID_EMAIL_OTP_RESPONSE = {
+  code: "invalid_email_otp",
   message: "The verification code is invalid, expired, or no longer active",
   messageAr: "رمز التحقق غير صحيح أو منتهي أو لم يعد نشطًا",
 } as const;
-const SAUDI_E164_MOBILE = /^\+9665[0-9]{8}$/;
-const PHONE_OTP_CODE = /^[0-9]{6}$/;
-const PHONE_OTP_TTL_MS = 10 * 60_000;
-const PHONE_OTP_COOLDOWN_MS = 60_000;
-const PHONE_OTP_SEND_WINDOW_MS = 60 * 60_000;
-const PHONE_OTP_MAX_SENDS = 5;
-const PHONE_OTP_MAX_ATTEMPTS = 5;
-const PHONE_OTP_DISPATCH_LEASE_MS = 30_000;
-const PHONE_OTP_VERIFICATION_LEASE_MS = 30_000;
-
-function phoneOtpApprovalProof(
-  token: string,
-  phone: string,
-  code: string,
-): string {
-  return createHmac("sha256", token)
-    .update(`healthdocs-invitation-phone-otp\0${phone}\0${code}`)
-    .digest("hex");
-}
-
-function approvalProofMatches(
-  stored: string | null,
-  expected: string,
-): boolean {
-  if (!stored || !/^[0-9a-f]{64}$/.test(stored)) return false;
-  return timingSafeEqual(
-    Buffer.from(stored, "hex"),
-    Buffer.from(expected, "hex"),
-  );
-}
+const EMAIL_OTP_CODE = /^[0-9]{6}$/;
+const EMAIL_OTP_TTL_MS = 10 * 60_000;
+const EMAIL_OTP_COOLDOWN_MS = 60_000;
+const EMAIL_OTP_SEND_WINDOW_MS = 60 * 60_000;
+const EMAIL_OTP_MAX_SENDS = 5;
+const EMAIL_OTP_MAX_ATTEMPTS = 5;
+// Resend can make two bounded 30-second attempts. Keep the durable lease
+// beyond that worst case so another instance cannot send a second code.
+const EMAIL_OTP_DISPATCH_LEASE_MS = 75_000;
+const EMAIL_OTP_VERIFICATION_LEASE_MS = 30_000;
 
 function otpProviderUnavailable(res: Response): void {
   res.status(503).json({
     code: "otp_unavailable",
-    message: "SMS verification is not configured",
-    messageAr: "خدمة التحقق بالرسائل النصية غير مهيأة",
+    message: "Email verification is not configured",
+    messageAr: "خدمة التحقق عبر البريد الإلكتروني غير مهيأة",
   });
 }
 
 router.post(
-  "/auth/invitation-phone-otp/start",
+  "/auth/invitation-email-otp/start",
   invitationOtpStartRateLimit,
   sessionIssuanceCsrfGuard,
   async (req, res) => {
@@ -1095,24 +1070,22 @@ router.post(
       typeof req.body === "object" && req.body !== null
         ? (req.body as Record<string, unknown>)
         : {};
-    if (
-      Object.keys(body).some((field) => field !== "token" && field !== "phone")
-    ) {
+    if (Object.keys(body).some((field) => field !== "token")) {
       res.status(400).json(INVALID_INVITATION_RESPONSE);
       return;
     }
     const token = typeof body.token === "string" ? body.token : "";
-    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-    if (!/^[0-9a-f]{64}$/.test(token) || !SAUDI_E164_MOBILE.test(phone)) {
+    if (!/^[0-9a-f]{64}$/.test(token)) {
       res.status(400).json(INVALID_INVITATION_RESPONSE);
       return;
     }
-    if (!isSmsOtpConfigured()) {
+    if (!isEmailConfigured()) {
       otpProviderUnavailable(res);
       return;
     }
 
     const tokenHash = createHash("sha256").update(token).digest("hex");
+    const generatedOtp = generateInvitationEmailOtp();
     const prepared = await db.transaction(async (tx) => {
       const candidate = (
         await tx
@@ -1163,7 +1136,6 @@ router.post(
       if (
         !invitation ||
         invitation.tokenHash !== tokenHash ||
-        invitation.phone !== phone ||
         invitation.acceptedAt ||
         invitation.revokedAt ||
         invitation.expiresAt.getTime() <= now.getTime()
@@ -1213,21 +1185,21 @@ router.post(
       const existing = (
         await tx
           .select()
-          .from(phoneOtpChallengesTable)
-          .where(eq(phoneOtpChallengesTable.invitationId, invitation.id))
+          .from(emailOtpChallengesTable)
+          .where(eq(emailOtpChallengesTable.invitationId, invitation.id))
           .for("update")
       )[0];
       const activeDispatchLease = Boolean(
         existing?.status === "dispatching" &&
         existing.dispatchStartedAt &&
-        existing.dispatchStartedAt.getTime() + PHONE_OTP_DISPATCH_LEASE_MS >
+        existing.dispatchStartedAt.getTime() + EMAIL_OTP_DISPATCH_LEASE_MS >
           now.getTime(),
       );
       const activeVerificationLease = Boolean(
         existing?.status === "verifying" &&
         existing.verificationStartedAt &&
         existing.verificationStartedAt.getTime() +
-          PHONE_OTP_VERIFICATION_LEASE_MS >
+          EMAIL_OTP_VERIFICATION_LEASE_MS >
           now.getTime(),
       );
       if (activeDispatchLease || activeVerificationLease) {
@@ -1235,8 +1207,8 @@ router.post(
           ? existing!.dispatchStartedAt!
           : existing!.verificationStartedAt!;
         const leaseMs = activeDispatchLease
-          ? PHONE_OTP_DISPATCH_LEASE_MS
-          : PHONE_OTP_VERIFICATION_LEASE_MS;
+          ? EMAIL_OTP_DISPATCH_LEASE_MS
+          : EMAIL_OTP_VERIFICATION_LEASE_MS;
         return {
           kind: "in_progress" as const,
           retryAfterSeconds: Math.max(
@@ -1265,11 +1237,11 @@ router.post(
 
       const sameWindow =
         existing &&
-        existing.sendWindowStartedAt.getTime() + PHONE_OTP_SEND_WINDOW_MS >
+        existing.sendWindowStartedAt.getTime() + EMAIL_OTP_SEND_WINDOW_MS >
           now.getTime();
-      if (sameWindow && existing!.attemptCount >= PHONE_OTP_MAX_ATTEMPTS) {
+      if (sameWindow && existing!.attemptCount >= EMAIL_OTP_MAX_ATTEMPTS) {
         const retryAt =
-          existing!.sendWindowStartedAt.getTime() + PHONE_OTP_SEND_WINDOW_MS;
+          existing!.sendWindowStartedAt.getTime() + EMAIL_OTP_SEND_WINDOW_MS;
         return {
           kind: "rate_limited" as const,
           retryAfterSeconds: Math.max(
@@ -1279,9 +1251,9 @@ router.post(
         };
       }
       const sendCount = sameWindow ? existing.sendCount + 1 : 1;
-      if (sendCount > PHONE_OTP_MAX_SENDS) {
+      if (sendCount > EMAIL_OTP_MAX_SENDS) {
         const retryAt =
-          existing!.sendWindowStartedAt.getTime() + PHONE_OTP_SEND_WINDOW_MS;
+          existing!.sendWindowStartedAt.getTime() + EMAIL_OTP_SEND_WINDOW_MS;
         return {
           kind: "rate_limited" as const,
           retryAfterSeconds: Math.max(
@@ -1292,37 +1264,63 @@ router.post(
       }
 
       const values = {
-        provider: "twilio_verify",
-        providerVerificationSid: null,
-        status: "dispatching",
         sendCount,
         sendWindowStartedAt: sameWindow ? existing!.sendWindowStartedAt : now,
         attemptCount: sameWindow ? existing!.attemptCount : 0,
-        dispatchStartedAt: now,
         verificationStartedAt: null,
-        expiresAt: new Date(now.getTime() + PHONE_OTP_TTL_MS),
-        nextSendAt: new Date(now.getTime() + PHONE_OTP_COOLDOWN_MS),
+        expiresAt: new Date(now.getTime() + EMAIL_OTP_TTL_MS),
+        nextSendAt: new Date(now.getTime() + EMAIL_OTP_COOLDOWN_MS),
         verifiedAt: null,
-        approvalProofHash: null,
         consumedAt: null,
         updatedAt: now,
       };
       const challenge = existing
-        ? (
-            await tx
-              .update(phoneOtpChallengesTable)
-              .set(values)
-              .where(eq(phoneOtpChallengesTable.id, existing.id))
-              .returning({ id: phoneOtpChallengesTable.id })
-          )[0]
+        ? { id: existing.id }
         : (
             await tx
-              .insert(phoneOtpChallengesTable)
-              .values({ invitationId: invitation.id, ...values })
-              .returning({ id: phoneOtpChallengesTable.id })
+              .insert(emailOtpChallengesTable)
+              .values({
+                invitationId: invitation.id,
+                ...values,
+                status: "preparing",
+                dispatchStartedAt: null,
+                codeSalt: null,
+                codeHash: null,
+              })
+              .returning({ id: emailOtpChallengesTable.id })
           )[0];
       if (!challenge) throw new Error("OTP challenge persistence failed");
-      return { kind: "prepared" as const, challengeId: challenge.id };
+      const codeHash = hashInvitationEmailOtp({
+        tokenHash,
+        challengeId: challenge.id,
+        email: invitation.email,
+        salt: generatedOtp.salt,
+        code: generatedOtp.code,
+      });
+      const dispatched = (
+        await tx
+          .update(emailOtpChallengesTable)
+          .set({
+            ...values,
+            status: "dispatching",
+            dispatchStartedAt: now,
+            codeSalt: generatedOtp.salt,
+            codeHash,
+          })
+          .where(eq(emailOtpChallengesTable.id, challenge.id))
+          .returning({ id: emailOtpChallengesTable.id })
+      )[0];
+      if (!dispatched) throw new Error("OTP challenge dispatch claim failed");
+      return {
+        kind: "prepared" as const,
+        challengeId: challenge.id,
+        invitationId: invitation.id,
+        email: invitation.email,
+        name: invitation.name,
+        nameAr: invitation.nameAr,
+        code: generatedOtp.code,
+        codeHash,
+      };
     });
 
     if (prepared.kind === "invalid") {
@@ -1343,8 +1341,8 @@ router.post(
       res.setHeader("Retry-After", String(prepared.retryAfterSeconds));
       res.status(409).json({
         code: "otp_operation_in_progress",
-        message: "An SMS verification operation is already in progress",
-        messageAr: "توجد عملية تحقق بالرسائل النصية قيد التنفيذ",
+        message: "An email verification operation is already in progress",
+        messageAr: "توجد عملية تحقق عبر البريد الإلكتروني قيد التنفيذ",
         retryAfterSeconds: prepared.retryAfterSeconds,
       });
       return;
@@ -1360,45 +1358,61 @@ router.post(
     }
 
     try {
-      const providerVerificationSid = await startPhoneOtp(phone);
+      await sendEmail({
+        to: prepared.email,
+        subject: "رمز تفعيل حساب الموظف | Employee activation code",
+        html: employeeInvitationOtpEmail({
+          nameAr: prepared.nameAr,
+          name: prepared.name,
+          code: prepared.code,
+          expiresMinutes: EMAIL_OTP_TTL_MS / 60_000,
+        }),
+        idempotencyKey: createEmailIdempotencyKey(
+          "employee-invitation-email-otp",
+          `${prepared.challengeId}:${prepared.codeHash}`,
+        ),
+      });
       const activated = await db
-        .update(phoneOtpChallengesTable)
+        .update(emailOtpChallengesTable)
         .set({
           status: "pending",
-          providerVerificationSid,
           dispatchStartedAt: null,
           updatedAt: new Date(),
         })
         .where(
           and(
-            eq(phoneOtpChallengesTable.id, prepared.challengeId),
-            eq(phoneOtpChallengesTable.status, "dispatching"),
+            eq(emailOtpChallengesTable.id, prepared.challengeId),
+            eq(emailOtpChallengesTable.status, "dispatching"),
+            eq(emailOtpChallengesTable.codeHash, prepared.codeHash),
           ),
         )
-        .returning({ id: phoneOtpChallengesTable.id });
+        .returning({ id: emailOtpChallengesTable.id });
       if (activated.length === 0) {
         throw new Error("OTP challenge activation lost its state");
       }
     } catch (error) {
       await db
-        .update(phoneOtpChallengesTable)
+        .update(emailOtpChallengesTable)
         .set({
           status: "failed",
-          providerVerificationSid: null,
           dispatchStartedAt: null,
+          verificationStartedAt: null,
+          codeSalt: null,
+          codeHash: null,
           updatedAt: new Date(),
         })
         .where(
           and(
-            eq(phoneOtpChallengesTable.id, prepared.challengeId),
-            eq(phoneOtpChallengesTable.status, "dispatching"),
+            eq(emailOtpChallengesTable.id, prepared.challengeId),
+            eq(emailOtpChallengesTable.status, "dispatching"),
+            eq(emailOtpChallengesTable.codeHash, prepared.codeHash),
           ),
         );
       logger.error(
         { challengeId: prepared.challengeId, ...safeErrorLogFields(error) },
-        "Employee invitation SMS OTP delivery failed",
+        "Employee invitation email OTP delivery failed",
       );
-      if (error instanceof SmsOtpNotConfiguredError) {
+      if (error instanceof EmailNotConfiguredError) {
         otpProviderUnavailable(res);
         return;
       }
@@ -1412,8 +1426,8 @@ router.post(
 
     res.status(202).json({
       status: "sent",
-      expiresInSeconds: PHONE_OTP_TTL_MS / 1000,
-      retryAfterSeconds: PHONE_OTP_COOLDOWN_MS / 1000,
+      expiresInSeconds: EMAIL_OTP_TTL_MS / 1000,
+      retryAfterSeconds: EMAIL_OTP_COOLDOWN_MS / 1000,
     });
   },
 );
@@ -1432,7 +1446,6 @@ router.post(
         (field) =>
           field !== "token" &&
           field !== "password" &&
-          field !== "phone" &&
           field !== "code",
       )
     ) {
@@ -1441,7 +1454,6 @@ router.post(
     }
     const token = typeof body.token === "string" ? body.token : "";
     const password = typeof body.password === "string" ? body.password : "";
-    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
     const code = typeof body.code === "string" ? body.code.trim() : "";
     if (!hasAllowedPasswordLength(password)) {
       res.status(400).json({
@@ -1453,18 +1465,13 @@ router.post(
     }
     // Tokens are fixed-width lowercase hex. Do not trim: any mutation of the
     // bearer value must fail rather than silently accepting a modified token.
-    if (
-      !/^[0-9a-f]{64}$/.test(token) ||
-      !SAUDI_E164_MOBILE.test(phone) ||
-      !PHONE_OTP_CODE.test(code)
-    ) {
+    if (!/^[0-9a-f]{64}$/.test(token) || !EMAIL_OTP_CODE.test(code)) {
       res.status(400).json(INVALID_INVITATION_RESPONSE);
       return;
     }
 
     const tokenHash = createHash("sha256").update(token).digest("hex");
-    const approvalProof = phoneOtpApprovalProof(token, phone, code);
-    if (!isSmsOtpConfigured()) {
+    if (!isEmailConfigured()) {
       otpProviderUnavailable(res);
       return;
     }
@@ -1488,7 +1495,6 @@ router.post(
       if (
         !invitation ||
         invitation.tokenHash !== tokenHash ||
-        invitation.phone !== phone ||
         invitation.acceptedAt ||
         invitation.revokedAt ||
         invitation.expiresAt.getTime() <= now.getTime()
@@ -1498,8 +1504,8 @@ router.post(
       const challenge = (
         await tx
           .select()
-          .from(phoneOtpChallengesTable)
-          .where(eq(phoneOtpChallengesTable.invitationId, invitation.id))
+          .from(emailOtpChallengesTable)
+          .where(eq(emailOtpChallengesTable.invitationId, invitation.id))
           .for("update")
       )[0];
       if (
@@ -1515,41 +1521,36 @@ router.post(
           challenge.status !== "failed"
         ) {
           await tx
-            .update(phoneOtpChallengesTable)
+            .update(emailOtpChallengesTable)
             .set({
               status: "failed",
-              providerVerificationSid: null,
               dispatchStartedAt: null,
               verificationStartedAt: null,
               verifiedAt: null,
-              approvalProofHash: null,
+              codeSalt: null,
+              codeHash: null,
               consumedAt: null,
               updatedAt: now,
             })
-            .where(eq(phoneOtpChallengesTable.id, challenge.id));
+            .where(eq(emailOtpChallengesTable.id, challenge.id));
         }
         return { kind: "invalid_otp" as const };
       }
       if (challenge.status === "approved") {
-        if (!approvalProofMatches(challenge.approvalProofHash, approvalProof)) {
-          const attemptNumber = challenge.attemptCount + 1;
-          const exhausted = attemptNumber >= PHONE_OTP_MAX_ATTEMPTS;
-          await tx
-            .update(phoneOtpChallengesTable)
-            .set({
-              status: exhausted ? "failed" : "approved",
-              attemptCount: attemptNumber,
-              providerVerificationSid: exhausted
-                ? null
-                : challenge.providerVerificationSid,
-              dispatchStartedAt: null,
-              verificationStartedAt: null,
-              verifiedAt: exhausted ? null : challenge.verifiedAt,
-              approvalProofHash: exhausted ? null : challenge.approvalProofHash,
-              consumedAt: null,
-              updatedAt: now,
-            })
-            .where(eq(phoneOtpChallengesTable.id, challenge.id));
+        if (
+          !challenge.codeSalt ||
+          !challenge.codeHash ||
+          !invitationEmailOtpMatches(challenge.codeHash, {
+            tokenHash,
+            challengeId: challenge.id,
+            email: invitation.email,
+            salt: challenge.codeSalt,
+            code,
+          })
+        ) {
+          // Approval is a durable finalization claim. A parallel token holder
+          // with a wrong code must not mutate it and invalidate the correct
+          // request while password hashing is in progress.
           return { kind: "invalid_otp" as const };
         }
         return {
@@ -1557,19 +1558,22 @@ router.post(
           challengeId: challenge.id,
           invitationId: invitation.id,
           attemptNumber: challenge.attemptCount,
+          codeSalt: challenge.codeSalt,
+          codeHash: challenge.codeHash,
         };
       }
-      if (challenge.attemptCount >= PHONE_OTP_MAX_ATTEMPTS) {
+      if (challenge.attemptCount >= EMAIL_OTP_MAX_ATTEMPTS) {
         await tx
-          .update(phoneOtpChallengesTable)
+          .update(emailOtpChallengesTable)
           .set({
             status: "failed",
-            providerVerificationSid: null,
             dispatchStartedAt: null,
             verificationStartedAt: null,
+            codeSalt: null,
+            codeHash: null,
             updatedAt: now,
           })
-          .where(eq(phoneOtpChallengesTable.id, challenge.id));
+          .where(eq(emailOtpChallengesTable.id, challenge.id));
         return { kind: "invalid_otp" as const };
       }
       if (challenge.status === "dispatching") {
@@ -1579,7 +1583,7 @@ router.post(
         challenge.status === "verifying" &&
         challenge.verificationStartedAt &&
         challenge.verificationStartedAt.getTime() +
-          PHONE_OTP_VERIFICATION_LEASE_MS >
+          EMAIL_OTP_VERIFICATION_LEASE_MS >
           now.getTime()
       ) {
         return { kind: "in_progress" as const };
@@ -1588,28 +1592,30 @@ router.post(
         return { kind: "invalid_otp" as const };
       }
       if (
-        typeof challenge.providerVerificationSid !== "string" ||
-        !/^VE[0-9a-fA-F]{32}$/.test(challenge.providerVerificationSid)
+        typeof challenge.codeSalt !== "string" ||
+        !/^[0-9a-f]{32}$/.test(challenge.codeSalt) ||
+        typeof challenge.codeHash !== "string" ||
+        !/^[0-9a-f]{64}$/.test(challenge.codeHash)
       ) {
         await tx
-          .update(phoneOtpChallengesTable)
+          .update(emailOtpChallengesTable)
           .set({
             status: "failed",
-            providerVerificationSid: null,
             dispatchStartedAt: null,
             verificationStartedAt: null,
             verifiedAt: null,
-            approvalProofHash: null,
+            codeSalt: null,
+            codeHash: null,
             consumedAt: null,
             updatedAt: now,
           })
-          .where(eq(phoneOtpChallengesTable.id, challenge.id));
+          .where(eq(emailOtpChallengesTable.id, challenge.id));
         return { kind: "invalid_otp" as const };
       }
       const attemptNumber = challenge.attemptCount + 1;
       const claimed = (
         await tx
-          .update(phoneOtpChallengesTable)
+          .update(emailOtpChallengesTable)
           .set({
             status: "verifying",
             attemptCount: attemptNumber,
@@ -1617,8 +1623,8 @@ router.post(
             verificationStartedAt: now,
             updatedAt: now,
           })
-          .where(eq(phoneOtpChallengesTable.id, challenge.id))
-          .returning({ id: phoneOtpChallengesTable.id })
+          .where(eq(emailOtpChallengesTable.id, challenge.id))
+          .returning({ id: emailOtpChallengesTable.id })
       )[0];
       if (!claimed) throw new Error("OTP attempt reservation failed");
       return {
@@ -1626,7 +1632,9 @@ router.post(
         challengeId: challenge.id,
         invitationId: invitation.id,
         attemptNumber,
-        providerVerificationSid: challenge.providerVerificationSid,
+        codeSalt: challenge.codeSalt,
+        codeHash: challenge.codeHash,
+        email: invitation.email,
       };
     });
 
@@ -1635,7 +1643,7 @@ router.post(
       return;
     }
     if (reservation.kind === "invalid_otp") {
-      res.status(400).json(INVALID_PHONE_OTP_RESPONSE);
+      res.status(400).json(INVALID_EMAIL_OTP_RESPONSE);
       return;
     }
     if (reservation.kind === "in_progress") {
@@ -1648,101 +1656,67 @@ router.post(
     }
 
     if (reservation.kind === "reserved") {
-      let otpResult: "approved" | "rejected";
-      try {
-        otpResult = await checkPhoneOtp(
-          reservation.providerVerificationSid,
-          code,
-        );
-      } catch (error) {
+      const otpApproved = invitationEmailOtpMatches(reservation.codeHash, {
+        tokenHash,
+        challengeId: reservation.challengeId,
+        email: reservation.email,
+        salt: reservation.codeSalt,
+        code,
+      });
+      if (!otpApproved) {
         await db
-          .update(phoneOtpChallengesTable)
-          .set({
-            status: "pending",
-            attemptCount: sql`greatest(${phoneOtpChallengesTable.attemptCount} - 1, 0)`,
-            dispatchStartedAt: null,
-            verificationStartedAt: null,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(phoneOtpChallengesTable.id, reservation.challengeId),
-              eq(phoneOtpChallengesTable.status, "verifying"),
-              eq(
-                phoneOtpChallengesTable.attemptCount,
-                reservation.attemptNumber,
-              ),
-            ),
-          );
-        logger.error(
-          {
-            challengeId: reservation.challengeId,
-            ...safeErrorLogFields(error),
-          },
-          "Employee invitation SMS OTP verification failed at provider",
-        );
-        if (error instanceof SmsOtpNotConfiguredError) {
-          otpProviderUnavailable(res);
-          return;
-        }
-        res.status(502).json({
-          code: "otp_provider_failed",
-          message: "The verification provider is temporarily unavailable",
-          messageAr: "خدمة التحقق غير متاحة مؤقتًا",
-        });
-        return;
-      }
-      if (otpResult !== "approved") {
-        await db
-          .update(phoneOtpChallengesTable)
+          .update(emailOtpChallengesTable)
           .set({
             status:
-              reservation.attemptNumber >= PHONE_OTP_MAX_ATTEMPTS
+              reservation.attemptNumber >= EMAIL_OTP_MAX_ATTEMPTS
                 ? "failed"
                 : "pending",
-            providerVerificationSid:
-              reservation.attemptNumber >= PHONE_OTP_MAX_ATTEMPTS
+            codeSalt:
+              reservation.attemptNumber >= EMAIL_OTP_MAX_ATTEMPTS
                 ? null
-                : reservation.providerVerificationSid,
+                : reservation.codeSalt,
+            codeHash:
+              reservation.attemptNumber >= EMAIL_OTP_MAX_ATTEMPTS
+                ? null
+                : reservation.codeHash,
             dispatchStartedAt: null,
             verificationStartedAt: null,
             updatedAt: new Date(),
           })
           .where(
             and(
-              eq(phoneOtpChallengesTable.id, reservation.challengeId),
-              eq(phoneOtpChallengesTable.status, "verifying"),
+              eq(emailOtpChallengesTable.id, reservation.challengeId),
+              eq(emailOtpChallengesTable.status, "verifying"),
               eq(
-                phoneOtpChallengesTable.attemptCount,
+                emailOtpChallengesTable.attemptCount,
                 reservation.attemptNumber,
               ),
             ),
           );
-        res.status(400).json(INVALID_PHONE_OTP_RESPONSE);
+        res.status(400).json(INVALID_EMAIL_OTP_RESPONSE);
         return;
       }
 
       const approvedAt = new Date();
       const persistedApproval = await db
-        .update(phoneOtpChallengesTable)
+        .update(emailOtpChallengesTable)
         .set({
           status: "approved",
           dispatchStartedAt: null,
           verificationStartedAt: null,
           verifiedAt: approvedAt,
-          approvalProofHash: approvalProof,
           updatedAt: approvedAt,
         })
         .where(
           and(
-            eq(phoneOtpChallengesTable.id, reservation.challengeId),
-            eq(phoneOtpChallengesTable.status, "verifying"),
-            eq(phoneOtpChallengesTable.attemptCount, reservation.attemptNumber),
-            gt(phoneOtpChallengesTable.expiresAt, approvedAt),
-            isNull(phoneOtpChallengesTable.consumedAt),
+            eq(emailOtpChallengesTable.id, reservation.challengeId),
+            eq(emailOtpChallengesTable.status, "verifying"),
+            eq(emailOtpChallengesTable.attemptCount, reservation.attemptNumber),
+            gt(emailOtpChallengesTable.expiresAt, approvedAt),
+            isNull(emailOtpChallengesTable.consumedAt),
           ),
         )
-        .returning({ id: phoneOtpChallengesTable.id });
+        .returning({ id: emailOtpChallengesTable.id });
       if (persistedApproval.length === 0) {
         res.status(409).json({
           code: "otp_state_changed",
@@ -1813,8 +1787,7 @@ router.post(
         if (
           !invitation ||
           invitation.tokenHash !== tokenHash ||
-          invitation.id !== reservation.invitationId ||
-          invitation.phone !== phone
+          invitation.id !== reservation.invitationId
         ) {
           return { kind: "invalid" as const };
         }
@@ -1823,8 +1796,8 @@ router.post(
         const challenge = (
           await tx
             .select()
-            .from(phoneOtpChallengesTable)
-            .where(eq(phoneOtpChallengesTable.id, reservation.challengeId))
+            .from(emailOtpChallengesTable)
+            .where(eq(emailOtpChallengesTable.id, reservation.challengeId))
             .for("update")
         )[0];
         const invalidate = async () => {
@@ -1846,17 +1819,17 @@ router.post(
             challenge.consumedAt == null
           ) {
             await tx
-              .update(phoneOtpChallengesTable)
+              .update(emailOtpChallengesTable)
               .set({
                 status: "failed",
-                providerVerificationSid: null,
                 dispatchStartedAt: null,
                 verificationStartedAt: null,
                 verifiedAt: null,
-                approvalProofHash: null,
+                codeSalt: null,
+                codeHash: null,
                 updatedAt: now,
               })
-              .where(eq(phoneOtpChallengesTable.id, challenge.id));
+              .where(eq(emailOtpChallengesTable.id, challenge.id));
           }
           return { kind: "invalid" as const };
         };
@@ -1867,8 +1840,14 @@ router.post(
           !challenge ||
           challenge.invitationId !== invitation.id ||
           challenge.status !== "approved" ||
-          challenge.attemptCount !== reservation.attemptNumber ||
-          !approvalProofMatches(challenge.approvalProofHash, approvalProof) ||
+          !challenge.codeSalt ||
+          !invitationEmailOtpMatches(challenge.codeHash, {
+            tokenHash,
+            challengeId: challenge.id,
+            email: invitation.email,
+            salt: challenge.codeSalt,
+            code,
+          }) ||
           challenge.consumedAt != null ||
           challenge.expiresAt.getTime() <= now.getTime()
         ) {
@@ -1936,7 +1915,9 @@ router.post(
               jobTitleAr: invitation.jobTitleAr,
               employeeNumber: invitation.employeeNumber,
               phone: invitation.phone,
-              phoneVerifiedAt: now,
+              // Email OTP proves control of invitation.email only. Preserve an
+              // optional administrator-supplied phone as explicitly unverified.
+              phoneVerifiedAt: null,
               isActive: true,
               mustChangePassword: false,
               // No session is issued here. Starting at version 1 also makes
@@ -1967,12 +1948,12 @@ router.post(
         }
         const consumedChallenge = (
           await tx
-            .update(phoneOtpChallengesTable)
+            .update(emailOtpChallengesTable)
             .set({
               status: "consumed",
-              providerVerificationSid: null,
               verifiedAt: now,
-              approvalProofHash: null,
+              codeSalt: null,
+              codeHash: null,
               consumedAt: now,
               dispatchStartedAt: null,
               verificationStartedAt: null,
@@ -1980,18 +1961,14 @@ router.post(
             })
             .where(
               and(
-                eq(phoneOtpChallengesTable.id, challenge.id),
-                eq(phoneOtpChallengesTable.status, "approved"),
-                eq(
-                  phoneOtpChallengesTable.attemptCount,
-                  reservation.attemptNumber,
-                ),
-                gt(phoneOtpChallengesTable.expiresAt, now),
-                eq(phoneOtpChallengesTable.approvalProofHash, approvalProof),
-                isNull(phoneOtpChallengesTable.consumedAt),
+                eq(emailOtpChallengesTable.id, challenge.id),
+                eq(emailOtpChallengesTable.status, "approved"),
+                gt(emailOtpChallengesTable.expiresAt, now),
+                eq(emailOtpChallengesTable.codeHash, reservation.codeHash),
+                isNull(emailOtpChallengesTable.consumedAt),
               ),
             )
-            .returning({ id: phoneOtpChallengesTable.id })
+            .returning({ id: emailOtpChallengesTable.id })
         )[0];
         if (!consumedChallenge) {
           throw new Error("OTP challenge consumption lost its lock");

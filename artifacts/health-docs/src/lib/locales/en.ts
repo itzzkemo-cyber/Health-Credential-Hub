@@ -128,47 +128,45 @@ export const en = {
   register: {
     title: "Employee account registration",
     subtitle:
-      "Verify your mobile number, then create a private password to complete your facility invitation.",
+      "Verify the work email linked to your invitation, then create a private password to complete registration.",
     invitation_required_title: "A facility manager invitation is required",
     no_invitation_hint:
       "Open the invitation link sent to your work email. If you did not receive one, ask your facility manager to send a registration invitation.",
     invitation_required:
       "Registration requires a valid invitation from your facility manager. Public account creation and choosing permissions are not available here.",
-    phone_title: "Verify your mobile number",
-    phone_subtitle:
-      "Enter your Saudi mobile number and we will send a 6-digit verification code.",
-    phone: "Mobile number",
-    phone_placeholder: "05XXXXXXXX",
-    phone_hint:
-      "Use a Saudi number such as 05XXXXXXXX or +9665XXXXXXXX. Standard message rates may apply.",
+    email_title: "Verify your work email",
+    email_subtitle:
+      "We will send a 6-digit verification code to the email address specified in your invitation.",
+    email_hint:
+      "The code is sent only to the work email your facility manager entered when creating the invitation. The email and permissions cannot be changed here.",
     send_code: "Send verification code",
     code_title: "Enter the verification code",
-    code_subtitle: "We sent a code to",
+    code_subtitle: "We sent a code to the work email linked to this invitation.",
     code: "6-digit verification code",
     code_hint:
-      "Never share this code. It will be verified when you complete account creation.",
+      "Open your work email and enter the latest code. Never share it; the code is verified when you complete account creation.",
     code_sent: "A new verification code was sent.",
     continue_to_password: "Continue to create password",
-    change_phone: "Change mobile number",
     resend_code: "Resend code",
     resend_in: "You can resend in",
     password_title: "Create your account password",
     password_subtitle:
-      "Complete your password and we will verify the mobile code and create your account in one secure step.",
+      "Complete your password and we will verify the email code and create your account in one secure step.",
+    code_entered_pending_verification:
+      "Code entered — it has not been verified yet. The server will verify it when you complete account activation.",
     back_to_code: "Back to verification code",
-    invalid_phone: "Enter a valid Saudi mobile number.",
-    phone_verification_failed:
-      "A code could not be sent to this number. Check it or ask your facility manager to verify the invitation details.",
-    invalid_phone_otp:
+    email_verification_failed:
+      "A code could not be sent to the invitation email. Ask your facility manager to check the address and send a new invitation if needed.",
+    invalid_email_otp:
       "The verification code is incorrect or has expired. Check it or request a new code.",
     otp_rate_limited:
       "Too many code delivery or verification attempts were made. Wait briefly, then try again.",
     otp_delivery_failed:
-      "The verification message could not be delivered. Check the mobile number and try again.",
+      "The verification message could not be delivered to the work email. Try again or ask your facility manager to review the address.",
     otp_already_approved:
       "This code was already approved. Finish creating your password to activate the account.",
     otp_unavailable:
-      "The verification messaging service is temporarily unavailable. Try again later.",
+      "The verification email service is temporarily unavailable. Try again later.",
     otp_verification_in_progress:
       "An earlier verification request is still processing. Wait a moment and try again.",
     otp_state_changed:
@@ -363,7 +361,7 @@ export const en = {
       "Sending an employee invitation is a protected administrative action. Enter your current password and two-factor or backup code.",
     invitation_email_title: "Secure delivery to the employee's email",
     invitation_email_hint:
-      "The employee receives a short-lived, single-use link, then verifies their mobile number before choosing a password. No password or invitation token is shown here. If email delivery is unavailable, no account is created.",
+      "The employee receives a short-lived, single-use link, then a verification code at the same work email before choosing a password. No password or invitation code is shown here. If email delivery fails, no account is created.",
     send_invitation: "Send registration invitation",
     invitation_sent: "The registration invitation was sent to the employee.",
     invitation_failed:
@@ -411,10 +409,6 @@ export const en = {
     job_title_english: "Job title in English",
     job_title_arabic: "Job title in Arabic",
     phone: "Mobile number",
-    phone_invitation_required:
-      "Enter a valid Saudi mobile number to send a registration invitation.",
-    phone_invitation_hint:
-      "Use 05XXXXXXXX or +9665XXXXXXXX. The employee must prove possession by SMS code before their account is created.",
     phone_verified_readonly:
       "This number is verified. Changing it requires a dedicated re-verification flow.",
     phone_reverification_required:

@@ -6,11 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type HealthStatusSmsOtp = typeof HealthStatusSmsOtp[keyof typeof HealthStatusSmsOtp];
+export type ReadinessStatusInvitationEmailOtp = typeof ReadinessStatusInvitationEmailOtp[keyof typeof ReadinessStatusInvitationEmailOtp];
 
 
-export const HealthStatusSmsOtp = {
+export const ReadinessStatusInvitationEmailOtp = {
   configured: 'configured',
   disabled: 'disabled',
-  misconfigured: 'misconfigured',
 } as const;

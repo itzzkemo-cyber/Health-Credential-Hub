@@ -9,6 +9,7 @@ export * from "./email-log";
 export * from "./password-reset-tokens";
 export * from "./employee-invitations";
 export * from "./phone-otp-challenges";
+export * from "./email-otp-challenges";
 export * from "./upload-grants";
 export * from "./automation-outbox";
 export * from "./shift-schedules";

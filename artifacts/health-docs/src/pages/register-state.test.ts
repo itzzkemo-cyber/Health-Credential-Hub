@@ -2,17 +2,15 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   consumeRegistrationToken,
-  createRegistrationPhoneOtpStart,
+  createRegistrationEmailOtpStart,
   createRegistrationSubmission,
   focusRegistrationSuccess,
   getRegistrationApiFailure,
   getRegistrationPasswordError,
-  getRegistrationPhoneOtpStartFailure,
+  getRegistrationEmailOtpStartFailure,
   getRegistrationResendSeconds,
   isRegistrationOtpComplete,
-  maskRegistrationPhone,
   normalizeRegistrationOtp,
-  normalizeSaudiRegistrationPhone,
   REGISTRATION_PASSWORD_MAX_LENGTH,
 } from "./register-state";
 
@@ -65,7 +63,6 @@ describe("employee registration state", () => {
         "token",
         overlong,
         overlong,
-        "+966500000000",
         "123456",
       ),
     ).toEqual({ ok: false, feedbackKey: "register.weak_password" });
@@ -77,7 +74,6 @@ describe("employee registration state", () => {
         "",
         "StrongPassword123!",
         "StrongPassword123!",
-        "+966500000000",
         "123456",
       ),
     ).toEqual({
@@ -92,7 +88,6 @@ describe("employee registration state", () => {
         " invitation-token ",
         " password with spaces ",
         " password with spaces ",
-        "050 000 0000",
         "123456",
       ),
     ).toEqual({
@@ -100,7 +95,6 @@ describe("employee registration state", () => {
       data: {
         token: " invitation-token ",
         password: " password with spaces ",
-        phone: "+966500000000",
         code: "123456",
       },
     });
@@ -112,7 +106,6 @@ describe("employee registration state", () => {
         "token",
         "short",
         "short",
-        "+966500000000",
         "123456",
       ),
     ).toEqual({ ok: false, feedbackKey: "register.weak_password" });
@@ -121,7 +114,6 @@ describe("employee registration state", () => {
         "token",
         "StrongPassword123!",
         "DifferentPassword123!",
-        "+966500000000",
         "123456",
       ),
     ).toEqual({
@@ -130,39 +122,18 @@ describe("employee registration state", () => {
     });
   });
 
-  it.each([
-    ["0500000000", "+966500000000"],
-    ["5 000 000 00", "+966500000000"],
-    ["+966 50 000 0000", "+966500000000"],
-    ["00966-50-000-0000", "+966500000000"],
-    ["٠٥٠٠٠٠٠٠٠٠", "+966500000000"],
-  ])("normalizes the supported Saudi mobile format %s", (value, expected) => {
-    expect(normalizeSaudiRegistrationPhone(value)).toBe(expected);
-  });
-
-  it.each(["", "050000000", "+966400000000", "+971500000000", "phone"])(
-    "rejects an invalid or non-Saudi mobile number %s",
-    (value) => {
-      expect(normalizeSaudiRegistrationPhone(value)).toBeNull();
-      expect(createRegistrationPhoneOtpStart("token", value)).toEqual({
-        ok: false,
-        feedbackKey: "register.invalid_phone",
-      });
-    },
-  );
-
-  it("builds a normalized OTP start request only with an invitation", () => {
-    expect(createRegistrationPhoneOtpStart("token", "0500000000")).toEqual({
+  it("builds an email OTP start request only with an invitation", () => {
+    expect(createRegistrationEmailOtpStart("token")).toEqual({
       ok: true,
-      data: { token: "token", phone: "+966500000000" },
+      data: { token: "token" },
     });
-    expect(createRegistrationPhoneOtpStart("", "0500000000")).toEqual({
+    expect(createRegistrationEmailOtpStart("")).toEqual({
       ok: false,
       feedbackKey: "register.no_invitation_hint",
     });
   });
 
-  it("normalizes, validates and masks phone OTP values", () => {
+  it("normalizes and validates email OTP values", () => {
     expect(normalizeRegistrationOtp("12a 34-56 78901")).toBe("1234567890");
     expect(normalizeRegistrationOtp("١٢٣٤٥٦")).toBe("123456");
     expect(isRegistrationOtpComplete("123456")).toBe(true);
@@ -170,7 +141,6 @@ describe("employee registration state", () => {
     expect(isRegistrationOtpComplete("1234567890")).toBe(false);
     expect(isRegistrationOtpComplete("123")).toBe(false);
     expect(isRegistrationOtpComplete("12345678901")).toBe(false);
-    expect(maskRegistrationPhone("0500000042")).toBe("+96650 ••• ••42");
   });
 
   it("uses the server resend deadline without rounding below zero", () => {
@@ -180,25 +150,15 @@ describe("employee registration state", () => {
     expect(getRegistrationResendSeconds(60_001, 90_000)).toBe(0);
   });
 
-  it("requires a normalized phone and numeric OTP for account acceptance", () => {
+  it("requires a complete numeric email OTP for account acceptance", () => {
     expect(
       createRegistrationSubmission(
         "token",
         "StrongPassword123!",
         "StrongPassword123!",
-        "not-a-phone",
-        "123456",
-      ),
-    ).toEqual({ ok: false, feedbackKey: "register.invalid_phone" });
-    expect(
-      createRegistrationSubmission(
-        "token",
-        "StrongPassword123!",
-        "StrongPassword123!",
-        "0500000000",
         "12ab",
       ),
-    ).toEqual({ ok: false, feedbackKey: "register.invalid_phone_otp" });
+    ).toEqual({ ok: false, feedbackKey: "register.invalid_email_otp" });
   });
 
   it("invalidates only rejected, expired, or replayed invitation links", () => {
@@ -210,8 +170,8 @@ describe("employee registration state", () => {
       feedbackKey: "register.weak_password",
       invalidatesInvitation: false,
     });
-    expect(getRegistrationApiFailure("invalid_phone_otp")).toEqual({
-      feedbackKey: "register.invalid_phone_otp",
+    expect(getRegistrationApiFailure("invalid_email_otp")).toEqual({
+      feedbackKey: "register.invalid_email_otp",
       invalidatesInvitation: false,
     });
     expect(getRegistrationApiFailure("otp_verification_in_progress")).toEqual({
@@ -249,44 +209,44 @@ describe("employee registration state", () => {
   });
 
   it("maps OTP delivery failures without discarding a valid invitation", () => {
-    expect(getRegistrationPhoneOtpStartFailure("otp_rate_limited", 73)).toEqual(
+    expect(getRegistrationEmailOtpStartFailure("otp_rate_limited", 73)).toEqual(
       {
         feedbackKey: "register.otp_rate_limited",
         invalidatesInvitation: false,
         retryAfterSeconds: 73,
       },
     );
-    expect(getRegistrationPhoneOtpStartFailure("rate_limited", 41)).toEqual({
+    expect(getRegistrationEmailOtpStartFailure("rate_limited", 41)).toEqual({
       feedbackKey: "register.otp_rate_limited",
       invalidatesInvitation: false,
       retryAfterSeconds: 41,
     });
-    expect(getRegistrationPhoneOtpStartFailure("otp_delivery_failed")).toEqual({
+    expect(getRegistrationEmailOtpStartFailure("otp_delivery_failed")).toEqual({
       feedbackKey: "register.otp_delivery_failed",
       invalidatesInvitation: false,
       retryAfterSeconds: null,
     });
     expect(
-      getRegistrationPhoneOtpStartFailure("otp_operation_in_progress", 17),
+      getRegistrationEmailOtpStartFailure("otp_operation_in_progress", 17),
     ).toEqual({
       feedbackKey: "register.otp_verification_in_progress",
       invalidatesInvitation: false,
       retryAfterSeconds: 17,
     });
-    expect(getRegistrationPhoneOtpStartFailure("otp_already_approved")).toEqual(
+    expect(getRegistrationEmailOtpStartFailure("otp_already_approved")).toEqual(
       {
         feedbackKey: "register.otp_already_approved",
         invalidatesInvitation: false,
         retryAfterSeconds: null,
       },
     );
-    expect(getRegistrationPhoneOtpStartFailure("otp_unavailable")).toEqual({
+    expect(getRegistrationEmailOtpStartFailure("otp_unavailable")).toEqual({
       feedbackKey: "register.otp_unavailable",
       invalidatesInvitation: false,
       retryAfterSeconds: null,
     });
-    expect(getRegistrationPhoneOtpStartFailure("invalid_invitation")).toEqual({
-      feedbackKey: "register.phone_verification_failed",
+    expect(getRegistrationEmailOtpStartFailure("invalid_invitation")).toEqual({
+      feedbackKey: "register.email_verification_failed",
       invalidatesInvitation: false,
       retryAfterSeconds: null,
     });

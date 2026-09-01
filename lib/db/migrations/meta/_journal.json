@@ -113,6 +113,13 @@
       "when": 1788223495561,
       "tag": "0015_nifty_captain_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788225324274,
+      "tag": "0016_black_silver_centurion",
+      "breakpoints": true
     }
   ]
 }

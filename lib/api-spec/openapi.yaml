@@ -550,31 +550,31 @@ paths:
         "400":
           description: Invalid or expired token, or password too short
 
-  /auth/invitation-phone-otp/start:
+  /auth/invitation-email-otp/start:
     post:
-      operationId: startInvitationPhoneVerification
+      operationId: startInvitationEmailVerification
       tags: [auth]
-      summary: Send an SMS OTP for an employee invitation
+      summary: Email an OTP for an employee invitation
       description: >-
         Public, rate-limited first step of employee activation. The supplied
-        Saudi E.164 mobile number must exactly match the administrator-issued
-        invitation. OTP state, send cooldowns, attempt budgets, and expiry are
-        durable; no OTP value is stored by this application.
+        bearer token resolves the server-side invitation email; no recipient
+        address is accepted from the caller. OTP state, send cooldowns, attempt
+        budgets, and expiry are durable; only a secret-keyed HMAC is stored.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/StartInvitationPhoneOtpInput"
+              $ref: "#/components/schemas/StartInvitationEmailOtpInput"
       responses:
         "202":
-          description: OTP dispatch accepted by the configured SMS provider
+          description: OTP dispatch accepted by the configured email provider
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PhoneOtpStarted"
+                $ref: "#/components/schemas/EmailOtpStarted"
         "400":
-          description: Generic invalid, expired, replayed, revoked, or phone-mismatched invitation
+          description: Generic invalid, expired, replayed, or revoked invitation
           content:
             application/json:
               schema:
@@ -584,25 +584,25 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SmsOtpError"
+                $ref: "#/components/schemas/EmailOtpError"
         "429":
           description: Durable invitation cooldown or send budget reached, or client rate limited
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SmsOtpError"
+                $ref: "#/components/schemas/EmailOtpError"
         "502":
-          description: SMS provider rejected or failed the delivery request
+          description: Email provider rejected or failed the delivery request
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SmsOtpError"
+                $ref: "#/components/schemas/EmailOtpError"
         "503":
-          description: SMS OTP provider is not configured
+          description: Email OTP delivery is not configured
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SmsOtpError"
+                $ref: "#/components/schemas/EmailOtpError"
 
   /auth/accept-invitation:
     post:
@@ -610,9 +610,9 @@ paths:
       tags: [auth]
       summary: Activate an employee account from a single-use invitation
       description: >-
-        Public invite-acceptance endpoint. The bearer token, matching Saudi
-        E.164 mobile number, SMS OTP, and employee-chosen password are the only
-        accepted fields. Organization scope and profile data come from the
+        Public invite-acceptance endpoint. The bearer token, emailed OTP, and
+        employee-chosen password are the only accepted fields. Organization
+        scope and profile data come from the
         administrator-issued invitation. The OTP is verified before the user
         row is created. A successful activation does not create a browser
         session; the employee signs in through the normal login flow.
@@ -642,25 +642,19 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SmsOtpError"
+                $ref: "#/components/schemas/EmailOtpError"
         "429":
           description: Too many acceptance attempts from this client
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SmsOtpError"
-        "502":
-          description: SMS verification provider failed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SmsOtpError"
+                $ref: "#/components/schemas/EmailOtpError"
         "503":
-          description: SMS OTP provider is not configured
+          description: Email OTP delivery is not configured
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SmsOtpError"
+                $ref: "#/components/schemas/EmailOtpError"
 
   # Two-factor authentication (TOTP)
   /auth/totp/setup:
@@ -1289,7 +1283,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/InvitationError"
         "503":
-          description: Email delivery, SMS verification, or the public application URL is not configured
+          description: Email delivery or the public application URL is not configured
           content:
             application/json:
               schema:
@@ -2038,7 +2032,7 @@ components:
         emailDelivery:
           type: string
           enum: [configured, disabled, misconfigured]
-        smsOtp:
+        invitationEmailOtp:
           type: string
           enum: [configured, disabled, misconfigured]
         ocr:
@@ -2066,7 +2060,7 @@ components:
         emailDelivery:
           type: string
           enum: [configured, disabled]
-        smsOtp:
+        invitationEmailOtp:
           type: string
           enum: [configured, disabled]
         ocr:
@@ -2079,7 +2073,7 @@ components:
           objectStorage,
           documentUploads,
           emailDelivery,
-          smsOtp,
+          invitationEmailOtp,
           ocr,
         ]
 
@@ -2255,7 +2249,7 @@ components:
     AcceptEmployeeInvitationInput:
       type: object
       additionalProperties: false
-      required: [token, password, phone, code]
+      required: [token, password, code]
       properties:
         token:
           type: string
@@ -2265,29 +2259,21 @@ components:
           format: password
           minLength: 12
           maxLength: 1024
-        phone:
-          type: string
-          pattern: "^\\+9665[0-9]{8}$"
-          description: Saudi mobile number in E.164 format matching the invitation.
         code:
           type: string
           pattern: "^[0-9]{6}$"
-          description: Six-digit SMS one-time verification code.
+          description: Six-digit one-time code sent to the invitation email.
 
-    StartInvitationPhoneOtpInput:
+    StartInvitationEmailOtpInput:
       type: object
       additionalProperties: false
-      required: [token, phone]
+      required: [token]
       properties:
         token:
           type: string
           pattern: "^[0-9a-f]{64}$"
-        phone:
-          type: string
-          pattern: "^\\+9665[0-9]{8}$"
-          description: Saudi mobile number in E.164 format matching the invitation.
 
-    PhoneOtpStarted:
+    EmailOtpStarted:
       type: object
       additionalProperties: false
       required: [status, expiresInSeconds, retryAfterSeconds]
@@ -2302,7 +2288,7 @@ components:
           type: integer
           minimum: 1
 
-    SmsOtpError:
+    EmailOtpError:
       type: object
       required: [code, message, messageAr]
       properties:
@@ -2993,7 +2979,6 @@ components:
           jobTitle,
           jobTitleAr,
           employeeNumber,
-          phone,
           currentPassword,
           code,
         ]
@@ -3023,9 +3008,9 @@ components:
           minLength: 1
           maxLength: 100
         phone:
-          type: string
+          type: ["string", "null"]
           pattern: "^\\+9665[0-9]{8}$"
-          description: Saudi mobile number in E.164 format; the employee must verify it before activation.
+          description: Optional Saudi mobile number in E.164 format. Email OTP does not verify this number.
         facilityId:
           type: ["integer", "null"]
           minimum: 1

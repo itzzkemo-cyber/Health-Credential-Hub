@@ -249,10 +249,8 @@ the same runtime without granting Render write access to GitHub.
 | `S3_OBJECT_STORAGE_ENDPOINT`          | Supabase project S3 endpoint                                   |
 | `S3_OBJECT_STORAGE_ACCESS_KEY_ID`     | server-only S3 access key                                      |
 | `S3_OBJECT_STORAGE_SECRET_ACCESS_KEY` | server-only S3 secret key                                      |
-| `SMS_OTP_PROVIDER`                    | `twilio_verify`                                                |
-| `TWILIO_VERIFY_SERVICE_SID`           | server-only Verify service SID                                 |
-| `TWILIO_API_KEY_SID`                  | restricted server-only API key SID                             |
-| `TWILIO_API_KEY_SECRET`               | matching server-only API key secret                            |
+| `EMAIL_FROM`                          | verified dedicated Resend sender                              |
+| `RESEND_API_KEY`                      | restricted server-only Resend sending key                     |
 
 The non-secret runtime boundary must remain exactly:
 
@@ -267,25 +265,27 @@ UPLOAD_SECURITY_PROVIDER=raster-sanitizer
 The Blueprint generates independent 256-bit `SESSION_SECRET` and
 `TOTP_ENCRYPTION_KEY` values. Preserve those values across redeploys; rotating
 the first invalidates sessions and rotating the second requires a controlled
-TOTP migration.
+TOTP migration. Rotating `SESSION_SECRET` also invalidates pending employee
+email OTP codes, whose maximum lifetime is ten minutes.
 
-Email remains disabled on the first deployment. After the dedicated Resend
-sending domain is verified and its click/open tracking is disabled, add
+After the dedicated Resend sending domain is verified and its click/open
+tracking is disabled, add
 `EMAIL_FROM` and the restricted server-only `RESEND_API_KEY` in Render. Confirm
 that `PUBLIC_APP_URL` is the canonical HTTPS application URL, then change
 `EMAIL_ALERTS_DISABLED` to exactly `0` and redeploy. A successful
 `/api/readyz` response must report `emailDelivery: "configured"`; a 503 with
 `emailDelivery: "misconfigured"` means the opt-in is incomplete or malformed.
+The same response must report `invitationEmailOtp: "configured"` before any
+employee invitations are issued.
 The readiness response never contains the sender address or API key. Bounce
 and complaint monitoring remains an operator responsibility until a verified,
 replay-safe webhook is implemented.
 
-Employee SMS activation is fail-closed until the Twilio Verify service and all
-three server-only credentials above are configured. Apply the matching database
-migration first, complete Saudi sender/compliance setup, keep the Verify code at
-six digits with a lifetime no longer than ten minutes, enable provider fraud and
-spend controls, then deploy and exercise a synthetic invitation end to end. Do
-not place a phone, OTP or invitation token in Render logs or environment names.
+Employee activation uses a six-digit code sent through the same Resend sender
+only to the locked invitation email. Apply migration `0016` before the matching
+API deploy, then exercise successful, wrong, expired and replayed codes. Do not
+place an email address, OTP or invitation token in Render logs or environment
+names. An optional invitation phone remains unverified.
 
 Do not place the migration URL, project-owner URL, database passwords,
 bootstrap values, service-role keys, or document data in the Blueprint.

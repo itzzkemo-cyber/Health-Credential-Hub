@@ -27,11 +27,8 @@ const state = vi.hoisted(() => ({
   transactionCount: 0,
   hashPassword: vi.fn(async (_password: string) => "new-password-hash"),
   setSessionCookie: vi.fn(),
-  smsConfigured: true,
-  startPhoneOtp: vi.fn(async (): Promise<string> => `VE${"b".repeat(32)}`),
-  checkPhoneOtp: vi.fn(
-    async (): Promise<"approved" | "rejected"> => "approved",
-  ),
+  emailConfigured: true,
+  sendEmail: vi.fn(async () => undefined),
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -68,15 +65,15 @@ vi.mock("@workspace/db", () => {
     deletedAt: "departments.deletedAt",
   };
   const facilitiesTable = { kind: "facilities", id: "facilities.id" };
-  const phoneOtpChallengesTable = {
-    kind: "phoneOtpChallenges",
-    id: "phoneOtpChallenges.id",
-    invitationId: "phoneOtpChallenges.invitationId",
-    status: "phoneOtpChallenges.status",
-    providerVerificationSid: "phoneOtpChallenges.providerVerificationSid",
-    attemptCount: "phoneOtpChallenges.attemptCount",
-    expiresAt: "phoneOtpChallenges.expiresAt",
-    consumedAt: "phoneOtpChallenges.consumedAt",
+  const emailOtpChallengesTable = {
+    kind: "emailOtpChallenges",
+    id: "emailOtpChallenges.id",
+    invitationId: "emailOtpChallenges.invitationId",
+    status: "emailOtpChallenges.status",
+    attemptCount: "emailOtpChallenges.attemptCount",
+    expiresAt: "emailOtpChallenges.expiresAt",
+    consumedAt: "emailOtpChallenges.consumedAt",
+    codeHash: "emailOtpChallenges.codeHash",
   };
   const auditLogsTable = { kind: "auditLogs" };
 
@@ -84,7 +81,7 @@ vi.mock("@workspace/db", () => {
     set: (values: Record<string, unknown>) => ({
       where: () => {
         if (table === employeeInvitationsTable) state.outsideRevocation = true;
-        if (table === phoneOtpChallengesTable) {
+        if (table === emailOtpChallengesTable) {
           const appliedValues =
             values.attemptCount && typeof values.attemptCount === "object"
               ? {
@@ -112,7 +109,7 @@ vi.mock("@workspace/db", () => {
     usersTable,
     departmentsTable,
     facilitiesTable,
-    phoneOtpChallengesTable,
+    emailOtpChallengesTable,
     auditLogsTable,
     passwordResetTokensTable: {},
     db: {
@@ -165,7 +162,7 @@ vi.mock("@workspace/db", () => {
                 if (table === facilitiesTable) {
                   return Promise.resolve(state.facilityRows);
                 }
-                if (table === phoneOtpChallengesTable) {
+                if (table === emailOtpChallengesTable) {
                   return {
                     for: async () => (state.challenge ? [state.challenge] : []),
                   };
@@ -205,7 +202,7 @@ vi.mock("@workspace/db", () => {
                 state.auditInsert = values;
                 return Promise.resolve();
               }
-              if (table === phoneOtpChallengesTable) {
+              if (table === emailOtpChallengesTable) {
                 state.challenge = {
                   id: 51,
                   createdAt: new Date(),
@@ -221,7 +218,7 @@ vi.mock("@workspace/db", () => {
           update: (table: unknown) => ({
             set: (values: Record<string, unknown>) => ({
               where: () => {
-                if (table === phoneOtpChallengesTable) {
+                if (table === emailOtpChallengesTable) {
                   state.challengeUpdate = values;
                   if (state.challenge) Object.assign(state.challenge, values);
                   const terminal = Promise.resolve(undefined);
@@ -309,26 +306,32 @@ vi.mock("../lib/logger", () => ({
 
 vi.mock("../lib/email/sender", () => ({
   EmailNotConfiguredError: class extends Error {},
-  createEmailIdempotencyKey: vi.fn(),
-  isEmailConfigured: vi.fn(() => false),
+  createEmailIdempotencyKey: vi.fn(() => `healthdocs-${"e".repeat(64)}`),
+  isEmailConfigured: vi.fn(() => state.emailConfigured),
   isFixtureRecipient: vi.fn(() => false),
-  sendEmail: vi.fn(),
+  sendEmail: state.sendEmail,
 }));
 
 vi.mock("../lib/email/templates", () => ({
+  employeeInvitationOtpEmail: vi.fn(() => "otp-email"),
   getPasswordResetUrl: vi.fn(),
   passwordResetEmail: vi.fn(),
 }));
 
-vi.mock("../lib/safeError", () => ({
-  safeErrorLogFields: vi.fn(() => ({})),
+vi.mock("../lib/email/invitationOtp", () => ({
+  generateInvitationEmailOtp: vi.fn(() => ({
+    code: "123456",
+    salt: "c".repeat(32),
+  })),
+  hashInvitationEmailOtp: vi.fn(() => "d".repeat(64)),
+  invitationEmailOtpMatches: vi.fn(
+    (storedHash: string | null, input: { code: string }) =>
+      storedHash === "d".repeat(64) && input.code === "123456",
+  ),
 }));
 
-vi.mock("../lib/sms/provider", () => ({
-  SmsOtpNotConfiguredError: class extends Error {},
-  isSmsOtpConfigured: vi.fn(() => state.smsConfigured),
-  startPhoneOtp: state.startPhoneOtp,
-  checkPhoneOtp: state.checkPhoneOtp,
+vi.mock("../lib/safeError", () => ({
+  safeErrorLogFields: vi.fn(() => ({})),
 }));
 
 import router from "./auth";
@@ -371,18 +374,17 @@ describe("public employee invitation acceptance", () => {
     state.challenge = {
       id: 51,
       invitationId: 81,
-      provider: "twilio_verify",
-      providerVerificationSid: `VE${"b".repeat(32)}`,
       status: "pending",
       sendCount: 1,
       sendWindowStartedAt: new Date(),
       attemptCount: 0,
       dispatchStartedAt: null,
       verificationStartedAt: null,
+      codeSalt: "c".repeat(32),
+      codeHash: "d".repeat(64),
       expiresAt: new Date(Date.now() + 10 * 60_000),
       nextSendAt: new Date(Date.now() + 60_000),
       verifiedAt: null,
-      approvalProofHash: null,
       consumedAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -399,11 +401,9 @@ describe("public employee invitation acceptance", () => {
     state.transactionCount = 0;
     state.hashPassword.mockClear();
     state.setSessionCookie.mockClear();
-    state.smsConfigured = true;
-    state.checkPhoneOtp.mockReset();
-    state.checkPhoneOtp.mockResolvedValue("approved");
-    state.startPhoneOtp.mockReset();
-    state.startPhoneOtp.mockResolvedValue(`VE${"b".repeat(32)}`);
+    state.emailConfigured = true;
+    state.sendEmail.mockReset();
+    state.sendEmail.mockResolvedValue(undefined);
   });
 
   afterEach(async () => {
@@ -440,7 +440,6 @@ describe("public employee invitation acceptance", () => {
         body: JSON.stringify({
           token: RAW_TOKEN,
           password: "  strong password  ",
-          phone: "+966500000000",
           code: "123456",
           ...overrides,
         }),
@@ -463,7 +462,7 @@ describe("public employee invitation acceptance", () => {
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("No port");
     return fetch(
-      `http://127.0.0.1:${address.port}/api/auth/invitation-phone-otp/start`,
+      `http://127.0.0.1:${address.port}/api/auth/invitation-email-otp/start`,
       {
         method: "POST",
         headers: {
@@ -472,7 +471,6 @@ describe("public employee invitation acceptance", () => {
         },
         body: JSON.stringify({
           token: RAW_TOKEN,
-          phone: "+966500000000",
           ...overrides,
         }),
       },
@@ -500,7 +498,7 @@ describe("public employee invitation acceptance", () => {
       jobTitleAr: "ممرض",
       employeeNumber: "EMP-2",
       phone: "+966500000000",
-      phoneVerifiedAt: expect.any(Date),
+      phoneVerifiedAt: null,
       isActive: true,
       mustChangePassword: false,
       sessionVersion: 1,
@@ -539,12 +537,15 @@ describe("public employee invitation acceptance", () => {
       expiresInSeconds: 600,
       retryAfterSeconds: 60,
     });
-    expect(state.startPhoneOtp).toHaveBeenCalledWith("+966500000000");
+    expect(state.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "new.worker@example.sa" }),
+    );
     expect(state.challenge).toEqual(
       expect.objectContaining({
         invitationId: 81,
         status: "pending",
-        providerVerificationSid: `VE${"b".repeat(32)}`,
+        codeSalt: "c".repeat(32),
+        codeHash: "d".repeat(64),
         attemptCount: 0,
         sendCount: 1,
       }),
@@ -561,7 +562,17 @@ describe("public employee invitation acceptance", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({ code: "invalid_invitation" }),
     );
-    expect(state.startPhoneOtp).not.toHaveBeenCalled();
+    expect(state.sendEmail).not.toHaveBeenCalled();
+    expect(state.challenge).toBeNull();
+  });
+
+  it("never accepts a caller-supplied OTP recipient", async () => {
+    state.challenge = null;
+
+    const response = await startOtp({ email: "attacker@example.com" });
+
+    expect(response.status).toBe(400);
+    expect(state.sendEmail).not.toHaveBeenCalled();
     expect(state.challenge).toBeNull();
   });
 
@@ -575,7 +586,7 @@ describe("public employee invitation acceptance", () => {
         retryAfterSeconds: expect.any(Number),
       }),
     );
-    expect(state.startPhoneOtp).not.toHaveBeenCalled();
+    expect(state.sendEmail).not.toHaveBeenCalled();
   });
 
   it("enforces the persisted hourly send budget after the cooldown", async () => {
@@ -589,7 +600,7 @@ describe("public employee invitation acceptance", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({ code: "otp_rate_limited" }),
     );
-    expect(state.startPhoneOtp).not.toHaveBeenCalled();
+    expect(state.sendEmail).not.toHaveBeenCalled();
   });
 
   it("preserves the attempt budget when resending in the same hourly window", async () => {
@@ -617,7 +628,7 @@ describe("public employee invitation acceptance", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({ code: "otp_operation_in_progress" }),
     );
-    expect(state.startPhoneOtp).not.toHaveBeenCalled();
+    expect(state.sendEmail).not.toHaveBeenCalled();
   });
 
   it("rejects resend while a dispatch lease is active", async () => {
@@ -631,7 +642,7 @@ describe("public employee invitation acceptance", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({ code: "otp_operation_in_progress" }),
     );
-    expect(state.startPhoneOtp).not.toHaveBeenCalled();
+    expect(state.sendEmail).not.toHaveBeenCalled();
   });
 
   it("still honors resend cooldown after a verification lease becomes stale", async () => {
@@ -645,7 +656,7 @@ describe("public employee invitation acceptance", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({ code: "otp_rate_limited" }),
     );
-    expect(state.startPhoneOtp).not.toHaveBeenCalled();
+    expect(state.sendEmail).not.toHaveBeenCalled();
   });
 
   it("recovers a stale verification lease without resetting attempts", async () => {
@@ -660,7 +671,8 @@ describe("public employee invitation acceptance", () => {
     expect(state.challenge).toEqual(
       expect.objectContaining({
         status: "pending",
-        providerVerificationSid: `VE${"b".repeat(32)}`,
+        codeSalt: "c".repeat(32),
+        codeHash: "d".repeat(64),
         attemptCount: 2,
       }),
     );
@@ -669,27 +681,28 @@ describe("public employee invitation acceptance", () => {
   it("starts a fresh provider verification after an approved challenge expires", async () => {
     state.challenge!.status = "approved";
     state.challenge!.verifiedAt = new Date(Date.now() - 11 * 60_000);
-    state.challenge!.approvalProofHash = "c".repeat(64);
+    state.challenge!.codeSalt = "c".repeat(32);
+    state.challenge!.codeHash = "d".repeat(64);
     state.challenge!.expiresAt = new Date(Date.now() - 1_000);
     state.challenge!.nextSendAt = new Date(Date.now() - 1_000);
 
     const response = await startOtp();
 
     expect(response.status).toBe(202);
-    expect(state.startPhoneOtp).toHaveBeenCalledTimes(1);
+    expect(state.sendEmail).toHaveBeenCalledTimes(1);
     expect(state.challenge).toEqual(
       expect.objectContaining({
         status: "pending",
-        providerVerificationSid: `VE${"b".repeat(32)}`,
         verifiedAt: null,
-        approvalProofHash: null,
+        codeSalt: "c".repeat(32),
+        codeHash: "d".repeat(64),
       }),
     );
   });
 
-  it("fails closed and marks the challenge failed when SMS delivery fails", async () => {
+  it("fails closed and marks the challenge failed when email delivery fails", async () => {
     state.challenge = null;
-    state.startPhoneOtp.mockRejectedValueOnce(new Error("provider failure"));
+    state.sendEmail.mockRejectedValueOnce(new Error("provider failure"));
 
     const response = await startOtp();
 
@@ -704,62 +717,36 @@ describe("public employee invitation acceptance", () => {
   });
 
   it("does not create a user for a rejected OTP and persists the attempt", async () => {
-    state.checkPhoneOtp.mockResolvedValueOnce("rejected");
-
     const response = await accept({ code: "000000" });
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual(
-      expect.objectContaining({ code: "invalid_phone_otp" }),
+      expect.objectContaining({ code: "invalid_email_otp" }),
     );
     expect(state.userInsert).toBeNull();
     expect(state.challenge).toEqual(
       expect.objectContaining({ status: "pending", attemptCount: 1 }),
     );
-    expect(state.checkPhoneOtp).toHaveBeenCalledWith(
-      `VE${"b".repeat(32)}`,
-      "000000",
-    );
   });
 
-  it("releases the verification lease without consuming an attempt when the provider fails", async () => {
-    state.checkPhoneOtp.mockRejectedValueOnce(new Error("provider failure"));
-
-    const response = await accept();
-
-    expect(response.status).toBe(502);
-    expect(await response.json()).toEqual(
-      expect.objectContaining({ code: "otp_provider_failed" }),
-    );
-    expect(state.userInsert).toBeNull();
-    expect(state.challenge).toEqual(
-      expect.objectContaining({
-        status: "pending",
-        attemptCount: 0,
-        verificationStartedAt: null,
-      }),
-    );
-  });
-
-  it("rejects an expired persisted OTP without calling the provider", async () => {
+  it("rejects and sanitizes an expired persisted OTP", async () => {
     state.challenge!.expiresAt = new Date(Date.now() - 1_000);
 
     const response = await accept();
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual(
-      expect.objectContaining({ code: "invalid_phone_otp" }),
+      expect.objectContaining({ code: "invalid_email_otp" }),
     );
-    expect(state.checkPhoneOtp).not.toHaveBeenCalled();
     expect(state.userInsert).toBeNull();
     expect(state.challenge).toEqual(
       expect.objectContaining({
         status: "failed",
-        providerVerificationSid: null,
         dispatchStartedAt: null,
         verificationStartedAt: null,
         verifiedAt: null,
-        approvalProofHash: null,
+        codeSalt: null,
+        codeHash: null,
         consumedAt: null,
       }),
     );
@@ -768,19 +755,19 @@ describe("public employee invitation acceptance", () => {
   it("sanitizes an expired approved challenge before rejecting it", async () => {
     state.challenge!.status = "approved";
     state.challenge!.verifiedAt = new Date(Date.now() - 11 * 60_000);
-    state.challenge!.approvalProofHash = "c".repeat(64);
+    state.challenge!.codeSalt = "c".repeat(32);
+    state.challenge!.codeHash = "d".repeat(64);
     state.challenge!.expiresAt = new Date(Date.now() - 1_000);
 
     const response = await accept();
 
     expect(response.status).toBe(400);
-    expect(state.checkPhoneOtp).not.toHaveBeenCalled();
     expect(state.challenge).toEqual(
       expect.objectContaining({
         status: "failed",
-        providerVerificationSid: null,
         verifiedAt: null,
-        approvalProofHash: null,
+        codeSalt: null,
+        codeHash: null,
       }),
     );
   });
@@ -792,9 +779,8 @@ describe("public employee invitation acceptance", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual(
-      expect.objectContaining({ code: "invalid_phone_otp" }),
+      expect.objectContaining({ code: "invalid_email_otp" }),
     );
-    expect(state.checkPhoneOtp).not.toHaveBeenCalled();
     expect(state.userInsert).toBeNull();
     expect(state.challenge).toEqual(
       expect.objectContaining({ status: "failed", attemptCount: 5 }),
@@ -811,11 +797,10 @@ describe("public employee invitation acceptance", () => {
     expect(await response.json()).toEqual(
       expect.objectContaining({ code: "otp_verification_in_progress" }),
     );
-    expect(state.checkPhoneOtp).not.toHaveBeenCalled();
     expect(state.userInsert).toBeNull();
   });
 
-  it("retries finalization after provider approval without checking the provider twice", async () => {
+  it("retries finalization after durable local approval", async () => {
     state.finalizationFailureOnce = true;
 
     const firstResponse = await accept();
@@ -824,7 +809,7 @@ describe("public employee invitation acceptance", () => {
     expect(state.challenge).toEqual(
       expect.objectContaining({
         status: "approved",
-        approvalProofHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+        codeHash: "d".repeat(64),
       }),
     );
     if (server) {
@@ -837,18 +822,17 @@ describe("public employee invitation acceptance", () => {
     const retryResponse = await accept();
 
     expect(retryResponse.status).toBe(201);
-    expect(state.checkPhoneOtp).toHaveBeenCalledTimes(1);
     expect(state.challenge).toEqual(
       expect.objectContaining({
         status: "consumed",
-        providerVerificationSid: null,
-        approvalProofHash: null,
+        codeSalt: null,
+        codeHash: null,
         consumedAt: expect.any(Date),
       }),
     );
   });
 
-  it("rejects a different code after provider approval without rechecking the provider", async () => {
+  it("rejects a different code after approval without mutating the finalization claim", async () => {
     state.finalizationFailureOnce = true;
     const firstResponse = await accept();
     expect(firstResponse.status).toBe(500);
@@ -864,16 +848,15 @@ describe("public employee invitation acceptance", () => {
 
     expect(retryResponse.status).toBe(400);
     expect(await retryResponse.json()).toEqual(
-      expect.objectContaining({ code: "invalid_phone_otp" }),
+      expect.objectContaining({ code: "invalid_email_otp" }),
     );
-    expect(state.checkPhoneOtp).toHaveBeenCalledTimes(1);
     expect(state.userInsert).toBeNull();
     expect(state.challenge).toEqual(
-      expect.objectContaining({ status: "approved", attemptCount: 2 }),
+      expect.objectContaining({ status: "approved", attemptCount: 1 }),
     );
   });
 
-  it("exhausts the durable budget for mismatched codes after provider approval", async () => {
+  it("keeps an approved finalization claim stable across repeated wrong codes", async () => {
     state.finalizationFailureOnce = true;
     const firstResponse = await accept();
     expect(firstResponse.status).toBe(500);
@@ -896,30 +879,27 @@ describe("public employee invitation acceptance", () => {
       }
     }
 
-    expect(state.checkPhoneOtp).toHaveBeenCalledTimes(1);
     expect(state.userInsert).toBeNull();
     expect(state.challenge).toEqual(
       expect.objectContaining({
-        status: "failed",
-        attemptCount: 5,
-        providerVerificationSid: null,
-        verifiedAt: null,
-        approvalProofHash: null,
+        status: "approved",
+        attemptCount: 1,
+        verifiedAt: expect.any(Date),
+        codeHash: "d".repeat(64),
       }),
     );
   });
 
-  it("fails closed when a pending challenge has no provider verification SID", async () => {
-    state.challenge!.providerVerificationSid = null;
+  it("fails closed when a pending challenge has no code hash", async () => {
+    state.challenge!.codeHash = null;
 
     const response = await accept();
 
     expect(response.status).toBe(400);
-    expect(state.checkPhoneOtp).not.toHaveBeenCalled();
     expect(state.challenge).toEqual(
       expect.objectContaining({
         status: "failed",
-        providerVerificationSid: null,
+        codeHash: null,
       }),
     );
   });
@@ -956,13 +936,12 @@ describe("public employee invitation acceptance", () => {
   });
 
   it.each(["12345", "1234567"])(
-    "rejects a non-six-digit SMS code (%s) before database work",
+    "rejects a non-six-digit email code (%s) before database work",
     async (code) => {
       const response = await accept({ code });
 
       expect(response.status).toBe(400);
       expect(state.transactionCount).toBe(0);
-      expect(state.checkPhoneOtp).not.toHaveBeenCalled();
       expect(state.userInsert).toBeNull();
     },
   );

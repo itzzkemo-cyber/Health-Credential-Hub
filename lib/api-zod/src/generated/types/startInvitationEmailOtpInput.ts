@@ -6,10 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface SmsOtpError {
-  code: string;
-  message: string;
-  messageAr: string;
-  /** @minimum 1 */
-  retryAfterSeconds?: number;
+export interface StartInvitationEmailOtpInput {
+  /** @pattern ^[0-9a-f]{64}$ */
+  token: string;
 }

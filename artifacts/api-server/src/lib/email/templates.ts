@@ -222,6 +222,54 @@ export function employeeInvitationEmail(
   return layout(body);
 }
 
+export interface EmployeeInvitationOtpEmailInput {
+  nameAr: string;
+  name: string;
+  code: string;
+  expiresMinutes: number;
+}
+
+/** The OTP is escaped and intentionally rendered as text, never as a link. */
+export function employeeInvitationOtpEmail(
+  input: EmployeeInvitationOtpEmailInput,
+): string {
+  const code = esc(input.code);
+  const body = `
+        <tr>
+          <td style="padding:28px 32px 8px;" dir="rtl" align="right">
+            <div style="font-size:17px;font-weight:bold;margin-bottom:8px;">مرحباً ${esc(input.nameAr)}،</div>
+            <div style="font-size:14px;line-height:1.9;">
+              استخدم رمز التحقق التالي لإكمال تفعيل حساب الموظف. الرمز صالح لمدة
+              <strong>${input.expiresMinutes} دقائق</strong> ولاستخدام واحد فقط.
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="padding:20px 32px;">
+            <div dir="ltr" style="display:inline-block;background:${BRAND.bg};color:${BRAND.primaryDark};border:1px solid ${BRAND.border};font-family:Consolas,monospace;font-size:30px;font-weight:bold;letter-spacing:8px;padding:14px 22px;border-radius:8px;">${code}</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 32px 8px;" dir="rtl" align="right">
+            <div style="font-size:13px;color:${BRAND.muted};line-height:1.9;">
+              لا تشارك هذا الرمز مع أي شخص. إذا لم تطلبه فتجاهل الرسالة وتواصل مع مسؤول منشأتك.
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:8px 32px 20px;border-top:1px dashed ${BRAND.border};" dir="ltr" align="left">
+            <div style="font-size:13px;color:${BRAND.muted};line-height:1.8;">
+              Hello ${esc(input.name)}, use the verification code above to finish
+              activating your employee account. It expires in
+              <strong>${input.expiresMinutes} minutes</strong> and can be used once.
+              Never share this code. If you did not request it, ignore this email
+              and contact your facility administrator.
+            </div>
+          </td>
+        </tr>`;
+  return layout(body);
+}
+
 export interface DigestMember {
   name: string;
   nameAr: string;

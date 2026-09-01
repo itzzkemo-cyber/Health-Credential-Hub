@@ -21,7 +21,7 @@ vi.mock("@workspace/api-client-react", () => ({
     mutate: vi.fn(),
     reset: vi.fn(),
   }),
-  useStartInvitationPhoneVerification: () => ({
+  useStartInvitationEmailVerification: () => ({
     isPending: false,
     mutate: vi.fn(),
     reset: vi.fn(),
@@ -135,7 +135,7 @@ describe("invite-only authentication UI", () => {
   );
 
   it.each(["ar", "en"] as const)(
-    "renders the mobile verification step in %s without exposing its token",
+    "renders the work-email verification step in %s without exposing its token",
     (language) => {
       const invitationToken = "single-use-sensitive-token";
       const { html } = renderRegister(
@@ -143,16 +143,16 @@ describe("invite-only authentication UI", () => {
         `https://app.example.sa/register#token=${invitationToken}`,
       );
 
-      expect(html).toContain(translation(language, "register.phone_title"));
-      expect(html).toContain(translation(language, "register.phone_subtitle"));
+      expect(html).toContain(translation(language, "register.email_title"));
+      expect(html).toContain(translation(language, "register.email_subtitle"));
+      expect(html).toContain(translation(language, "register.email_hint"));
       expect(html).toContain(
         translation(language, "register.invitation_required"),
       );
       expect(html).toContain("<form");
-      expect(html).toContain('id="registration-phone"');
-      expect(html).toContain('type="tel"');
-      expect(html).toContain('inputMode="tel"');
-      expect(html).toContain('autoComplete="tel-national"');
+      expect(html).toContain('id="registration-email-hint"');
+      expect(html).not.toContain('type="tel"');
+      expect(html).not.toContain('autocomplete="tel-national"');
       expect(html).not.toContain('id="registration-password"');
       expect(html).not.toContain(invitationToken);
     },
@@ -185,9 +185,10 @@ describe("invite-only authentication UI", () => {
         "register.invalid_title",
         "register.invalid_hint",
         "register.failed",
-        "register.invalid_phone",
-        "register.phone_verification_failed",
-        "register.invalid_phone_otp",
+        "register.email_hint",
+        "register.code_entered_pending_verification",
+        "register.email_verification_failed",
+        "register.invalid_email_otp",
         "register.otp_rate_limited",
         "register.otp_delivery_failed",
         "register.otp_unavailable",
@@ -202,8 +203,6 @@ describe("invite-only authentication UI", () => {
         "employees_page.invitation_step_up_hint",
         "employees_page.invitation_email_hint",
         "employees_page.invitation_failed",
-        "employees_page.phone_invitation_required",
-        "employees_page.phone_invitation_hint",
       ];
 
       for (const key of keys) {
@@ -213,4 +212,13 @@ describe("invite-only authentication UI", () => {
       }
     },
   );
+
+  it("states that a locally complete code is still pending server verification", () => {
+    expect(en.register.code_entered_pending_verification).toContain(
+      "not been verified yet",
+    );
+    expect(ar.register.code_entered_pending_verification).toContain(
+      "لم يُتحقق منه بعد",
+    );
+  });
 });
