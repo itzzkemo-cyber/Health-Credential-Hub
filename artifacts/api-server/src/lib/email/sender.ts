@@ -21,6 +21,8 @@ export interface OutgoingEmail {
   to: string;
   subject: string;
   html: string;
+  /** Optional plain-text fallback for clients that block or strip HTML. */
+  text?: string;
   /** Stable across retries; deliberately contains no recipient or reset token. */
   idempotencyKey: string;
 }
@@ -148,6 +150,7 @@ export async function sendEmail(email: OutgoingEmail): Promise<void> {
           to: [email.to],
           subject: email.subject,
           html: email.html,
+          ...(email.text ? { text: email.text } : {}),
         }),
         signal: AbortSignal.timeout(30_000),
       });

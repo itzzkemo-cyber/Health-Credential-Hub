@@ -51,17 +51,51 @@ function esc(s: string): string {
     .replaceAll('"', "&quot;");
 }
 
+/**
+ * Table-based CTA for broad email-client support. The nested table and block
+ * anchor keep the whole visual button tappable in Gmail and Outlook instead
+ * of relying on an inline anchor's painted area.
+ */
+function emailButton(href: string, labelHtml: string): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center">
+    <tr>
+      <td bgcolor="${BRAND.primary}" style="background:${BRAND.primary};border-radius:8px;text-align:center;">
+        <a href="${esc(href)}" target="_blank" rel="noopener noreferrer" style="display:block;color:#ffffff;text-decoration:none;font-weight:bold;padding:14px 32px;border-radius:8px;font-size:16px;line-height:1.5;">
+          ${labelHtml}
+        </a>
+      </td>
+    </tr>
+  </table>`;
+}
+
+function privateLinkFallback(url: string): string {
+  const safeUrl = esc(url);
+  return `<tr>
+    <td style="padding:0 32px 20px;" dir="rtl" align="right">
+      <div style="font-size:13px;color:${BRAND.muted};line-height:1.8;">
+        إذا لم يعمل الزر، انسخ الرابط الخاص التالي والصقه في Chrome أو Safari.<br/>
+        <span dir="ltr">If the button does not work, copy this private link into your browser.</span>
+      </div>
+      <div dir="ltr" style="margin-top:8px;padding:10px 12px;background:${BRAND.bg};border:1px solid ${BRAND.border};border-radius:6px;font-size:12px;line-height:1.7;word-break:break-all;overflow-wrap:anywhere;text-align:left;">
+        <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" style="color:${BRAND.primaryDark};text-decoration:underline;word-break:break-all;overflow-wrap:anywhere;">${safeUrl}</a>
+      </div>
+      <div style="margin-top:6px;font-size:12px;color:${BRAND.danger};line-height:1.7;">
+        الرابط مخصص لك ويُستخدم مرة واحدة؛ لا تشاركه مع أي شخص.<br/>
+        <span dir="ltr">This one-time link is private. Do not share it.</span>
+      </div>
+    </td>
+  </tr>`;
+}
+
 function layout(bodyHtml: string): string {
   const appUrl = getAppBaseUrl();
   const cta = appUrl
     ? `<tr><td align="center" style="padding:8px 32px 28px;">
-         <a href="${appUrl}" style="display:inline-block;background:${BRAND.primary};color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 28px;border-radius:8px;font-size:15px;">
-           فتح المنصة &nbsp;·&nbsp; Open HealthDocs
-         </a>
+         ${emailButton(appUrl, "فتح المنصة &nbsp;·&nbsp; Open HealthDocs")}
        </td></tr>`
     : "";
   return `<!doctype html>
-<html>
+<html lang="ar" dir="rtl">
 <body style="margin:0;padding:0;background:${BRAND.bg};font-family:Tahoma,'Segoe UI',Arial,sans-serif;color:${BRAND.text};">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND.bg};padding:24px 12px;">
     <tr><td align="center">
@@ -149,9 +183,10 @@ export function passwordResetEmail(input: PasswordResetEmailInput): string {
         </tr>
         <tr>
           <td align="center" style="padding:20px 32px;">
-            <a href="${esc(input.resetUrl)}" style="display:inline-block;background:${BRAND.primary};color:#ffffff;text-decoration:none;font-weight:bold;padding:14px 32px;border-radius:8px;font-size:16px;">
-              إعادة تعيين كلمة المرور &nbsp;·&nbsp; Reset Password
-            </a>
+            ${emailButton(
+              input.resetUrl,
+              "إعادة تعيين كلمة المرور &nbsp;·&nbsp; Reset Password",
+            )}
           </td>
         </tr>
         <tr>
@@ -196,11 +231,13 @@ export function employeeInvitationEmail(
         </tr>
         <tr>
           <td align="center" style="padding:20px 32px;">
-            <a href="${esc(input.invitationUrl)}" style="display:inline-block;background:${BRAND.primary};color:#ffffff;text-decoration:none;font-weight:bold;padding:14px 32px;border-radius:8px;font-size:16px;">
-              تفعيل حساب الموظف &nbsp;·&nbsp; Activate employee account
-            </a>
+            ${emailButton(
+              input.invitationUrl,
+              "تفعيل حساب الموظف &nbsp;·&nbsp; Activate employee account",
+            )}
           </td>
         </tr>
+        ${privateLinkFallback(input.invitationUrl)}
         <tr>
           <td style="padding:0 32px 8px;" dir="rtl" align="right">
             <div style="font-size:13px;color:${BRAND.muted};line-height:1.9;">
@@ -220,6 +257,23 @@ export function employeeInvitationEmail(
           </td>
         </tr>`;
   return layout(body);
+}
+
+/** Plain-text fallback for clients that block or strip HTML links. */
+export function employeeInvitationText(
+  input: EmployeeInvitationEmailInput,
+): string {
+  return `مرحباً ${input.nameAr}،
+
+أنشأ مسؤول منشأتك دعوة لك للانضمام إلى منصة وثائقي الصحي. افتح الرابط الخاص التالي في المتصفح لإنشاء كلمة المرور وتفعيل حساب الموظف. الدعوة صالحة لمدة 24 ساعة ولاستخدام واحد فقط.
+
+${input.invitationUrl}
+
+الرابط مخصص لك. لا تشاركه مع أي شخص. إذا لم تكن تتوقع هذه الدعوة فتجاهل الرسالة وتواصل مع مسؤول منشأتك.
+
+Hello ${input.name},
+
+An administrator at your facility invited you to HealthDocs. Open the private link above in your browser to choose your password and activate your employee account. The invitation is valid for 24 hours and can be used once. Do not share the link. If you did not expect this invitation, ignore this message and contact your facility administrator.`;
 }
 
 export interface EmployeeInvitationOtpEmailInput {

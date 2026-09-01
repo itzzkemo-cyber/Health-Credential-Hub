@@ -293,6 +293,9 @@ vi.mock("../lib/email/templates", () => ({
   employeeInvitationEmail: vi.fn(
     ({ invitationUrl }: { invitationUrl: string }) => invitationUrl,
   ),
+  employeeInvitationText: vi.fn(
+    ({ invitationUrl }: { invitationUrl: string }) => invitationUrl,
+  ),
 }));
 
 vi.mock("../lib/logger", () => ({

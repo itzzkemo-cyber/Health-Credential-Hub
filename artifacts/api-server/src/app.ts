@@ -20,6 +20,7 @@ import {
   getStorageConnectSources,
   validateObjectStorageConfiguration,
 } from "./lib/objectStorage";
+import { isSpaDocumentRequest } from "./lib/spaFallback";
 
 const app: Express = express();
 const isProduction = process.env.NODE_ENV === "production";
@@ -155,7 +156,7 @@ if (isProduction || process.env.SERVE_WEB === "true") {
     }),
   );
   app.use((req, res, next) => {
-    if (req.method !== "GET" || !req.accepts("html")) {
+    if (!isSpaDocumentRequest(req.method, Boolean(req.accepts("html")))) {
       next();
       return;
     }

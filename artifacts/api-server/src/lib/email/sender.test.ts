@@ -151,4 +151,32 @@ describe("email delivery configuration", () => {
       });
     }
   });
+
+  it("sends the plain-text fallback beside the HTML body", async () => {
+    configureEmail();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await sendEmail({
+      to: "employee@example.sa",
+      subject: "Invitation",
+      html: '<a href="https://credentials.example.sa/register#token=safe">Activate</a>',
+      text: "Activate: https://credentials.example.sa/register#token=safe",
+      idempotencyKey,
+    });
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    const payload = JSON.parse(String((init as RequestInit).body)) as Record<
+      string,
+      unknown
+    >;
+    expect(payload).toMatchObject({
+      to: ["employee@example.sa"],
+      subject: "Invitation",
+      text: "Activate: https://credentials.example.sa/register#token=safe",
+    });
+    expect(payload.html).toContain("#token=safe");
+  });
 });

@@ -41,6 +41,7 @@ import {
 } from "../lib/email/sender";
 import {
   employeeInvitationEmail,
+  employeeInvitationText,
   getEmployeeInvitationUrl,
 } from "../lib/email/templates";
 import { logger } from "../lib/logger";
@@ -849,6 +850,7 @@ router.post(
         subject:
           "دعوة للانضمام إلى وثائقي الصحي | HealthDocs employee invitation",
         html: employeeInvitationEmail({ nameAr, name, invitationUrl }),
+        text: employeeInvitationText({ nameAr, name, invitationUrl }),
         idempotencyKey: createEmailIdempotencyKey(
           "employee-invitation",
           tokenHash,
