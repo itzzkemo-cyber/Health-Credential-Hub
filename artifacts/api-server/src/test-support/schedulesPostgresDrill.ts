@@ -17,6 +17,7 @@ interface Roster {
   version: number;
   status: string;
   assignments: ShiftAssignment[];
+  issues: string[];
   shortages: unknown[];
 }
 interface TeamRoster {
@@ -232,26 +233,45 @@ export async function runSchedulesPostgresDrill(
       )
     ).status,
   ).toBe(409);
+  const reviewableDraftResponse = await call(
+    `/schedules/${roster.id}`,
+    cookie(aSupervisor),
+    {
+      expectedVersion: 1,
+      assignments: [{ employeeId: a1, date: "2033-01-01", shiftCode: "D" }],
+    },
+    "PATCH",
+  );
+  expect(reviewableDraftResponse.status).toBe(200);
+  const reviewableDraft = (await reviewableDraftResponse.json()) as Roster;
+  expect(reviewableDraft.version).toBe(2);
+  expect(reviewableDraft.issues).toContain("employee_unavailable");
   expect(
     (
       await call(
-        `/schedules/${roster.id}`,
+        `/schedules/${roster.id}/publish`,
         cookie(aSupervisor),
-        {
-          expectedVersion: 1,
-          assignments: [{ employeeId: a1, date: "2033-01-01", shiftCode: "D" }],
-        },
-        "PATCH",
+        { expectedVersion: reviewableDraft.version },
       )
     ).status,
-  ).toBe(400);
+  ).toBe(409);
+  const correctedResponse = await call(
+    `/schedules/${roster.id}`,
+    cookie(aSupervisor),
+    { expectedVersion: reviewableDraft.version, assignments: roster.assignments },
+    "PATCH",
+  );
+  expect(correctedResponse.status).toBe(200);
+  roster = (await correctedResponse.json()) as Roster;
+  expect(roster.version).toBe(3);
+  expect(roster.issues).toEqual([]);
   expect(
     (
       await call(
         `/schedules/${roster.id}`,
         cookie(aSupervisor),
         {
-          expectedVersion: 1,
+          expectedVersion: roster.version,
           assignments: [roster.assignments[0], roster.assignments[0]],
         },
         "PATCH",
@@ -265,7 +285,7 @@ export async function runSchedulesPostgresDrill(
       call(
         `/schedules/${roster.id}`,
         cookie(aSupervisor),
-        { expectedVersion: 1, assignments: roster.assignments },
+        { expectedVersion: roster.version, assignments: roster.assignments },
         "PATCH",
       ),
     ),
