@@ -44,4 +44,30 @@ describe("local PDF credential text suggestions", () => {
       )?.certificateNumber,
     ).toBeNull();
   });
+
+  it("recognizes common e-certificate labels without inventing image-only fields", () => {
+    const result = extractLocalPdfCredentialSuggestions(
+      "TEST EMPLOYEE Registration ID: REG-123 Issued: Feb 07 2026 Expired: Feb 07 2028 eCertificateID: CERT-456 Training Center",
+    );
+
+    expect(result).toMatchObject({
+      holderName: "TEST EMPLOYEE",
+      certificateNumber: "CERT-456",
+      issueDate: "2026-02-07",
+      expiryDate: "2028-02-07",
+      issuerName: null,
+      detectedType: "custom",
+    });
+  });
+
+  it.each(["SAUDI HEART ASSOCIATION", "TRAINING CENTER", "MINISTRY OF HEALTH"])(
+    "does not misclassify an organization heading as the holder: %s",
+    (heading) => {
+      expect(
+        extractLocalPdfCredentialSuggestions(
+          `${heading} Registration ID: REG-123 eCertificateID: CERT-456`,
+        )?.holderName,
+      ).toBeNull();
+    },
+  );
 });

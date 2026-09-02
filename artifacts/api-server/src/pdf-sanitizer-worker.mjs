@@ -18,12 +18,16 @@ import {
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_PAGES = 5;
 const MAX_PAGE_PIXELS = 2_500_000;
+const MAX_PAGE_EDGE = 8_192;
 const MAX_TOTAL_PIXELS = 12_000_000;
 const MAX_SOURCE_IMAGE_PIXELS = 12_000_000;
+const MAX_SOURCE_IMAGE_EDGE = 8_192;
 const MAX_OBJECTS = 10_000;
 const MAX_DEPTH = 64;
 const MAX_EXTRACTED_TEXT_BYTES = 24 * 1024;
 const RENDER_SCALE = 1.5;
+const MIN_RENDER_SCALE = 1;
+const RENDER_PIXEL_BUDGET_RATIO = 0.99;
 const WORKER_FRAME_MAGIC = Buffer.from("HDP1", "ascii");
 
 // Reject rather than silently removing evidence-bearing signatures/forms.
@@ -186,7 +190,9 @@ async function preflight(input) {
           !Number.isSafeInteger(width) ||
           !Number.isSafeInteger(height) ||
           width < 1 ||
-          height < 1
+          height < 1 ||
+          width > MAX_SOURCE_IMAGE_EDGE ||
+          height > MAX_SOURCE_IMAGE_EDGE
         )
           reject();
         sourceImagePixels += width * height;
@@ -219,6 +225,8 @@ class BoundedCanvasFactory {
       !Number.isSafeInteger(height) ||
       width < 1 ||
       height < 1 ||
+      width > MAX_SOURCE_IMAGE_EDGE ||
+      height > MAX_SOURCE_IMAGE_EDGE ||
       width * height > MAX_SOURCE_IMAGE_PIXELS
     )
       reject();
@@ -226,7 +234,15 @@ class BoundedCanvasFactory {
     return { canvas, context: canvas.getContext("2d") };
   }
   reset(target, width, height) {
-    if (width < 1 || height < 1 || width * height > MAX_SOURCE_IMAGE_PIXELS)
+    if (
+      !Number.isSafeInteger(width) ||
+      !Number.isSafeInteger(height) ||
+      width < 1 ||
+      height < 1 ||
+      width > MAX_SOURCE_IMAGE_EDGE ||
+      height > MAX_SOURCE_IMAGE_EDGE ||
+      width * height > MAX_SOURCE_IMAGE_PIXELS
+    )
       reject();
     target.canvas.width = width;
     target.canvas.height = height;
@@ -281,7 +297,38 @@ async function rebuild(input, extractText) {
     const pages = [];
     for (let pageNumber = 1; pageNumber <= count; pageNumber++) {
       const page = await document.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: RENDER_SCALE });
+      const sourceViewport = page.getViewport({ scale: 1 });
+      const sourceWidth = Math.ceil(sourceViewport.width);
+      const sourceHeight = Math.ceil(sourceViewport.height);
+      const sourcePixels = sourceWidth * sourceHeight;
+      if (
+        !Number.isSafeInteger(sourceWidth) ||
+        !Number.isSafeInteger(sourceHeight) ||
+        sourceWidth < 1 ||
+        sourceHeight < 1 ||
+        sourceWidth > MAX_PAGE_EDGE ||
+        sourceHeight > MAX_PAGE_EDGE ||
+        sourcePixels > MAX_PAGE_PIXELS
+      )
+        reject();
+      const pixelBoundScale = Math.sqrt(
+        (MAX_PAGE_PIXELS * RENDER_PIXEL_BUDGET_RATIO) /
+          (sourceViewport.width * sourceViewport.height),
+      );
+      const edgeBoundScale = Math.min(
+        MAX_PAGE_EDGE / sourceViewport.width,
+        MAX_PAGE_EDGE / sourceViewport.height,
+      );
+      const renderScale = Math.max(
+        MIN_RENDER_SCALE,
+        Math.min(RENDER_SCALE, pixelBoundScale, edgeBoundScale),
+      );
+      // Keep ordinary scanned certificates usable without allowing an
+      // attacker to turn an enormous physical page into a low-resolution
+      // canvas. Documents that require rendering below 1x remain rejected.
+      if (!Number.isFinite(renderScale) || renderScale < MIN_RENDER_SCALE)
+        reject();
+      const viewport = page.getViewport({ scale: renderScale });
       const width = Math.ceil(viewport.width);
       const height = Math.ceil(viewport.height);
       const pixels = width * height;
@@ -291,6 +338,8 @@ async function rebuild(input, extractText) {
         !Number.isSafeInteger(height) ||
         width < 1 ||
         height < 1 ||
+        width > MAX_PAGE_EDGE ||
+        height > MAX_PAGE_EDGE ||
         pixels > MAX_PAGE_PIXELS ||
         totalPixels > MAX_TOTAL_PIXELS
       )
@@ -318,10 +367,24 @@ async function rebuild(input, extractText) {
           }
         }
       }
-      pages.push({ page, viewport, width, height });
+      pages.push({
+        page,
+        viewport,
+        width,
+        height,
+        pageWidth: sourceViewport.width,
+        pageHeight: sourceViewport.height,
+      });
     }
     let totalImageBytes = 0;
-    for (const { page, viewport, width, height } of pages) {
+    for (const {
+      page,
+      viewport,
+      width,
+      height,
+      pageWidth,
+      pageHeight,
+    } of pages) {
       const canvas = createCanvas(width, height);
       try {
         await page.render({
@@ -335,10 +398,7 @@ async function rebuild(input, extractText) {
         totalImageBytes += jpeg.length;
         if (totalImageBytes > MAX_BYTES) reject();
         const image = await output.embedJpg(jpeg);
-        const rebuiltPage = output.addPage([
-          width / RENDER_SCALE,
-          height / RENDER_SCALE,
-        ]);
+        const rebuiltPage = output.addPage([pageWidth, pageHeight]);
         rebuiltPage.drawImage(image, {
           x: 0,
           y: 0,

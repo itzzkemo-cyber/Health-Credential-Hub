@@ -337,6 +337,60 @@ describe("bounded PDF child sanitizer", () => {
     ).rejects.toBeInstanceOf(PdfRejectedError);
   });
 
+  it("downscales an ordinary large scanned page within the pixel budget", async () => {
+    const sourceWidth = 1064;
+    const sourceHeight = 1494;
+    const result = await sanitizePdfWithTextInChild(
+      await fixture(1, sourceWidth, sourceHeight),
+    );
+    const output = await PDFDocument.load(result.bytes, {
+      updateMetadata: false,
+    });
+    const page = output.getPage(0);
+    const image = output.context
+      .enumerateIndirectObjects()
+      .map(([, value]) => value)
+      .find(
+        (value) =>
+          value instanceof PDFRawStream &&
+          value.dict.get(PDFName.of("Subtype"))?.toString() === "/Image",
+      ) as PDFRawStream;
+    const width = image.dict.lookup(PDFName.of("Width"), PDFNumber).asNumber();
+    const height = image.dict
+      .lookup(PDFName.of("Height"), PDFNumber)
+      .asNumber();
+
+    expect(width * height).toBeLessThanOrEqual(2_500_000);
+    expect(page.getWidth()).toBeCloseTo(sourceWidth, 0);
+    expect(page.getHeight()).toBeCloseTo(sourceHeight, 0);
+    expect(result.text).toContain("TEST CREDENTIAL 1");
+  }, 20_000);
+
+  it("rejects an extreme page edge even when its pixel area is small", async () => {
+    await expect(
+      sanitizePdfInChild(await fixture(1, 1, 8_193)),
+    ).rejects.toBeInstanceOf(PdfRejectedError);
+  });
+
+  it("rejects a skinny embedded image before native decode", async () => {
+    const document = await PDFDocument.create({ updateMetadata: false });
+    document.addPage([320, 240]);
+    document.context.register(
+      document.context.stream(Uint8Array.of(0), {
+        Type: "XObject",
+        Subtype: "Image",
+        Width: 1,
+        Height: 8_193,
+        ColorSpace: "DeviceGray",
+        BitsPerComponent: 8,
+      }),
+    );
+
+    await expect(
+      sanitizePdfInChild(Buffer.from(await document.save())),
+    ).rejects.toBeInstanceOf(PdfRejectedError);
+  });
+
   it("rejects total rendered pixel load beyond the document budget", async () => {
     await expect(
       sanitizePdfInChild(await fixture(5, 1000, 1100)),

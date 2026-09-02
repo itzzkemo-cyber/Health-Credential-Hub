@@ -149,6 +149,22 @@ function knownIssuer(text: string): { en: string; ar: string | null } | null {
   return match ? { en: match[1], ar: match[2] } : null;
 }
 
+function leadingRegistrationHolder(text: string): string | undefined {
+  const candidate =
+    /^([A-Z][A-Z'-]+(?: [A-Z][A-Z'-]+){1,5})(?=\s+[Rr]egistration\s+(?:ID|Id|id|[Nn]umber|[Nn]o\.?)(?:\s|:|#|-))/.exec(
+      text,
+    )?.[1];
+  if (
+    !candidate ||
+    /\b(?:ASSOCIATION|AUTHORITY|BOARD|CENTER|CENTRE|CLINIC|COLLEGE|COMMISSION|COUNCIL|DEPARTMENT|FOUNDATION|HOSPITAL|INSTITUTE|MINISTRY|ORGANIZATION|SOCIETY|TRAINING|UNIVERSITY)\b/.test(
+      candidate,
+    )
+  ) {
+    return undefined;
+  }
+  return candidate;
+}
+
 /**
  * Convert bounded text from the isolated PDF worker into review-only
  * suggestions. Values are deliberately conservative: the employee must still
@@ -175,7 +191,7 @@ export function extractLocalPdfCredentialSuggestions(
   const holderName = bounded(
     /(?:this certifies that|issued to|participant|student|holder|name)\s*[:#-]?\s*([A-Z][A-Za-z' -]{2,79}?)(?=\s+(?:has|successfully|completed|course|certificate|issued|issue|valid|date|$))/i.exec(
       text,
-    )?.[1],
+    )?.[1] ?? leadingRegistrationHolder(text),
     80,
   );
   const holderNameAr = bounded(
@@ -192,6 +208,7 @@ export function extractLocalPdfCredentialSuggestions(
   ]);
   const expiryDate = labeledDate(text, [
     "expir(?:y|es|ation)(?: date)?",
+    "expired(?: date)?",
     "expiration date",
     "valid (?:until|through)",
     "تاريخ الانتهاء",
