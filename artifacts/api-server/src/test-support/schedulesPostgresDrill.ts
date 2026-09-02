@@ -542,7 +542,25 @@ export async function runSchedulesPostgresDrill(
     ),
   ]);
   expect(boundaryRaces.map((response) => response.status).sort()).toEqual([
-    200, 400,
+    200, 200,
+  ]);
+  const boundaryDrafts = (await Promise.all(
+    boundaryRaces.map((response) => response.json()),
+  )) as Roster[];
+  expect(boundaryDrafts.flatMap((draft) => draft.issues)).toContain(
+    "minimum_rest",
+  );
+  const boundaryPublishes = await Promise.all(
+    boundaryDrafts.map((draft) =>
+      call(
+        `/schedules/${draft.id}/publish`,
+        rootCookie,
+        { expectedVersion: draft.version },
+      ),
+    ),
+  );
+  expect(boundaryPublishes.map((response) => response.status)).toEqual([
+    409, 409,
   ]);
 
   // Audit persistence and roster/membership changes share one transaction.
