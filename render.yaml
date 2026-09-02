@@ -54,8 +54,9 @@ services:
         sync: false
       - key: OBJECT_STORAGE_PROVIDER
         value: s3
-      # Controlled acceptance permits bounded JPEG/PNG intake only. The API
-      # rebuilds every image as a metadata-free JPEG before private persistence.
+      # Controlled acceptance permits bounded JPEG/PNG/PDF intake. The API
+      # rebuilds images as metadata-free JPEGs and PDFs as flattened,
+      # image-only documents before private persistence.
       - key: DOCUMENT_UPLOADS_ENABLED
         value: "true"
       - key: UPLOAD_SECURITY_PROVIDER

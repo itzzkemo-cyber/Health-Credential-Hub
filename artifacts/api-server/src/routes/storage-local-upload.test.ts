@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
     writeServerMediatedObject: vi.fn(),
     getObjectEntityFile: vi.fn(),
     deleteObject: vi.fn(),
+    deleteRejectedGrant: vi.fn(),
     storedFile,
     ObjectAlreadyExistsError,
     ObjectNotFoundError,
@@ -43,8 +44,17 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@workspace/db", () => ({
   credentialsTable: {},
-  uploadGrantsTable: {},
-  db: {},
+  uploadGrantsTable: {
+    id: "id",
+    requestedBy: "requestedBy",
+    objectPath: "objectPath",
+    status: "status",
+  },
+  db: {
+    delete: vi.fn(() => ({
+      where: vi.fn(() => ({ returning: mocks.deleteRejectedGrant })),
+    })),
+  },
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -197,6 +207,8 @@ describe("server-mediated private object upload route", () => {
     mocks.getObjectEntityFile.mockResolvedValue(mocks.storedFile);
     mocks.deleteObject.mockReset();
     mocks.deleteObject.mockResolvedValue(undefined);
+    mocks.deleteRejectedGrant.mockReset();
+    mocks.deleteRejectedGrant.mockResolvedValue([{ id: 19 }]);
 
     const app = express();
     app.use((req, _res, next) => {
@@ -262,6 +274,7 @@ describe("server-mediated private object upload route", () => {
     expect(mocks.processUploadSecurity).toHaveBeenCalledWith(
       bytes,
       "image/png",
+      { extractPdfText: false },
     );
     expect(mocks.writeServerMediatedObject).toHaveBeenCalledWith(
       `/objects/uploads/${uploadId}`,
@@ -326,6 +339,7 @@ describe("server-mediated private object upload route", () => {
     expect(mocks.processUploadSecurity).toHaveBeenCalledWith(
       pdfInput,
       "application/pdf",
+      { extractPdfText: false },
     );
     expect(mocks.writeServerMediatedObject).toHaveBeenCalledWith(
       `/objects/uploads/${uploadId}`,
@@ -344,6 +358,142 @@ describe("server-mediated private object upload route", () => {
     );
   });
 
+  it("returns bounded local PDF suggestions only for the explicit review request", async () => {
+    const pdfInput = Buffer.from("%PDF-1.7\nsynthetic-original");
+    const pdfOutput = Buffer.from("%PDF-1.7\nsynthetic-image-only-output");
+    const sha256 = createHash("sha256").update(pdfOutput).digest("hex");
+    mocks.processUploadSecurity.mockResolvedValue({
+      bytes: pdfOutput,
+      contentType: "application/pdf",
+      sha256,
+      extractedText:
+        "Saudi Heart Association BLS Certificate Number: 84880082123 Issue Date: 2 Feb 2026 Expiry Date: 2 Feb 2027",
+    });
+    mocks.validateUploadedObject.mockResolvedValue({
+      bytes: pdfOutput,
+      contentType: "application/pdf",
+      size: pdfOutput.length,
+      sha256,
+    });
+
+    const response = await put(pdfInput, {
+      "content-type": "application/pdf",
+      "if-none-match": "*",
+      "x-healthdocs-pdf-text": "review",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(response.headers.get("x-upload-cleanup-disposition")).toBe(
+      "confirmed",
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      localExtraction: {
+        detectedType: "BLS",
+        issuerName: "Saudi Heart Association",
+        certificateNumber: "84880082123",
+        issueDate: "2026-02-02",
+        expiryDate: "2027-02-02",
+      },
+    });
+    expect(mocks.processUploadSecurity).toHaveBeenCalledWith(
+      pdfInput,
+      "application/pdf",
+      { extractPdfText: true },
+    );
+    expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
+    expect(mocks.finalizeUploadGrantProcessing).not.toHaveBeenCalled();
+    expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
+    expect(mocks.deleteRejectedGrant).toHaveBeenCalledOnce();
+  });
+
+  it("returns no-store 204 when an explicitly reviewed PDF has no extractable text", async () => {
+    const pdfInput = Buffer.from("%PDF-1.7\nsynthetic-image-only-input");
+    const pdfOutput = Buffer.from("%PDF-1.7\nsynthetic-image-only-output");
+    const sha256 = createHash("sha256").update(pdfOutput).digest("hex");
+    mocks.processUploadSecurity.mockResolvedValue({
+      bytes: pdfOutput,
+      contentType: "application/pdf",
+      sha256,
+    });
+    mocks.validateUploadedObject.mockResolvedValue({
+      bytes: pdfOutput,
+      contentType: "application/pdf",
+      size: pdfOutput.length,
+      sha256,
+    });
+
+    const response = await put(pdfInput, {
+      "content-type": "application/pdf",
+      "if-none-match": "*",
+      "x-healthdocs-pdf-text": "review",
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(response.headers.get("x-upload-cleanup-disposition")).toBe(
+      "confirmed",
+    );
+    expect(mocks.processUploadSecurity).toHaveBeenCalledWith(
+      pdfInput,
+      "application/pdf",
+      { extractPdfText: true },
+    );
+    expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
+    expect(mocks.finalizeUploadGrantProcessing).not.toHaveBeenCalled();
+    expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
+  });
+
+  it("fails an ephemeral PDF review closed without writing bytes when grant release is uncertain", async () => {
+    const pdfInput = Buffer.from("%PDF-1.7\nsynthetic-review-input");
+    const pdfOutput = Buffer.from("%PDF-1.7\nsynthetic-review-output");
+    const sha256 = createHash("sha256").update(pdfOutput).digest("hex");
+    mocks.processUploadSecurity.mockResolvedValue({
+      bytes: pdfOutput,
+      contentType: "application/pdf",
+      sha256,
+      extractedText: "BLS Certificate Number: REVIEW-1234",
+    });
+    mocks.rollbackUploadGrantProcessing.mockResolvedValue(false);
+
+    const response = await put(pdfInput, {
+      "content-type": "application/pdf",
+      "if-none-match": "*",
+      "x-healthdocs-pdf-text": "review",
+    });
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("x-upload-cleanup-disposition")).toBeNull();
+    expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
+    expect(mocks.finalizeUploadGrantProcessing).not.toHaveBeenCalled();
+  });
+
+  it("never returns PDF suggestions when local review was not requested", async () => {
+    const pdfInput = Buffer.from("%PDF-1.7\nsynthetic-original");
+    const pdfOutput = Buffer.from("%PDF-1.7\nsynthetic-image-only-output");
+    const sha256 = createHash("sha256").update(pdfOutput).digest("hex");
+    mocks.processUploadSecurity.mockResolvedValue({
+      bytes: pdfOutput,
+      contentType: "application/pdf",
+      sha256,
+      extractedText: "Certificate Number: MUST-NOT-LEAVE-SERVER",
+    });
+    mocks.validateUploadedObject.mockResolvedValue({
+      bytes: pdfOutput,
+      contentType: "application/pdf",
+      size: pdfOutput.length,
+      sha256,
+    });
+
+    const response = await put(pdfInput, {
+      "content-type": "application/pdf",
+      "if-none-match": "*",
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("cache-control")).toBeNull();
+  });
+
   it("does not persist rejected active PDF bytes or finalize their grant", async () => {
     mocks.processUploadSecurity.mockRejectedValue(
       new mocks.UploadSecurityRejectedError(),
@@ -353,6 +503,9 @@ describe("server-mediated private object upload route", () => {
       { "content-type": "application/pdf", "if-none-match": "*" },
     );
     expect(response.status).toBe(422);
+    expect(response.headers.get("x-upload-cleanup-disposition")).toBe(
+      "confirmed",
+    );
     expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
     expect(mocks.finalizeUploadGrantProcessing).not.toHaveBeenCalled();
   });
@@ -404,6 +557,9 @@ describe("server-mediated private object upload route", () => {
     const response = await put();
 
     expect(response.status).toBe(500);
+    expect(response.headers.get("x-upload-cleanup-disposition")).toBe(
+      "confirmed",
+    );
     expect(mocks.reserveUploadGrantFailureCleanup).toHaveBeenCalledOnce();
     expect(mocks.deleteObject).toHaveBeenCalledWith(mocks.storedFile);
     expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
@@ -446,6 +602,7 @@ describe("server-mediated private object upload route", () => {
     const response = await put();
 
     expect(response.status).toBe(500);
+    expect(response.headers.get("x-upload-cleanup-disposition")).toBeNull();
     expect(mocks.reserveUploadGrantFailureCleanup).toHaveBeenCalledOnce();
     expect(mocks.deleteObject).not.toHaveBeenCalled();
     expect(mocks.rollbackUploadGrantProcessing).not.toHaveBeenCalled();
@@ -459,6 +616,7 @@ describe("server-mediated private object upload route", () => {
     const response = await put();
 
     expect(response.status).toBe(409);
+    expect(response.headers.get("x-upload-cleanup-disposition")).toBeNull();
     expect(mocks.getObjectEntityFile).not.toHaveBeenCalled();
     expect(mocks.deleteObject).not.toHaveBeenCalled();
     expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
@@ -485,6 +643,9 @@ describe("server-mediated private object upload route", () => {
     const response = await put();
 
     expect(response.status).toBe(422);
+    expect(response.headers.get("x-upload-cleanup-disposition")).toBe(
+      "confirmed",
+    );
     await expect(response.json()).resolves.toEqual({
       error: "Uploaded file failed security checks",
     });
@@ -503,6 +664,19 @@ describe("server-mediated private object upload route", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Upload security processing is unavailable",
     });
+    expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
+    expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
+  });
+
+  it("does not claim cleanup confirmation when quarantine cleanup failed", async () => {
+    mocks.processUploadSecurity.mockRejectedValue(
+      new mocks.MalwareQuarantineCleanupError(),
+    );
+
+    const response = await put();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("x-upload-cleanup-disposition")).toBeNull();
     expect(mocks.writeServerMediatedObject).not.toHaveBeenCalled();
     expect(mocks.rollbackUploadGrantProcessing).toHaveBeenCalledOnce();
   });

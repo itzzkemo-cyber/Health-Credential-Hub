@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   claimCredentialSubmission,
+  createCredentialUploadError,
   CredentialSubmissionError,
+  CredentialUploadError,
   getUnlinkedUploadId,
+  isUploadCleanupConfirmed,
   releaseCredentialSubmission,
   submitCredentialWithDeferredUpload,
   type CredentialUploadGrant,
@@ -36,6 +39,31 @@ function createDependencies() {
 }
 
 describe("deferred credential submission", () => {
+  it("accepts only the fixed server cleanup disposition", () => {
+    expect(
+      createCredentialUploadError(
+        new Response(null, {
+          status: 422,
+          headers: { "X-Upload-Cleanup-Disposition": "confirmed" },
+        }),
+      ),
+    ).toMatchObject({ status: 422, cleanupConfirmed: true });
+    expect(
+      createCredentialUploadError(
+        new Response(null, {
+          status: 500,
+          headers: { "X-Upload-Cleanup-Disposition": "unknown" },
+        }),
+      ),
+    ).toMatchObject({ status: 500, cleanupConfirmed: false });
+    expect(isUploadCleanupConfirmed(new CredentialUploadError(422, true))).toBe(
+      true,
+    );
+    expect(isUploadCleanupConfirmed(new CredentialUploadError(500, false))).toBe(
+      false,
+    );
+  });
+
   it("extracts cleanup identifiers only from canonical private upload paths", () => {
     expect(
       getUnlinkedUploadId(
@@ -196,6 +224,49 @@ describe("deferred credential submission", () => {
 
     expect(dependencies.cleanupUpload).toHaveBeenCalledWith(grant.objectPath);
     expect(dependencies.createCredential).not.toHaveBeenCalled();
+  });
+
+  it("preserves a rejected PUT error when the server confirms cleanup", async () => {
+    const dependencies = createDependencies();
+    const uploadError = new CredentialUploadError(422, true);
+    dependencies.putUpload.mockRejectedValueOnce(uploadError);
+
+    let caught: unknown;
+    try {
+      await submitCredentialWithDeferredUpload({
+        ...dependencies,
+        file,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(CredentialSubmissionError);
+    expect(caught).toMatchObject({
+      stage: "upload",
+      originalError: uploadError,
+    });
+    expect(dependencies.cleanupUpload).not.toHaveBeenCalled();
+    expect(dependencies.createCredential).not.toHaveBeenCalled();
+  });
+
+  it("still cleans a rejected PUT when the server does not confirm cleanup", async () => {
+    const dependencies = createDependencies();
+    dependencies.putUpload.mockRejectedValueOnce(
+      new CredentialUploadError(500, false),
+    );
+
+    await expect(
+      submitCredentialWithDeferredUpload({
+        ...dependencies,
+        file,
+      }),
+    ).rejects.toMatchObject({
+      name: "CredentialSubmissionError",
+      stage: "upload",
+    });
+
+    expect(dependencies.cleanupUpload).toHaveBeenCalledWith(grant.objectPath);
   });
 
   it("reports cleanup failure without retaining the object path on the error", async () => {

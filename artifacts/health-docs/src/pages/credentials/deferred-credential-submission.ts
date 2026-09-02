@@ -21,6 +21,35 @@ export interface UploadedCredentialFile {
   kind: "pdf" | "image";
 }
 
+export const UPLOAD_CLEANUP_DISPOSITION_HEADER = "x-upload-cleanup-disposition";
+export const UPLOAD_CLEANUP_CONFIRMED = "confirmed";
+
+export class CredentialUploadError extends Error {
+  readonly status: number;
+  readonly cleanupConfirmed: boolean;
+
+  constructor(status: number, cleanupConfirmed: boolean) {
+    super(`Storage upload failed (${status})`);
+    this.name = "CredentialUploadError";
+    this.status = status;
+    this.cleanupConfirmed = cleanupConfirmed;
+  }
+}
+
+export function createCredentialUploadError(
+  response: Pick<Response, "status" | "headers">,
+): CredentialUploadError {
+  return new CredentialUploadError(
+    response.status,
+    response.headers.get(UPLOAD_CLEANUP_DISPOSITION_HEADER) ===
+      UPLOAD_CLEANUP_CONFIRMED,
+  );
+}
+
+export function isUploadCleanupConfirmed(error: unknown): boolean {
+  return error instanceof CredentialUploadError && error.cleanupConfirmed;
+}
+
 export class CredentialSubmissionError extends Error {
   readonly stage: CredentialSubmissionStage;
   readonly originalError: unknown;
@@ -113,7 +142,10 @@ export async function submitCredentialWithDeferredUpload<TResult>({
     onStage?.("create");
     return await createCredential(uploadedFile);
   } catch (error) {
-    if (objectPath) {
+    const serverConfirmedUploadCleanup =
+      failedStage === "upload" &&
+      isUploadCleanupConfirmed(error);
+    if (objectPath && !serverConfirmedUploadCleanup) {
       try {
         await cleanupUpload(objectPath);
       } catch (cleanupError) {

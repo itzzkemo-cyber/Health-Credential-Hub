@@ -54,13 +54,20 @@ import { cn } from "@/lib/utils";
 import { getDocumentUploadAvailability } from "@/lib/document-upload-availability";
 import {
   claimCredentialSubmission,
+  createCredentialUploadError,
+  CredentialUploadError,
   CredentialSubmissionError,
   getUnlinkedUploadId,
+  isUploadCleanupConfirmed,
   releaseCredentialSubmission,
   submitCredentialWithDeferredUpload,
   type CredentialSubmissionStage,
 } from "./deferred-credential-submission";
 import { getCredentialOwnerState } from "./credential-owner-state";
+import {
+  buildLocalPdfReviewHeaders,
+  parseLocalPdfReviewResponse,
+} from "./local-pdf-review";
 import { applyReviewedOcrSuggestions, getOcrAvailability } from "./ocr-review";
 
 export default function CredentialNew() {
@@ -136,9 +143,12 @@ export default function CredentialNew() {
   >("idle");
   const [ocrUploadedFile, setOcrUploadedFile] = useState<{
     objectPath: string;
-    kind: "image";
+    kind: "image" | "pdf";
   } | null>(null);
   const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
+  const [pdfReviewStatus, setPdfReviewStatus] = useState<"idle" | "no-text">(
+    "idle",
+  );
   const submissionLock = useRef({ current: false });
   const ocrLock = useRef(false);
 
@@ -191,19 +201,44 @@ export default function CredentialNew() {
       blob: Blob;
       contentType: "image/jpeg" | "image/png" | "application/pdf";
     },
-  ) => {
+    requestPdfReview = false,
+  ): Promise<{
+    localExtraction: OcrResult | null;
+    ephemeralPdfReview: boolean;
+  }> => {
+    const uploadHeaders = buildUploadRequestHeaders(
+      grant.requiredHeaders,
+      prepared.contentType,
+      grant.uploadURL,
+      window.location.origin,
+    );
+    const { headers, reviewRequested } = buildLocalPdfReviewHeaders({
+      headers: uploadHeaders,
+      contentType: prepared.contentType,
+      uploadUrl: grant.uploadURL,
+      pageOrigin: window.location.origin,
+      requestReview: requestPdfReview,
+    });
     const response = await fetch(grant.uploadURL, {
       method: "PUT",
       body: prepared.blob,
-      headers: buildUploadRequestHeaders(
-        grant.requiredHeaders,
-        prepared.contentType,
-        grant.uploadURL,
-        window.location.origin,
-      ),
+      headers,
     });
     if (!response.ok) {
-      throw new Error(`Storage upload failed (${response.status})`);
+      throw createCredentialUploadError(response);
+    }
+    if (!reviewRequested) {
+      return { localExtraction: null, ephemeralPdfReview: false };
+    }
+    try {
+      return {
+        localExtraction: await parseLocalPdfReviewResponse(response),
+        ephemeralPdfReview: true,
+      };
+    } catch (error) {
+      const cleanupDisposition = createCredentialUploadError(response);
+      if (cleanupDisposition.cleanupConfirmed) throw cleanupDisposition;
+      throw error;
     }
   };
 
@@ -220,6 +255,7 @@ export default function CredentialNew() {
       await deleteUnlinkedUpload.mutateAsync({ uploadId });
       setOcrUploadedFile(null);
       setOcrResult(null);
+      setPdfReviewStatus("idle");
       return true;
     } catch {
       setCleanupUnconfirmed(true);
@@ -233,7 +269,7 @@ export default function CredentialNew() {
   const handleFileSelection = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
-    if (!documentUploadsEnabled || controlsDisabled) return;
+    if (!documentUploadsEnabled || controlsDisabled || ocrLock.current) return;
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
@@ -244,12 +280,18 @@ export default function CredentialNew() {
     if (!(await deleteUploadedOcrFile())) return;
     setSelectedFile(file);
     setOcrResult(null);
+    setPdfReviewStatus("idle");
+    if (file.type === "application/pdf") {
+      void readSelectedDocument(file, false);
+    }
   };
 
   const clearSelectedFile = async () => {
+    if (ocrLock.current) return;
     if (!(await deleteUploadedOcrFile())) return;
     setSelectedFile(null);
     setOcrResult(null);
+    setPdfReviewStatus("idle");
   };
 
   const leaveForm = async () => {
@@ -260,12 +302,16 @@ export default function CredentialNew() {
     setLocation("/credentials");
   };
 
-  const readSelectedDocument = async () => {
+  const readSelectedDocument = async (
+    fileOverride?: File,
+    reuseExistingUpload = true,
+  ) => {
+    const file = fileOverride ?? selectedFile;
+    const isPdf = file?.type === "application/pdf";
     if (
-      !selectedFile ||
-      selectedFile.type === "application/pdf" ||
+      !file ||
       !employeeId ||
-      ocrAvailability !== "enabled" ||
+      (!isPdf && ocrAvailability !== "enabled") ||
       cleanupUnconfirmed ||
       ocrLock.current
     ) {
@@ -275,20 +321,40 @@ export default function CredentialNew() {
     ocrLock.current = true;
     let grantedObjectPath: string | null = null;
     try {
-      let uploadedFile = ocrUploadedFile;
+      let uploadedFile = reuseExistingUpload ? ocrUploadedFile : null;
       if (!uploadedFile) {
         setOcrStage("upload");
-        const prepared = await prepareUploadFile(selectedFile);
+        const prepared = await prepareUploadFile(file);
         const grant = await requestUploadUrl.mutateAsync({
           data: {
-            name: selectedFile.name,
+            name: file.name,
             size: prepared.blob.size,
             contentType: prepared.contentType,
           },
         });
         grantedObjectPath = grant.objectPath;
-        await putPreparedUpload(grant, prepared);
-        uploadedFile = { objectPath: grant.objectPath, kind: "image" };
+        if (isPdf) setOcrStage("read");
+        const uploadResult = await putPreparedUpload(
+          grant,
+          prepared,
+          isPdf,
+        );
+
+        if (isPdf && uploadResult.ephemeralPdfReview) {
+          // The review request never persists bytes or its grant. Saving later
+          // performs the normal upload once the employee confirms the form.
+          setOcrResult(uploadResult.localExtraction);
+          if (uploadResult.localExtraction) {
+            setPdfReviewStatus("idle");
+            toast.success(t("credential.ocr_read_success"));
+          } else {
+            setPdfReviewStatus("no-text");
+            toast.info(t("credential.pdf_text_unavailable"));
+          }
+          return;
+        }
+
+        uploadedFile = { objectPath: grant.objectPath, kind: prepared.kind };
         setOcrUploadedFile(uploadedFile);
       }
 
@@ -299,7 +365,8 @@ export default function CredentialNew() {
       setOcrResult(result);
       toast.success(t("credential.ocr_read_success"));
     } catch (error) {
-      if (grantedObjectPath) {
+      const serverConfirmedUploadCleanup = isUploadCleanupConfirmed(error);
+      if (grantedObjectPath && !serverConfirmedUploadCleanup) {
         const uploadId = getUnlinkedUploadId(grantedObjectPath);
         try {
           if (!uploadId) throw new Error("Invalid private upload reference");
@@ -310,12 +377,22 @@ export default function CredentialNew() {
           toast.error(t("credential.cleanup_failed"));
           return;
         }
+      } else if (serverConfirmedUploadCleanup) {
+        setOcrUploadedFile(null);
       }
 
       if (error instanceof UploadTooLargeError) {
         toast.error(t("credential.file_too_large"));
       } else if (error instanceof UnsupportedUploadTypeError) {
         toast.error(t("credential.file_type_unsupported"));
+      } else if (
+        isPdf &&
+        error instanceof CredentialUploadError &&
+        error.status === 422
+      ) {
+        toast.error(t("credential.pdf_upload_rejected"));
+      } else if (error instanceof CredentialUploadError) {
+        toast.error(t("credential.upload_failed"));
       } else {
         toast.error(t("credential.ocr_read_failed"));
       }
@@ -327,6 +404,7 @@ export default function CredentialNew() {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (ocrLock.current) return;
     if (ownerState !== "ready") {
       toast.error(t("credential.employee_required"));
       return;
@@ -361,7 +439,9 @@ export default function CredentialNew() {
               contentType: prepared.contentType,
             },
           }),
-        putUpload: putPreparedUpload,
+        putUpload: async (grant, prepared) => {
+          await putPreparedUpload(grant, prepared);
+        },
         createCredential: async (uploadedFile) => {
           const credential = await createCredential.mutateAsync({
             data: {
@@ -398,6 +478,13 @@ export default function CredentialNew() {
         underlyingError instanceof UnsupportedUploadTypeError
       ) {
         toast.error(t("credential.file_type_unsupported"));
+      } else if (
+        submissionError?.stage === "upload" &&
+        selectedFile?.type === "application/pdf" &&
+        underlyingError instanceof CredentialUploadError &&
+        underlyingError.status === 422
+      ) {
+        toast.error(t("credential.pdf_upload_rejected"));
       } else if (submissionError?.stage === "upload") {
         toast.error(t("credential.upload_failed"));
       } else if (submissionError?.stage === "cleanup") {
@@ -415,6 +502,7 @@ export default function CredentialNew() {
     if (createdCredentialId !== null) {
       setOcrUploadedFile(null);
       setOcrResult(null);
+      setPdfReviewStatus("idle");
       setSelectedFile(null);
       toast.success(t("credential.create_success"));
       setLocation(`/credentials/${createdCredentialId}`);
@@ -581,12 +669,36 @@ export default function CredentialNew() {
                     t={t}
                   />
                   {selectedFile?.type === "application/pdf" && (
-                    <p
-                      className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm leading-6"
-                      role="status"
-                    >
-                      {t("credential.pdf_processing_notice")}
-                    </p>
+                    <div className="space-y-3">
+                      <p className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm leading-6">
+                        {t("credential.pdf_processing_notice")}
+                      </p>
+                      {(ocrStage === "upload" || ocrStage === "read") && (
+                        <p
+                          className="flex items-center gap-2 text-sm leading-6 text-muted-foreground"
+                          role="status"
+                          aria-live="polite"
+                        >
+                          <Loader2
+                            className="h-4 w-4 shrink-0 animate-spin"
+                            aria-hidden="true"
+                          />
+                          {t(
+                            ocrStage === "upload"
+                              ? "credential.ocr_uploading"
+                              : "credential.pdf_reading",
+                          )}
+                        </p>
+                      )}
+                      {pdfReviewStatus === "no-text" && !ocrBusy && (
+                        <p
+                          className="text-sm leading-6 text-muted-foreground"
+                          role="status"
+                        >
+                          {t("credential.pdf_text_unavailable")}
+                        </p>
+                      )}
+                    </div>
                   )}
                   {selectedFile &&
                     selectedFile.type !== "application/pdf" &&

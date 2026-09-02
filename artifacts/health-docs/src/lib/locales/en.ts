@@ -519,10 +519,10 @@ export const en = {
     certificate_number: "Certificate Number",
     issue_date: "Issue Date",
     expiry_date: "Expiry Date",
-    file: "Attached Photo",
+    file: "Attached Document",
     notes: "Notes",
     file_too_large:
-      "The photo is too large — the maximum is 8 MB. Take a smaller photo or reduce its resolution, then try again.",
+      "The document is too large — the maximum is 8 MiB. Choose a smaller file or reduce the image resolution, then try again.",
     file_type_unsupported:
       "Choose a JPG or PNG photo, or a PDF of up to 5 pages and 8 MiB.",
     document_preview: "Document Preview",
@@ -531,11 +531,11 @@ export const en = {
     pdf_open_hint:
       'Inline PDF preview isn\'t supported in this browser — use "Open File" to view it',
     upload_failed:
-      "Could not upload the photo — check your connection and try again",
+      "Could not upload the document — check your connection and try again",
     add_subtitle:
-      "Enter a new professional certificate or license; attach a photo when secure uploads are available.",
-    uploading_title: "Uploading photo…",
-    uploading_hint: "Keep this page open until the photo upload is complete",
+      "Enter a new professional certificate or license; attach an image or PDF when secure uploads are available.",
+    uploading_title: "Uploading document…",
+    uploading_hint: "Keep this page open until the document upload is complete",
     saving_title: "Saving document…",
     cleanup_failed:
       "The document was not saved and cleanup could not be confirmed. Do not retry yet; contact your administrator.",
@@ -548,28 +548,33 @@ export const en = {
     uploading_for: "Uploading for employee",
     owner_loading: "Loading the selected employee…",
     private_upload_notice:
-      "The selected photo stays on this device until you save or explicitly choose document reading. After upload, it remains private and can be viewed only by you and authorized staff within your facility.",
+      "Selected images stay on this device until you save or choose document reading. Selecting a PDF sends it immediately to the platform server for temporary security review and local text extraction, without storing a file. It is written to private storage only after you choose Save Document, where only you and authorized staff in your facility can view it.",
     manual_upload_hint:
       "Optional: attach a JPG/PNG image or PDF up to 8 MiB. PDFs may contain up to 5 pages.",
     pdf_processing_notice:
-      "PDFs are rebuilt as private image-only copies; selectable text, annotations and interactive features are not retained. Encrypted files, attachments, forms and digital signatures are rejected. Review every page after upload and keep your original. PDF OCR is not enabled.",
-    upload_checking_title: "Checking secure photo upload availability",
+      "The platform automatically tries to extract readable PDF text inside its own server, without sending it to an external provider. Raw text is not retained and suggestions are never applied before your review. The PDF is then rebuilt as a private image-only copy; encrypted files, forms and digital signatures are rejected. Keep your original.",
+    pdf_reading: "Extracting safe text from the PDF…",
+    pdf_text_unavailable:
+      "The PDF was uploaded securely, but it contained no extractable text. Enter the details manually; image-only scans need enabled image reading or manual entry.",
+    pdf_upload_rejected:
+      "The PDF failed the security check. Use a flattened, unencrypted copy without forms or digital signatures, keep the original, and try again.",
+    upload_checking_title: "Checking secure document upload availability",
     upload_checking_desc:
       "You can continue entering the details; file selection will appear when the check is complete.",
-    upload_unavailable_title: "Photo attachments are temporarily unavailable",
+    upload_unavailable_title: "Document attachments are temporarily unavailable",
     upload_unavailable_desc:
-      "You can save the credential record without a photo. Photo selection remains disabled until secure scanning and storage are enabled by an administrator.",
+      "You can save the credential record without an attachment. File selection remains disabled until secure scanning and storage are enabled by an administrator.",
     record_without_attachment_hint:
-      "Optional: save the credential record without an attachment now, then add the photo after uploads are enabled.",
+      "Optional: save the credential record without an attachment now, then add the document after uploads are enabled.",
     select_type: "Select document type",
     english: "English",
     arabic: "Arabic",
     save_document: "Save Document",
     file_ready:
-      "Selected locally — use document reading or save when you are ready",
-    replace_file: "Replace Photo",
-    remove_file: "Remove Photo",
-    choose_file: "Take or Choose a Photo",
+      "Selected locally — review any suggestions or save when you are ready",
+    replace_file: "Replace File",
+    remove_file: "Remove File",
+    choose_file: "Take a Photo or Choose a File",
     ocr_title: "Optional document reading",
     ocr_disclosure:
       "Only when you choose Read document, the sanitized private image is sent to your organization's approved OCR processor. Always review the suggestions before using them.",

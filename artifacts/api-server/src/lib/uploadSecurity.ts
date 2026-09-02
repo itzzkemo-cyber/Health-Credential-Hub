@@ -16,6 +16,7 @@ import {
   checkPdfSanitizerReadiness,
   PdfRejectedError,
   sanitizePdfInChild,
+  sanitizePdfWithTextInChild,
 } from "./pdfSanitizer";
 // sharp 0.35.0 ships lib/index.d.ts but its export map omits a `types`
 // condition. Keep the required runtime pinned while locally constraining the
@@ -108,6 +109,8 @@ export interface ProcessedUpload {
   bytes: Buffer;
   contentType: AllowedUploadContentType;
   sha256: string;
+  /** Ephemeral source text from a PDF; never persist or log this value. */
+  extractedText?: string;
 }
 
 export type RasterSanitizerRunner = (
@@ -118,6 +121,8 @@ export type RasterSanitizerRunner = (
 export interface ProcessUploadSecurityOptions extends ScanUploadForMalwareOptions {
   /** Explicit injection point for bounded PDF failure-path tests. */
   pdfSanitizer?: (bytes: Buffer) => Promise<Buffer>;
+  /** Same-origin, authenticated review flow only; text stays ephemeral. */
+  extractPdfText?: boolean;
   /** Explicit injection point for bounded failure-path tests. */
   rasterSanitizer?: RasterSanitizerRunner;
   /** Production always uses 15 seconds; tests may shorten the deadline. */
@@ -647,9 +652,12 @@ export async function processUploadSecurity(
     // Defender profile must use the same fail-closed image-only PDF rebuild.
     return withUploadSecuritySlot(async () => {
       try {
-        const processedBytes = await (
-          options.pdfSanitizer ?? sanitizePdfInChild
-        )(bytes);
+        const processed = options.pdfSanitizer
+          ? { bytes: await options.pdfSanitizer(bytes), text: "" }
+          : options.extractPdfText
+            ? await sanitizePdfWithTextInChild(bytes)
+            : { bytes: await sanitizePdfInChild(bytes), text: "" };
+        const processedBytes = processed.bytes;
         if (
           !Buffer.isBuffer(processedBytes) ||
           processedBytes.length < 1 ||
@@ -662,6 +670,7 @@ export async function processUploadSecurity(
           bytes: processedBytes,
           contentType: "application/pdf" as const,
           sha256: createHash("sha256").update(processedBytes).digest("hex"),
+          ...(processed.text ? { extractedText: processed.text } : {}),
         };
       } catch (error) {
         if (

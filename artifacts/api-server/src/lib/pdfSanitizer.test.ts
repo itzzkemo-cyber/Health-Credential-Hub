@@ -12,10 +12,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import QRCode from "qrcode";
 import {
   checkPdfSanitizerReadiness,
+  PDF_SANITIZER_MAX_TEXT_BYTES,
   pdfWorkerEnvironment,
   PdfRejectedError,
   PdfUnavailableError,
   sanitizePdfInChild,
+  sanitizePdfWithTextInChild,
 } from "./pdfSanitizer";
 
 async function fixture(pages = 1, width = 320, height = 240): Promise<Buffer> {
@@ -86,6 +88,32 @@ describe("bounded PDF child sanitizer", () => {
       ).toBe(360);
     }
   }, 20_000);
+
+  it("returns bounded source text separately without retaining it in the rebuilt PDF", async () => {
+    const result = await sanitizePdfWithTextInChild(await fixture(2));
+
+    expect(result.text).toContain("TEST CREDENTIAL 1");
+    expect(result.text).toContain("TEST CREDENTIAL 2");
+    expect(result.bytes.includes(Buffer.from("TEST CREDENTIAL"))).toBe(false);
+  });
+
+  it("truncates JSON-expanding source text without rejecting a safe PDF", async () => {
+    const document = await PDFDocument.create({ updateMetadata: false });
+    document.addPage([320, 240]).drawText('"\\'.repeat(20_000), {
+      x: 10,
+      y: 200,
+      size: 6,
+    });
+
+    const result = await sanitizePdfWithTextInChild(
+      Buffer.from(await document.save({ useObjectStreams: true })),
+    );
+
+    expect(Buffer.byteLength(result.text, "utf8")).toBeLessThanOrEqual(
+      PDF_SANITIZER_MAX_TEXT_BYTES,
+    );
+    expect(result.bytes.subarray(0, 8).toString("ascii")).toMatch(/^%PDF-1\./);
+  });
 
   it("rejects JavaScript stored in compressed objects instead of copying it", async () => {
     const input = await modifyFixture((document) => {
@@ -186,7 +214,7 @@ describe("bounded PDF child sanitizer", () => {
     );
   });
 
-  it("rejects external URI actions", async () => {
+  it("discards a strictly typed hyperlink annotation from the rebuilt PDF", async () => {
     const input = await modifyFixture((document) => {
       document.getPages()[0].node.set(
         PDFName.of("Annots"),
@@ -199,6 +227,95 @@ describe("bounded PDF child sanitizer", () => {
               S: "URI",
               URI: PDFString.of("https://example.invalid/never-requested"),
             },
+          },
+        ]),
+      );
+    });
+    const result = await sanitizePdfInChild(input);
+    await expect(
+      PDFDocument.load(result, { updateMetadata: false }),
+    ).resolves.toBeDefined();
+    expect(result.includes(Buffer.from("/URI"))).toBe(false);
+    expect(result.includes(Buffer.from("example.invalid"))).toBe(false);
+  });
+
+  it("rejects a link annotation carrying a JavaScript action", async () => {
+    const input = await modifyFixture((document) => {
+      document.getPages()[0].node.set(
+        PDFName.of("Annots"),
+        document.context.obj([
+          {
+            Type: "Annot",
+            Subtype: "Link",
+            Rect: [0, 0, 20, 20],
+            A: { S: "JavaScript", JS: "app.alert('blocked')" },
+          },
+        ]),
+      );
+    });
+    await expect(sanitizePdfInChild(input)).rejects.toBeInstanceOf(
+      PdfRejectedError,
+    );
+  });
+
+  it("rejects link destinations rather than relying on renderer discard", async () => {
+    const input = await modifyFixture((document) => {
+      document.getPages()[0].node.set(
+        PDFName.of("Annots"),
+        document.context.obj([
+          {
+            Type: "Annot",
+            Subtype: "Link",
+            Rect: [0, 0, 20, 20],
+            Dest: [document.getPages()[0].ref, "Fit"],
+          },
+        ]),
+      );
+    });
+    await expect(sanitizePdfInChild(input)).rejects.toBeInstanceOf(
+      PdfRejectedError,
+    );
+  });
+
+  it("rejects a URI link that hides an active graph in an extra action key", async () => {
+    const input = await modifyFixture((document) => {
+      document.getPages()[0].node.set(
+        PDFName.of("Annots"),
+        document.context.obj([
+          {
+            Type: "Annot",
+            Subtype: "Link",
+            Rect: [0, 0, 20, 20],
+            A: {
+              S: "URI",
+              URI: PDFString.of("https://example.invalid/safe-shape"),
+              IsMap: { S: "JavaScript", JS: "app.alert('blocked')" },
+            },
+          },
+        ]),
+      );
+    });
+    await expect(sanitizePdfInChild(input)).rejects.toBeInstanceOf(
+      PdfRejectedError,
+    );
+  });
+
+  it("rejects indirect URI actions instead of skipping referenced graphs", async () => {
+    const input = await modifyFixture((document) => {
+      const action = document.context.register(
+        document.context.obj({
+          S: "URI",
+          URI: PDFString.of("https://example.invalid/indirect"),
+        }),
+      );
+      document.getPages()[0].node.set(
+        PDFName.of("Annots"),
+        document.context.obj([
+          {
+            Type: "Annot",
+            Subtype: "Link",
+            Rect: [0, 0, 20, 20],
+            A: action,
           },
         ]),
       );

@@ -17,7 +17,7 @@ Every enabled integration below must use the reviewed production controls.
 | Supabase private Storage (S3 API) | Bounded JPEG/PNG rebuilding and flat PDF image-only reconstruction, private reads and application ACL checks. | The operator configures the private bucket/MIME limits and injects server-only S3 keys into Render. | **Controlled pilot only.** Original bytes are not persisted. Active/encrypted/signed/form PDFs and general files are rejected. Reconstruction is not antivirus certification; worker isolation, Frankfurt transfer, free-tier SLA, backup, retention, orphan cleanup and incident controls remain approval gates. |
 | Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                                 | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | **No-go for real documents in this release.** Signed direct PUT has no provider-ingress byte cap and no malware quarantine. Keep synthetic-only until bounded ingress, AV/quarantine, orphan cleanup, and restore drills are accepted.                                                                                |
 | Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.                       | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | **No-go for real documents in this release.** Keep disabled until the same bounded-ingress, AV/quarantine, lifecycle, tenancy, IAM/CORS, and synthetic restore gates pass.                                                                                                                                            |
-| Gemini OCR                         | Authenticated users can send an authorized stored file to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields.               | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                        |
+| Gemini OCR                         | Authenticated users can send an authorized stored JPEG/PNG image to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields. PDF suggestions use the separate local worker and never call Gemini. | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint. | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete. |
 | Resend email                       | Password resets, invitations, employee activation email OTP, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API. | The Render manifest declares operator-supplied `EMAIL_FROM` and `RESEND_API_KEY`; it cannot create or verify the sender domain. | **Required for employee invitation and activation.** Fail-closed until configured. Approve Resend retention, region/subprocessors, tracking, bounce handling, delivery reconciliation, quotas and incident handling. |
 | Signed automation webhook          | A PostgreSQL transactional outbox and optional HMAC-signed worker emit three minimized credential lifecycle events.                                  | Partly. The bootstrap provisions or updates an inert one-shot Cloud Run Job, dedicated worker/scheduler identities, a regional HMAC secret, and a paused five-minute Scheduler job. It does not provision the receiver. | Disabled by default. Supports explicit facility routing, exact-host/public-IP enforcement, idempotency, bounded timeout, retry/backoff, stale-claim recovery, dead-letter retention, and no document/token fields. The recipient remains an operator-approved subprocessor and must verify signatures/replay windows. |
 
@@ -37,21 +37,32 @@ standard integration is implemented or claimed here.
    its session, CSRF protections, exact content type, byte count, and
    create-only header. The request body is retained only in bounded process
    memory; it is not written to Supabase or a local quarantine file.
+   Selecting a PDF first uses an explicit review header: the server processes
+   it in memory, returns only bounded field suggestions, releases the temporary
+   grant, and writes no object. Saving later obtains a fresh grant and repeats
+   the normal sanitizer path before any private object is stored.
 3. The server verifies the signature, decodes with strict warning, pixel,
    channel, frame, dimension, concurrency, and timeout limits, corrects
    orientation, and rebuilds a new JPEG without EXIF, GPS, ICC, XMP, comments,
    animation, or bytes appended to the original container.
    PDF follows a separate child-process path: at most 5 pages/8 MiB, decoded
    with local packaged libraries and rebuilt into a new image-only PDF. Active,
-   encrypted, signed and form PDFs are rejected. Selectable text is lost; the
-   UI discloses this in Arabic/English. No new external processor is contacted.
+   encrypted, signed and form PDFs are rejected. For an explicit PDF review
+   request, bounded source text is extracted in the same local worker before
+   reconstruction and converted to review-only field suggestions. The raw text
+   and both document copies are ephemeral in that review request and are never
+   stored, logged, audited, or returned. Selectable
+   text is lost from the saved image-only copy; the UI discloses this in
+   Arabic/English. No new external processor is contacted.
 4. Only the rebuilt JPEG/PDF is written to the private bucket. The server reads it
    back, checks type, size, signature, and SHA-256, then atomically updates the
    still-unclaimed grant to the rebuilt metadata. A failed write, verification,
    or grant update triggers object deletion and a fail-closed response.
 5. Credential linkage revalidates the stored object and consumes the grant.
-   Private reads and image-only OCR use the existing owner and server-side
-   facility/team scope checks. The browser never receives Supabase S3 keys.
+   Private reads and optional external image OCR use the existing owner and
+   server-side facility/team scope checks. Local PDF suggestions arrive only in
+   the authenticated upload response with `private, no-store`, and the browser
+   never receives Supabase S3 keys.
 
 This path accepts only `image/jpeg`, `image/png` and bounded `application/pdf`.
 SVG, GIF, WebP, AVIF,
@@ -70,8 +81,10 @@ limits and deployment gates. Arbitrary file intake is not supported.
   screenshots, logs, CI, or chat.
 - The original browser filename stays only in the short-lived PostgreSQL grant;
   it is never an object key or log field. Object names are random UUIDs.
-- The owner-only cleanup endpoint covers failed form completion; automated
-  orphan lifecycle is still an operator gate. The encrypted backup and local
+- The owner-only cleanup endpoint covers failed form completion and accepts a
+  no-op replay when no actor-owned grant remains. Its `204` response is not
+  proof that provider storage has no orphan; automated reconciliation and
+  orphan lifecycle are still operator gates. The encrypted backup and local
   restore drill in [`BACKUP_RESTORE.md`](BACKUP_RESTORE.md) preserve object bytes
   and ACL metadata but do not constitute a live Supabase backup or provider
   restore. Scheduling, real-provider evidence, capacity alerts and incident
@@ -258,7 +271,8 @@ no-store, max-age=0`; only explicitly public objects may use cacheable
    **Apply reviewed suggestions**, and OCR never saves or verifies a credential.
    The user must still correct fields and submit the normal application form.
 
-The external request contains the full credential image/PDF, which can expose
+The external request contains the full credential image (PDF is not accepted by
+this external endpoint), which can expose
 names, identifiers, license/certificate numbers, dates, photographs, and
 incidental health data, plus the system extraction prompt. Data minimization is
 currently limited to the file size/type policy and browser image downscaling;

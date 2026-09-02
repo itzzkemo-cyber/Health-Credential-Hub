@@ -30,6 +30,7 @@ import {
 import { getCredentialScopedUsers, logAudit } from "../lib/helpers";
 import { rateLimit } from "../lib/rateLimit";
 import { safeErrorLogFields } from "../lib/safeError";
+import { extractLocalPdfCredentialSuggestions } from "../lib/localPdfExtraction";
 import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
 import { ObjectPermission } from "../lib/objectAcl";
 import {
@@ -74,6 +75,8 @@ const localUploadRateLimit = rateLimit({
   windowMs: 10 * 60_000,
 });
 export const MAX_ACTIVE_LOCAL_UPLOADS = 1;
+const UPLOAD_CLEANUP_DISPOSITION_HEADER = "X-Upload-Cleanup-Disposition";
+const UPLOAD_CLEANUP_CONFIRMED = "confirmed";
 let activeLocalUploads = 0;
 
 function requireServerMediatedUploadProvider(
@@ -192,12 +195,71 @@ router.put(
     let writeAttempted = false;
     let finalized = false;
     let storedObjectFile: StoredObjectFile | undefined;
+    const localPdfReviewRequested =
+      contentType === "application/pdf" &&
+      req.get("x-healthdocs-pdf-text") === "review";
     try {
       // PDFs are rebuilt as image-only PDFs; raster input becomes fresh JPEG.
       // The legacy Windows
       // provider returns only bytes that received its configured verdict.
       // Persist only the processor result, never the browser-supplied buffer.
-      const processed = await processUploadSecurity(bytes, contentType);
+      const processed = await processUploadSecurity(bytes, contentType, {
+        extractPdfText: localPdfReviewRequested,
+      });
+
+      if (localPdfReviewRequested) {
+        const localExtraction = processed.extractedText
+          ? extractLocalPdfCredentialSuggestions(processed.extractedText)
+          : null;
+        try {
+          const rolledBack = await rollbackUploadGrantProcessing(
+            grant.id,
+            user.id,
+            objectPath,
+            processingToken,
+          );
+          if (!rolledBack) {
+            throw new Error("Local PDF review grant release lost ownership");
+          }
+          const removed = await db
+            .delete(uploadGrantsTable)
+            .where(
+              and(
+                eq(uploadGrantsTable.id, grant.id),
+                eq(uploadGrantsTable.requestedBy, user.id),
+                eq(uploadGrantsTable.objectPath, objectPath),
+                eq(uploadGrantsTable.status, "pending"),
+              ),
+            )
+            .returning({ id: uploadGrantsTable.id });
+          if (removed.length !== 1) {
+            throw new Error("Local PDF review grant removal was not confirmed");
+          }
+        } catch (cleanupError) {
+          req.log.error(
+            safeErrorLogFields(cleanupError),
+            "Failed to remove ephemeral local PDF review grant",
+          );
+          res.status(500).json({ error: "Failed to review PDF" });
+          return;
+        }
+
+        // Review is deliberately ephemeral: neither the original nor rebuilt
+        // bytes are written to object storage. Saving the credential later
+        // performs a fresh, normal upload and sanitizer pass.
+        res.setHeader("Cache-Control", "private, no-store, max-age=0");
+        res.setHeader(
+          UPLOAD_CLEANUP_DISPOSITION_HEADER,
+          UPLOAD_CLEANUP_CONFIRMED,
+        );
+        if (localExtraction) {
+          res.status(200).json({ localExtraction });
+        } else {
+          res.status(204).end();
+        }
+        return;
+      }
+
       writeAttempted = true;
       await objectStorageService.writeServerMediatedObject(
         objectPath,
@@ -339,6 +401,40 @@ router.put(
           req.log.error(
             safeErrorLogFields(cleanupError),
             "Failed to release rejected upload grant",
+          );
+          res.status(500).json({ error: "Failed to store object" });
+          return;
+        }
+      }
+
+      // The grant rollback and, when a write was attempted, durable-object
+      // cleanup both completed. Tell the same-origin client it must not issue
+      // a second DELETE that would turn this terminal rejection into a
+      // misleading cleanup failure. Do not emit this header from any branch
+      // where cleanup ownership or provider deletion remains uncertain.
+      if (!(error instanceof MalwareQuarantineCleanupError)) {
+        try {
+          const removed = await db
+            .delete(uploadGrantsTable)
+            .where(
+              and(
+                eq(uploadGrantsTable.id, grant.id),
+                eq(uploadGrantsTable.requestedBy, user.id),
+                eq(uploadGrantsTable.objectPath, objectPath),
+                eq(uploadGrantsTable.status, "pending"),
+              ),
+            )
+            .returning({ id: uploadGrantsTable.id });
+          if (removed.length === 1) {
+            res.setHeader(
+              UPLOAD_CLEANUP_DISPOSITION_HEADER,
+              UPLOAD_CLEANUP_CONFIRMED,
+            );
+          }
+        } catch (cleanupError) {
+          req.log.error(
+            safeErrorLogFields(cleanupError),
+            "Failed to remove rejected upload grant",
           );
           res.status(500).json({ error: "Failed to store object" });
           return;
@@ -522,7 +618,12 @@ router.delete(
             )
             .for("update")
         )[0];
-        if (!grant) return { kind: "not_found" as const };
+        // A valid cleanup replay with no actor-owned grant is a successful
+        // no-op. This keeps the endpoint idempotent when the server already
+        // removed a rejected/review grant but the browser did not receive the
+        // first response. It also keeps missing and foreign grants opaque: no
+        // provider lookup, credential query, deletion or audit occurs here.
+        if (!grant) return { kind: "absent" as const };
         // The sanitizer owns both the grant and its object while processing.
         // Returning the same 404 avoids an existence/state oracle and ensures
         // cleanup cannot delete bytes underneath an active processing attempt.
@@ -542,9 +643,17 @@ router.delete(
         )[0];
         if (linkedCredential) return { kind: "not_found" as const };
 
-        const objectFile =
-          await objectStorageService.getObjectEntityFile(objectPath);
-        await objectStorageService.deleteObject(objectFile);
+        try {
+          const objectFile =
+            await objectStorageService.getObjectEntityFile(objectPath);
+          await objectStorageService.deleteObject(objectFile);
+        } catch (error) {
+          // The locked, actor-owned, unlinked grant is the authority for this
+          // cleanup. If its object is already absent, finishing the grant and
+          // audit cleanup is idempotent and does not reveal another actor's
+          // object state.
+          if (!(error instanceof ObjectNotFoundError)) throw error;
+        }
         await tx
           .delete(uploadGrantsTable)
           .where(

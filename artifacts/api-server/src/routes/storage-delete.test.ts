@@ -107,7 +107,10 @@ vi.mock("@workspace/db", () => {
           })),
           delete: vi.fn((table: unknown) => ({
             where: vi.fn(async () => {
-              if (table === uploadGrantsTable) state.deletedGrant = true;
+              if (table === uploadGrantsTable) {
+                state.deletedGrant = true;
+                state.grant = null;
+              }
             }),
           })),
           insert: vi.fn((table: unknown) => ({
@@ -301,21 +304,33 @@ describe("unlinked private upload deletion", () => {
     ["cross-facility manager", "hospital_admin", 8],
     ["global system administrator", "system_admin", 9],
   ])(
-    "returns the same 404 to a non-owner %s",
+    "returns an opaque idempotent 204 to a non-owner %s",
     async (_label, role, facilityId) => {
       state.actor = { ...state.actor, id: 99, role, facilityId };
 
       const response = await remove();
 
-      expect(response.status).toBe(404);
-      await expect(response.json()).resolves.toEqual({
-        error: "Upload not found",
-      });
+      expect(response.status).toBe(204);
+      expect(response.headers.get("x-upload-cleanup-disposition")).toBeNull();
       expect(state.getObjectEntityFile).not.toHaveBeenCalled();
       expect(state.deleteObject).not.toHaveBeenCalled();
       expect(state.deletedGrant).toBe(false);
+      expect(state.audit).toBeNull();
     },
   );
+
+  it("treats a valid cleanup replay with no owned grant as a no-op", async () => {
+    state.grant = null;
+
+    const response = await remove();
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("x-upload-cleanup-disposition")).toBeNull();
+    expect(state.getObjectEntityFile).not.toHaveBeenCalled();
+    expect(state.deleteObject).not.toHaveBeenCalled();
+    expect(state.deletedGrant).toBe(false);
+    expect(state.audit).toBeNull();
+  });
 
   it.each(["active", "soft-deleted"])(
     "retains an upload linked by an %s credential row",
@@ -339,18 +354,43 @@ describe("unlinked private upload deletion", () => {
     },
   );
 
-  it("uses the same 404 for invalid identifiers and storage absence", async () => {
+  it("uses 404 for invalid identifiers", async () => {
     expect((await remove("not-a-valid-upload-id")).status).toBe(404);
+  });
 
+  it("idempotently removes an owned unlinked grant when its object is absent", async () => {
     state.getObjectEntityFile.mockRejectedValue(
       new state.ObjectNotFoundError(),
     );
     const missing = await remove();
-    expect(missing.status).toBe(404);
-    await expect(missing.json()).resolves.toEqual({
-      error: "Upload not found",
-    });
+    expect(missing.status).toBe(204);
+    expect(state.deleteObject).not.toHaveBeenCalled();
+    expect(state.deletedGrant).toBe(true);
+    expect(state.audit).toEqual(
+      expect.objectContaining({
+        userId: 7,
+        action: "Deleted unlinked private upload",
+      }),
+    );
+  });
+
+  it("accepts a replay after a successful owned cleanup without storage access", async () => {
+    const first = await remove();
+    expect(first.status).toBe(204);
+    expect(state.grant).toBeNull();
+
+    state.getObjectEntityFile.mockClear();
+    state.deleteObject.mockClear();
+    state.deletedGrant = false;
+    state.audit = null;
+
+    const replay = await remove();
+
+    expect(replay.status).toBe(204);
+    expect(state.getObjectEntityFile).not.toHaveBeenCalled();
+    expect(state.deleteObject).not.toHaveBeenCalled();
     expect(state.deletedGrant).toBe(false);
+    expect(state.audit).toBeNull();
   });
 
   it("rejects a stale or deactivated session before storage access", async () => {
