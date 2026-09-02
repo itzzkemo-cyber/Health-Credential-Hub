@@ -50,8 +50,8 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-background">
-      <div className="flex min-h-[calc(100dvh-0px)] flex-col md:flex-row">
+    <div className="flex flex-1 flex-col bg-background">
+      <div className="flex flex-1 flex-col md:flex-row">
         {/* Left side - Brand/Info */}
         <div className="hidden md:flex md:w-1/2 lg:w-[60%] bg-primary/5 flex-col justify-center items-center p-12 relative overflow-hidden">
           <div className="absolute inset-0 bg-primary/10 [mask-image:linear-gradient(to_bottom,white,transparent)] pointer-events-none" />

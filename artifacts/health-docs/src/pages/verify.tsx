@@ -5,8 +5,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ShieldCheck, ShieldAlert, FileText, CheckCircle2, Building2, Calendar, Clock3 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
-type Translator = (key: string) => string;
-
 type VerifiedCredentialData = {
   verificationState: "verified";
   type: string;
@@ -33,20 +31,6 @@ export function hasVerifiedCredentialData(
   );
 }
 
-export function VerificationFooter({ t }: { t: Translator }) {
-  return (
-    <footer className="mt-8 space-y-1 text-center text-xs text-muted-foreground">
-      <p>{t("verify_page.powered_by")} &copy; {new Date().getFullYear()}</p>
-      <p>
-        {t("verify_page.developed_by")}{" "}
-        <bdi lang="en" dir="ltr" className="font-semibold text-foreground/80">
-          ABDULKARIM ALHEJAILI
-        </bdi>
-      </p>
-    </footer>
-  );
-}
-
 export default function VerifyQR() {
   const [, params] = useRoute("/verify/:token");
   const { t, isRTL } = useLanguage();
@@ -60,7 +44,7 @@ export default function VerifyQR() {
   const isExpired = isVerified && verData.status === "expired";
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 py-12 px-4 flex flex-col items-center">
+    <div className="flex flex-1 flex-col items-center bg-slate-50 px-4 py-12 dark:bg-slate-950">
       
       {/* Government-like header */}
       <div className="w-full max-w-md flex flex-col items-center mb-8">
@@ -169,8 +153,6 @@ export default function VerifyQR() {
           </Card>
         ) : null}
       </div>
-      
-      <VerificationFooter t={t} />
     </div>
   );
 }

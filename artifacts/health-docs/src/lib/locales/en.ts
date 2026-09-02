@@ -42,6 +42,11 @@ export const en = {
     go_home: "Return to dashboard",
     user: "User",
   },
+  footer: {
+    aria_label: "Site footer",
+    powered_by: "Powered by Watha'iqi Health",
+    developed_by: "Developed by:",
+  },
   mobile: {
     home: "Home",
     schedule: "Schedule",
@@ -525,8 +530,6 @@ export const en = {
     issue_date: "Issue Date",
     expiry_date: "Expiry Date",
     verified_on: "Verified on",
-    powered_by: "Powered by Watha'iqi Health",
-    developed_by: "Developed by:",
   },
   credential: {
     add_new: "Add Credential",

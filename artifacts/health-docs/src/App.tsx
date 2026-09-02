@@ -21,6 +21,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { LanguageProvider } from "@/lib/i18n";
 import { useLanguage } from "@/lib/language-context";
 import { AppShell } from "@/components/layout/Shell";
+import { PublicPageLayout } from "@/components/layout/PublicPageLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { withPasswordChangeState } from "@/lib/password-change-state";
@@ -188,12 +189,36 @@ const queryClient = new QueryClient({
 function Router() {
   return (
     <Switch>
-      <Route path="/login" component={Login} />
-      <Route path="/register" component={Register} />
-      <Route path="/forgot-password" component={ForgotPassword} />
-      <Route path="/reset-password" component={ResetPassword} />
-      <Route path="/2fa-challenge" component={TwoFactorChallenge} />
-      <Route path="/verify/:token" component={VerifyQR} />
+      <Route path="/login">
+        <PublicPageLayout>
+          <Login />
+        </PublicPageLayout>
+      </Route>
+      <Route path="/register">
+        <PublicPageLayout>
+          <Register />
+        </PublicPageLayout>
+      </Route>
+      <Route path="/forgot-password">
+        <PublicPageLayout>
+          <ForgotPassword />
+        </PublicPageLayout>
+      </Route>
+      <Route path="/reset-password">
+        <PublicPageLayout>
+          <ResetPassword />
+        </PublicPageLayout>
+      </Route>
+      <Route path="/2fa-challenge">
+        <PublicPageLayout>
+          <TwoFactorChallenge />
+        </PublicPageLayout>
+      </Route>
+      <Route path="/verify/:token">
+        <PublicPageLayout>
+          <VerifyQR />
+        </PublicPageLayout>
+      </Route>
 
       <Route>
         <AppShell>

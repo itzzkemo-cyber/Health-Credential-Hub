@@ -301,7 +301,7 @@ export default function Register() {
   ) : null;
 
   return (
-    <main className="min-h-[100dvh] bg-background px-4 py-6 sm:px-6 sm:py-10">
+    <main className="flex-1 bg-background px-4 py-6 sm:px-6 sm:py-10">
       <div className="mx-auto w-full max-w-md space-y-6">
         <div className="flex items-center justify-between gap-3">
           <Link

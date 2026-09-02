@@ -74,7 +74,7 @@ export default function ResetPassword() {
   const ArrowIcon = isRTL ? ArrowRight : ArrowLeft;
 
   return (
-    <div className="min-h-[100dvh] flex flex-col items-center justify-center bg-background px-4 py-10">
+    <div className="flex flex-1 flex-col items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-md space-y-8">
         <div className="flex flex-col items-center text-center space-y-2">
           <div className="h-16 w-16 bg-primary/10 rounded-full flex items-center justify-center text-primary mb-4">

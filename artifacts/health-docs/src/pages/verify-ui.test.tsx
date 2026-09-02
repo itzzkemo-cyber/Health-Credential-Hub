@@ -1,10 +1,6 @@
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import {
-  hasVerifiedCredentialData,
-  VerificationFooter,
-} from "./verify";
+import { hasVerifiedCredentialData } from "./verify";
 
 describe("public credential verification UI", () => {
   it("treats only complete approved data as publicly verified", () => {
@@ -28,20 +24,5 @@ describe("public credential verification UI", () => {
         type: "BLS",
       }),
     ).toBe(false);
-  });
-
-  it("renders a semantic bilingual footer with the developer credit", () => {
-    const copy: Record<string, string> = {
-      "verify_page.powered_by": "بدعم من وثائقي الصحية",
-      "verify_page.developed_by": "تطوير:",
-    };
-    const html = renderToStaticMarkup(
-      <VerificationFooter t={(key) => copy[key] ?? key} />,
-    );
-
-    expect(html).toContain("<footer");
-    expect(html).toContain("بدعم من وثائقي الصحية");
-    expect(html).toContain("ABDULKARIM ALHEJAILI");
-    expect(html).toContain('<bdi lang="en" dir="ltr"');
   });
 });

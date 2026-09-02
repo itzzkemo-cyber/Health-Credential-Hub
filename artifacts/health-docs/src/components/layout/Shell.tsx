@@ -10,6 +10,7 @@ import {
   type AccountSetupUser,
 } from "@/lib/password-change-state";
 import { mustEnrollPrivilegedMfa } from "@/lib/account-security-state";
+import { AppFooter } from "./AppFooter";
 
 export function AppShell({ children }: { children: ReactNode }) {
   // The session itself is an httpOnly cookie the JS cannot read; this only
@@ -50,8 +51,11 @@ export function AppShell({ children }: { children: ReactNode }) {
     location === "/settings"
   ) {
     return (
-      <main className="flex min-h-[100dvh] w-full items-center justify-center bg-slate-50 p-4 dark:bg-slate-950 sm:p-6">
-        <div className="w-full max-w-2xl">{children}</div>
+      <main className="flex min-h-[100dvh] w-full flex-col bg-slate-50 p-4 dark:bg-slate-950 sm:p-6">
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-full max-w-2xl">{children}</div>
+        </div>
+        <AppFooter />
       </main>
     );
   }
@@ -59,7 +63,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Hide shell for login and verify
   if (location === "/login" || location.startsWith("/verify/")) {
     return (
-      <div className="min-h-[100dvh] bg-background w-full">{children}</div>
+      <div className="flex min-h-[100dvh] w-full flex-col bg-background">
+        <div className="flex flex-1 flex-col">{children}</div>
+        <AppFooter />
+      </div>
     );
   }
 
@@ -70,8 +77,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">
         <AppHeader />
-        <main className="mobile-main-padding flex-1 overflow-y-auto bg-slate-50 p-4 dark:bg-slate-900 md:p-6 lg:pb-6">
-          <div className="mx-auto max-w-6xl w-full">{children}</div>
+        <main className="mobile-main-padding flex flex-1 flex-col overflow-y-auto bg-slate-50 p-4 dark:bg-slate-900 md:p-6 lg:pb-6">
+          <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col">
+            <div className="flex-1">{children}</div>
+            <AppFooter className="mt-10" />
+          </div>
         </main>
         <MobileBottomNav />
       </div>

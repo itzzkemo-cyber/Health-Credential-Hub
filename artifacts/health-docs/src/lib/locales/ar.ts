@@ -42,6 +42,11 @@ export const ar = {
     go_home: "العودة إلى لوحة القيادة",
     user: "مستخدم",
   },
+  footer: {
+    aria_label: "تذييل الموقع",
+    powered_by: "بدعم من وثائقي الصحية",
+    developed_by: "تطوير:",
+  },
   mobile: {
     home: "الرئيسية",
     schedule: "الجدول",
@@ -508,8 +513,6 @@ export const ar = {
     issue_date: "تاريخ الإصدار",
     expiry_date: "تاريخ الانتهاء",
     verified_on: "تم التحقق في",
-    powered_by: "بدعم من وثائقي الصحية",
-    developed_by: "تطوير:",
   },
   credential: {
     add_new: "إضافة وثيقة",
