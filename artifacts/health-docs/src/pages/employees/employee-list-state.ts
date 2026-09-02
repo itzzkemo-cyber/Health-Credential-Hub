@@ -201,8 +201,8 @@ export function requiresEmployeeCreateStepUp(_role: string): boolean {
 }
 
 export function hasEmployeeScopeChangesRequiringStepUp(
-  employee: Pick<Employee, "departmentId" | "supervisorId">,
-  form: Pick<EmployeeEditForm, "departmentId" | "supervisorId">,
+  employee: Pick<Employee, "role" | "departmentId" | "supervisorId">,
+  form: Pick<EmployeeEditForm, "role" | "departmentId" | "supervisorId">,
 ): boolean {
   const departmentId =
     employee.departmentId == null ? "" : String(employee.departmentId);
@@ -210,7 +210,9 @@ export function hasEmployeeScopeChangesRequiringStepUp(
     employee.supervisorId == null ? "" : String(employee.supervisorId);
 
   return (
-    form.departmentId !== departmentId || form.supervisorId !== supervisorId
+    form.role !== employee.role ||
+    form.departmentId !== departmentId ||
+    form.supervisorId !== supervisorId
   );
 }
 

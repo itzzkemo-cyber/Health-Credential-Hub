@@ -14,8 +14,9 @@ export interface TotpAdminDisableInput {
      */
   currentPassword: string;
   /**
+     * Required only when the authenticated administrator is the protected MFA account. Other administrators step up with their password.
      * @minLength 1
      * @maxLength 128
      */
-  code: string;
+  code?: string;
 }

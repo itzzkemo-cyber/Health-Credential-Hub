@@ -7,7 +7,9 @@
  */
 
 export interface Employee {
-  totpEnabled?: boolean;
+  totpEnabled: boolean;
+  /** True only for the protected administrator account. */
+  mfaRequired: boolean;
   id: number;
   name: string;
   nameAr: string;

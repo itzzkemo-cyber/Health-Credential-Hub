@@ -8,6 +8,7 @@ import {
   getAdminMfaStepUpErrorKey,
   readAdminMfaStepUpCredentials,
   readAdminMfaStepUpInput,
+  readAdminStepUpCredentials,
   readCurrentPassword,
   readVerificationCode,
 } from "./admin-mfa-step-up";
@@ -40,6 +41,35 @@ describe("administrator MFA step-up", () => {
       currentPassword: " pass phrase ",
       code: "ABCDE-FGHIJ",
     });
+  });
+
+  it("requires only the current password for an ordinary administrator", () => {
+    expect(readAdminStepUpCredentials(formData("password"), false)).toEqual({
+      currentPassword: "password",
+    });
+    expect(readAdminMfaStepUpInput(formData("password"), 17, false)).toEqual({
+      userId: 17,
+      currentPassword: "password",
+    });
+  });
+
+  it("requires a second factor for the API-designated protected account", () => {
+    expect(readAdminStepUpCredentials(formData("password"), true)).toBeNull();
+    expect(
+      readAdminStepUpCredentials(formData("password", "123456"), true),
+    ).toEqual({ currentPassword: "password", code: "123456" });
+  });
+
+  it("fails closed when the account policy is unavailable", () => {
+    expect(
+      readAdminStepUpCredentials(formData("password"), undefined),
+    ).toBeNull();
+    expect(
+      readAdminStepUpCredentials(
+        formData("password", "ABCDE-FGHIJ"),
+        undefined,
+      ),
+    ).toEqual({ currentPassword: "password", code: "ABCDE-FGHIJ" });
   });
 
   it.each([

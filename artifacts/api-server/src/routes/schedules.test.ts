@@ -43,9 +43,40 @@ vi.mock("../lib/auth", () => ({
         : res.status(403).json({ message: "Forbidden" }),
 }));
 import router, {
+  draftBlockingIssues,
   serializePublishedPersonalSchedule,
   serializePublishedTeamSchedule,
 } from "./schedules";
+
+describe("schedule draft validation policy", () => {
+  it("preserves reviewable planning issues in drafts", () => {
+    expect(
+      draftBlockingIssues([
+        "monthly_shift_limit",
+        "minimum_rest",
+        "consecutive_day_limit",
+        "employee_unavailable",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("still blocks structurally invalid draft assignments", () => {
+    expect(
+      draftBlockingIssues([
+        "monthly_shift_limit",
+        "invalid_assignment",
+        "duplicate_employee_day",
+        "overlapping_shifts",
+        "invalid_adjacent_assignments",
+      ]),
+    ).toEqual([
+      "invalid_assignment",
+      "duplicate_employee_day",
+      "overlapping_shifts",
+      "invalid_adjacent_assignments",
+    ]);
+  });
+});
 
 describe("schedule route authorization and strict input boundaries", () => {
   let server: ReturnType<typeof express.application.listen>;

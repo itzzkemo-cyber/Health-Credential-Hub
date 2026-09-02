@@ -1,25 +1,26 @@
-import { ApiError, type UserRole } from "@workspace/api-client-react";
+import { ApiError } from "@workspace/api-client-react";
 
 export type PrivilegedMfaUser = {
-  role?: UserRole;
+  mfaRequired?: boolean;
   totpEnabled?: boolean;
 };
 
-const PRIVILEGED_ROLES: readonly UserRole[] = [
-  "supervisor",
-  "department_manager",
-  "hospital_admin",
-  "system_admin",
-];
+export function isProtectedMfaAccount(
+  user: PrivilegedMfaUser | null | undefined,
+): boolean {
+  // The immutable protected-account decision is made by the API. The client
+  // must never infer it from a mutable role, name, email, or facility.
+  return user?.mfaRequired === true;
+}
 
 export function mustEnrollPrivilegedMfa(
   user: PrivilegedMfaUser | null | undefined,
 ): boolean {
-  if (!user?.role || !PRIVILEGED_ROLES.includes(user.role)) return false;
+  if (!isProtectedMfaAccount(user)) return false;
 
-  // Privileged profiles fail closed when an older or malformed response omits
-  // the TOTP state. The API remains the authorization source of truth.
-  return user.totpEnabled !== true;
+  // Once the API marks this account as protected, a missing/malformed TOTP
+  // state is treated as unenrolled. The API remains authoritative as well.
+  return user?.totpEnabled !== true;
 }
 
 export function withMfaEnrollmentState<T extends object>(
@@ -33,7 +34,6 @@ export function isMfaEnrollmentRequiredApiError(error: unknown): boolean {
   if (!(error instanceof ApiError) || error.status !== 403) return false;
 
   return (
-    (error.data as { code?: string } | null)?.code ===
-    "MFA_ENROLLMENT_REQUIRED"
+    (error.data as { code?: string } | null)?.code === "MFA_ENROLLMENT_REQUIRED"
   );
 }

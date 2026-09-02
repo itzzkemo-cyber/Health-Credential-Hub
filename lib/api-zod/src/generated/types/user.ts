@@ -33,5 +33,7 @@ export interface User {
   isActive: boolean;
   mustChangePassword: boolean;
   totpEnabled: boolean;
+  /** True only for the immutable administrator account that must enroll and use TOTP. Clients must not infer this policy from name or role. */
+  mfaRequired: boolean;
   createdAt: string;
 }

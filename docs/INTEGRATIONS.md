@@ -473,8 +473,9 @@ this ledger.
 
 Expired/revoked invitations, wrong/expired codes, exhausted attempts, replay,
 recipient injection and parallel verification fail closed. TOTP remains the
-stronger second factor for managers and privileged actions; email activation
-does not replace it. Logs may contain internal invitation/challenge IDs and a
+second factor for the immutable account selected by `PROTECTED_MFA_USER_ID`;
+other administrators use password re-authentication for sensitive operations.
+Email activation does not replace either control. Logs may contain internal invitation/challenge IDs and a
 bounded error class, but never email, OTP, raw invitation token, credentials or
 provider response body.
 

@@ -5,7 +5,6 @@ import {
   getGetMeQueryKey,
   useTotpSetup,
   useTotpVerifySetup,
-  useTotpDisable,
   useTotpRegenerateBackup,
   ApiError,
   type TotpSetupData,
@@ -52,6 +51,51 @@ function apiErrorCode(err: unknown): string | undefined {
   return err instanceof ApiError
     ? (err.data as { code?: string } | null)?.code
     : undefined;
+}
+
+export function ProtectedMfaStatusActions({
+  enabled,
+  setupPending,
+  onEnable,
+  onRegenerate,
+  t,
+}: {
+  enabled: boolean;
+  setupPending: boolean;
+  onEnable: () => void;
+  onRegenerate: () => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4">
+      <Badge
+        variant={enabled ? "default" : "secondary"}
+        className={enabled ? "bg-emerald-600 hover:bg-emerald-600" : ""}
+      >
+        {enabled ? t("twofa.status_on") : t("twofa.status_off")}
+      </Badge>
+      {enabled ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="min-h-11 gap-2"
+          onClick={onRegenerate}
+        >
+          <KeyRound className="h-4 w-4" aria-hidden="true" />
+          {t("twofa.regenerate")}
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          className="min-h-11"
+          onClick={onEnable}
+          disabled={setupPending}
+        >
+          {setupPending ? t("common.loading") : t("twofa.enable")}
+        </Button>
+      )}
+    </div>
+  );
 }
 
 /** Shown once after activation/regeneration — the only time codes are visible. */
@@ -140,13 +184,10 @@ export default function TwoFactorCard() {
   const setupMutation = useTotpSetup({ mutation: { gcTime: 0 } });
   const verifyMutation = useTotpVerifySetup({ mutation: { gcTime: 0 } });
 
-  // --- Disable / regenerate flows ---
-  const [confirmMode, setConfirmMode] = useState<"disable" | "regen" | null>(
-    null,
-  );
+  // --- Backup-code regeneration flow ---
+  const [isRegenerateOpen, setIsRegenerateOpen] = useState(false);
   const confirmFormRef = useRef<HTMLFormElement>(null);
   const confirmPasswordRef = useRef<HTMLInputElement>(null);
-  const disableMutation = useTotpDisable({ mutation: { gcTime: 0 } });
   const regenMutation = useTotpRegenerateBackup({ mutation: { gcTime: 0 } });
 
   const refreshMe = () =>
@@ -243,72 +284,57 @@ export default function TwoFactorCard() {
     );
   };
 
-  const openConfirm = (mode: "disable" | "regen") => {
+  const openConfirm = () => {
     confirmFormRef.current?.reset();
-    disableMutation.reset();
     regenMutation.reset();
-    setConfirmMode(mode);
+    setIsRegenerateOpen(true);
   };
 
   const closeConfirm = () => {
-    if (disableMutation.isPending || regenMutation.isPending) return;
+    if (regenMutation.isPending) return;
     confirmFormRef.current?.reset();
-    disableMutation.reset();
     regenMutation.reset();
-    setConfirmMode(null);
+    setIsRegenerateOpen(false);
   };
 
   const submitConfirm = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!confirmMode || disableMutation.isPending || regenMutation.isPending) {
-      return;
-    }
+    if (!isRegenerateOpen || regenMutation.isPending) return;
 
     const form = event.currentTarget;
     const credentials = readAdminMfaStepUpCredentials(new FormData(form));
-    if (!credentials) return;
+    if (!credentials?.code) return;
+    const regenerationInput = {
+      currentPassword: credentials.currentPassword,
+      code: credentials.code,
+    };
 
     const onError = (err: unknown) => {
       const code = apiErrorCode(err);
       form.reset();
-      disableMutation.reset();
       regenMutation.reset();
       requestAnimationFrame(() => confirmPasswordRef.current?.focus());
       if (code === "wrong_password") toast.error(t("twofa.wrong_password"));
       else toast.error(t("twofa.invalid_code"));
     };
-    if (confirmMode === "disable") {
-      disableMutation.mutate(
-        { data: credentials },
-        {
-          onSuccess: () => {
-            form.reset();
-            disableMutation.reset();
-            setConfirmMode(null);
-            refreshMe();
-            toast.success(t("twofa.disabled_success"));
-          },
-          onError,
+    regenMutation.mutate(
+      { data: regenerationInput },
+      {
+        onSuccess: (res) => {
+          form.reset();
+          regenMutation.reset();
+          setIsRegenerateOpen(false);
+          setFreshCodes(res.backupCodes);
+          toast.success(t("twofa.regen_success"));
         },
-      );
-    } else {
-      regenMutation.mutate(
-        { data: credentials },
-        {
-          onSuccess: (res) => {
-            form.reset();
-            regenMutation.reset();
-            setConfirmMode(null);
-            setFreshCodes(res.backupCodes);
-            toast.success(t("twofa.regen_success"));
-          },
-          onError,
-        },
-      );
-    }
+        onError,
+      },
+    );
   };
 
-  const confirmPending = disableMutation.isPending || regenMutation.isPending;
+  const confirmPending = regenMutation.isPending;
+
+  if (!isLoading && !isError && me && me.mfaRequired !== true) return null;
 
   return (
     <Card className="hover-elevate">
@@ -329,45 +355,13 @@ export default function TwoFactorCard() {
             compact
           />
         ) : (
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <Badge
-              variant={me.totpEnabled ? "default" : "secondary"}
-              className={
-                me.totpEnabled ? "bg-emerald-600 hover:bg-emerald-600" : ""
-              }
-            >
-              {me.totpEnabled ? t("twofa.status_on") : t("twofa.status_off")}
-            </Badge>
-            {me.totpEnabled ? (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  onClick={() => openConfirm("regen")}
-                >
-                  <KeyRound className="h-4 w-4" /> {t("twofa.regenerate")}
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => openConfirm("disable")}
-                >
-                  {t("twofa.disable")}
-                </Button>
-              </div>
-            ) : (
-              <Button
-                size="sm"
-                onClick={startEnable}
-                disabled={setupMutation.isPending}
-              >
-                {setupMutation.isPending
-                  ? t("common.loading")
-                  : t("twofa.enable")}
-              </Button>
-            )}
-          </div>
+          <ProtectedMfaStatusActions
+            enabled={me.totpEnabled}
+            setupPending={setupMutation.isPending}
+            onEnable={startEnable}
+            onRegenerate={openConfirm}
+            t={t}
+          />
         )}
       </CardContent>
 
@@ -554,9 +548,9 @@ export default function TwoFactorCard() {
         </DialogContent>
       </Dialog>
 
-      {/* Disable / regenerate confirmation (password + second factor) */}
+      {/* Regeneration confirmation (password + second factor) */}
       <Dialog
-        open={!!confirmMode}
+        open={isRegenerateOpen}
         onOpenChange={(open) => !open && closeConfirm()}
       >
         <DialogContent
@@ -567,16 +561,8 @@ export default function TwoFactorCard() {
           }}
         >
           <DialogHeader>
-            <DialogTitle>
-              {confirmMode === "disable"
-                ? t("twofa.disable_title")
-                : t("twofa.regen_title")}
-            </DialogTitle>
-            <DialogDescription>
-              {confirmMode === "disable"
-                ? t("twofa.disable_hint")
-                : t("twofa.regen_hint")}
-            </DialogDescription>
+            <DialogTitle>{t("twofa.regen_title")}</DialogTitle>
+            <DialogDescription>{t("twofa.regen_hint")}</DialogDescription>
           </DialogHeader>
           <form
             ref={confirmFormRef}
@@ -629,15 +615,10 @@ export default function TwoFactorCard() {
               </Button>
               <Button
                 type="submit"
-                variant={confirmMode === "disable" ? "destructive" : "default"}
                 className="min-h-11 w-full sm:w-auto"
                 disabled={confirmPending}
               >
-                {confirmPending
-                  ? t("common.loading")
-                  : confirmMode === "disable"
-                    ? t("twofa.disable")
-                    : t("twofa.regenerate")}
+                {confirmPending ? t("common.loading") : t("twofa.regenerate")}
               </Button>
             </DialogFooter>
           </form>

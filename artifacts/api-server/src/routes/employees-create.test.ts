@@ -288,6 +288,9 @@ describe("administrative employee provisioning", () => {
       facilityId: 10,
       isActive: true,
       sessionVersion: 4,
+      passwordHash: "admin-password-hash",
+      totpEnabled: true,
+      totpSecret: "encrypted-secret",
     });
     Object.assign(testState.lockedActor, testState.actor);
     testState.extraUsers = [];
@@ -388,6 +391,23 @@ describe("administrative employee provisioning", () => {
       id: 2,
       mustChangePassword: true,
     });
+  });
+
+  it("uses password-only step-up for a non-protected administrator", async () => {
+    testState.actor.id = 3;
+    testState.lockedActor.id = 3;
+    testState.actor.totpEnabled = false;
+    testState.actor.totpSecret = null as unknown as string;
+    testState.lockedActor.totpEnabled = false;
+    testState.lockedActor.totpSecret = null as unknown as string;
+
+    const response = await postEmployee({ code: undefined });
+
+    expect(response.status).toBe(201);
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+    expect(testState.insertValues).toEqual(
+      expect.objectContaining({ email: "new.worker@example.sa" }),
+    );
   });
 
   it("rejects an overlong password before bcrypt or database work", async () => {

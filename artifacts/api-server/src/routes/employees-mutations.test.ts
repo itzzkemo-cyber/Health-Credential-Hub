@@ -283,6 +283,9 @@ describe("administrative employee mutations", () => {
     testState.actor.supervisorId = null;
     testState.actor.isActive = true;
     testState.actor.sessionVersion = 4;
+    testState.actor.passwordHash = "admin-password-hash";
+    testState.actor.totpEnabled = true;
+    testState.actor.totpSecret = "encrypted-secret";
     Object.assign(testState.lockedActor, testState.actor, {
       departmentId: null,
       supervisorId: null,
@@ -504,20 +507,55 @@ describe("administrative employee mutations", () => {
     expect(testState.committedAudit).toBeNull();
   });
 
-  it("records and revokes sessions for a role-only change without step-up", async () => {
+  it("requires and consumes protected-account step-up for a role-only change", async () => {
     const response = await request("PATCH", "/employees/2", {
       role: "supervisor",
+      currentPassword: "admin-password",
+      code: "123456",
     });
 
     expect(response.status).toBe(200);
     expect(testState.committedUpdate?.sessionVersion).not.toBe(1);
-    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+    expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
     expect(testState.committedAudit).toEqual(
       expect.objectContaining({
         details: JSON.stringify({
           role: { from: "employee", to: "supervisor" },
         }),
       }),
+    );
+  });
+
+  it("rejects a role-only change without the administrator password", async () => {
+    const response = await request("PATCH", "/employees/2", {
+      role: "supervisor",
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "step_up_failed" }),
+    );
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+    expect(testState.committedUpdate).toBeNull();
+  });
+
+  it("uses password-only step-up for a non-protected role change", async () => {
+    testState.actor.id = 3;
+    testState.lockedActor.id = 3;
+    testState.actor.totpEnabled = false;
+    testState.actor.totpSecret = null as unknown as string;
+    testState.lockedActor.totpEnabled = false;
+    testState.lockedActor.totpSecret = null as unknown as string;
+
+    const response = await request("PATCH", "/employees/2", {
+      role: "supervisor",
+      currentPassword: "admin-password",
+    });
+
+    expect(response.status).toBe(200);
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+    expect(testState.committedUpdate).toEqual(
+      expect.objectContaining({ role: "supervisor" }),
     );
   });
 
@@ -529,7 +567,11 @@ describe("administrative employee mutations", () => {
   ])(
     "enforces the hospital-administrator assignment matrix for %s",
     async (role, expectedStatus) => {
-      const response = await request("PATCH", "/employees/2", { role });
+      const response = await request("PATCH", "/employees/2", {
+        role,
+        currentPassword: "admin-password",
+        code: "123456",
+      });
 
       expect(response.status).toBe(expectedStatus);
       if (expectedStatus === 200) {
@@ -539,7 +581,11 @@ describe("administrative employee mutations", () => {
       } else {
         expect(testState.committedUpdate).toBeNull();
       }
-      expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+      if (expectedStatus === 200) {
+        expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
+      } else {
+        expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+      }
     },
   );
 
@@ -549,6 +595,8 @@ describe("administrative employee mutations", () => {
 
     const allowed = await request("PATCH", "/employees/2", {
       role: "hospital_admin",
+      currentPassword: "admin-password",
+      code: "123456",
     });
     expect(allowed.status).toBe(200);
     expect(testState.committedUpdate).toEqual(
@@ -704,6 +752,25 @@ describe("administrative employee mutations", () => {
           isActive: { from: false, to: true },
         }),
       }),
+    );
+  });
+
+  it("uses password-only step-up for a non-protected administrator mutation", async () => {
+    testState.actor.id = 3;
+    testState.lockedActor.id = 3;
+    testState.actor.totpEnabled = false;
+    testState.actor.totpSecret = null as unknown as string;
+    testState.lockedActor.totpEnabled = false;
+    testState.lockedActor.totpSecret = null as unknown as string;
+
+    const response = await request("POST", "/employees/2/deactivate", {
+      currentPassword: "admin-password",
+    });
+
+    expect(response.status).toBe(200);
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+    expect(testState.committedUpdate).toEqual(
+      expect.objectContaining({ isActive: false }),
     );
   });
 

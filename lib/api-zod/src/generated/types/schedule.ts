@@ -19,6 +19,8 @@ export type Schedule = ScheduleSummary & {
   constraints: ScheduleConstraints;
   unavailability: ScheduleUnavailability[];
   assignments: ShiftAssignment[];
+  /** Planning issue codes that must be resolved before publication. */
+  issues: string[];
   shortages: ScheduleShortage[];
   warnings: string[];
 };

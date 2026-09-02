@@ -219,10 +219,13 @@ docker run --rm --env-file /secure/path/wathaiqi-bootstrap.env \
   --entrypoint node wathaiqi-health:release dist/bootstrap-admin.mjs
 ```
 
-The command refuses to create another administrator once one exists. Delete
-the temporary file immediately, sign in once, change the temporary password,
+The command refuses to create another administrator once one exists. Set
+`PROTECTED_MFA_USER_ID` to that account's immutable database ID, delete the
+temporary file immediately, sign in once, change the temporary password,
 enroll TOTP, store recovery codes in the approved password manager, and then
-confirm the temporary password is no longer retained anywhere.
+confirm the temporary password is no longer retained anywhere. The protected
+account cannot disable MFA; other accounts use password re-authentication for
+sensitive administrative operations without TOTP.
 
 Never add `BOOTSTRAP_*` variables to the Render web service.
 
@@ -319,7 +322,8 @@ production gate in the first section is accepted.
 
 At a 390 px viewport, check both Arabic RTL and English LTR:
 
-1. Sign in with the changed administrator password and TOTP.
+1. Sign in to the protected administrator with the changed password and TOTP;
+   also confirm that a separate scoped manager signs in without a TOTP prompt.
 2. Create a scoped manager and a scoped employee through authenticated admin
    workflows; confirm there is no public sign-up path.
 3. Upload a synthetic JPEG or PNG below 8 MiB. Confirm the stored response is a

@@ -7,9 +7,11 @@ verification.
 
 ## Security and data flow
 
-1. An authenticated administrator with enrolled TOTP and a fresh password/code
-   step-up creates the employee invitation. Facility, department, supervisor,
-   role, email, and profile fields are authoritative server-side values.
+1. An authenticated administrator with a fresh password step-up creates the
+   employee invitation. The account selected by `PROTECTED_MFA_USER_ID` must
+   additionally provide a current TOTP or backup code. Facility, department,
+   supervisor, role, email, and profile fields are authoritative server-side
+   values.
 2. The invitation email contains a single-use fragment token. On the activation
    page, `POST /api/auth/invitation-email-otp/start` accepts only that token.
 3. The API revalidates the invitation, inviter authority, facility, department,

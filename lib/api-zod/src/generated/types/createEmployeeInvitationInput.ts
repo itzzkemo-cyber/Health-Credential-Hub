@@ -60,14 +60,15 @@ export interface CreateEmployeeInvitationInput {
      */
   supervisorId?: number | null;
   /**
+     * Required for administrator step-up verification.
      * @minLength 1
      * @maxLength 1024
      */
   currentPassword: string;
   /**
-     * Single-use TOTP or backup code for administrator step-up.
+     * Single-use TOTP or backup code. Required only when the authenticated administrator is the protected MFA account.
      * @minLength 1
      * @maxLength 128
      */
-  code: string;
+  code?: string;
 }

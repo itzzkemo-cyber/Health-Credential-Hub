@@ -27,15 +27,15 @@ export interface EmployeeInput {
   /** Target facility; honored only for system administrators. */
   facilityId?: number;
   /**
-     * Required with code for every direct account provisioning operation.
+     * Required for every direct account provisioning operation.
      * @minLength 12
      * @maxLength 1024
      */
   currentPassword: string;
   /**
-     * Required with currentPassword for every direct account provisioning operation; accepts TOTP or a backup code.
+     * Required with currentPassword only when the authenticated administrator is the protected MFA account; accepts TOTP or a backup code.
      * @minLength 1
      * @maxLength 128
      */
-  code: string;
+  code?: string;
 }

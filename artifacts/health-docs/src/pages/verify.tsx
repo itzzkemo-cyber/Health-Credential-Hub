@@ -2,8 +2,50 @@ import { useRoute } from "wouter";
 import { useVerifyCredential } from "@workspace/api-client-react";
 import { useLanguage } from "@/lib/language-context";
 import { Card, CardContent } from "@/components/ui/card";
-import { ShieldCheck, ShieldAlert, FileText, CheckCircle2, Building2, Calendar, Hash } from "lucide-react";
+import { ShieldCheck, ShieldAlert, FileText, CheckCircle2, Building2, Calendar, Clock3 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+
+type Translator = (key: string) => string;
+
+type VerifiedCredentialData = {
+  verificationState: "verified";
+  type: string;
+  issuerName: string;
+  issueDate: string;
+  expiryDate: string;
+  status: string;
+  verificationCode: string;
+};
+
+export function hasVerifiedCredentialData(
+  value: unknown,
+): value is VerifiedCredentialData {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    candidate.verificationState === "verified" &&
+    typeof candidate.type === "string" &&
+    typeof candidate.issuerName === "string" &&
+    typeof candidate.issueDate === "string" &&
+    typeof candidate.expiryDate === "string" &&
+    typeof candidate.status === "string" &&
+    typeof candidate.verificationCode === "string"
+  );
+}
+
+export function VerificationFooter({ t }: { t: Translator }) {
+  return (
+    <footer className="mt-8 space-y-1 text-center text-xs text-muted-foreground">
+      <p>{t("verify_page.powered_by")} &copy; {new Date().getFullYear()}</p>
+      <p>
+        {t("verify_page.developed_by")}{" "}
+        <bdi lang="en" dir="ltr" className="font-semibold text-foreground/80">
+          ABDULKARIM ALHEJAILI
+        </bdi>
+      </p>
+    </footer>
+  );
+}
 
 export default function VerifyQR() {
   const [, params] = useRoute("/verify/:token");
@@ -13,7 +55,9 @@ export default function VerifyQR() {
   // The verify endpoint takes the QR token string directly (public, no auth).
   const { data: verData, isLoading, isError } = useVerifyCredential(token ?? "");
 
-  const isExpired = verData?.status === "expired";
+  const isPendingVerification = verData?.verificationState === "pending";
+  const isVerified = hasVerifiedCredentialData(verData);
+  const isExpired = isVerified && verData.status === "expired";
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 py-12 px-4 flex flex-col items-center">
@@ -50,7 +94,21 @@ export default function VerifyQR() {
               </p>
             </CardContent>
           </Card>
-        ) : (
+        ) : isPendingVerification ? (
+          <Card className="border-t-4 border-t-amber-500 shadow-xl">
+            <CardContent className="space-y-4 p-8 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-amber-100 ring-4 ring-amber-50 dark:bg-amber-900 dark:ring-amber-950">
+                <Clock3 className="h-8 w-8 text-amber-600 dark:text-amber-400" />
+              </div>
+              <h2 className="text-xl font-bold text-amber-700 dark:text-amber-400">
+                {t("verify_page.pending_title")}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {t("verify_page.pending_description")}
+              </p>
+            </CardContent>
+          </Card>
+        ) : isVerified ? (
           <Card className={`border-t-4 ${isExpired ? "border-t-amber-500" : "border-t-emerald-500"} shadow-xl overflow-hidden animate-in zoom-in-95 duration-500`}>
             <div className={`${isExpired ? "bg-amber-50 dark:bg-amber-950/30" : "bg-emerald-50 dark:bg-emerald-950/30"} p-6 text-center border-b border-border`}>
               <div className={`mx-auto w-16 h-16 ${isExpired ? "bg-amber-100 dark:bg-amber-900 ring-amber-50 dark:ring-amber-950" : "bg-emerald-100 dark:bg-emerald-900 ring-emerald-50 dark:ring-emerald-950"} rounded-full flex items-center justify-center mb-4 ring-4`}>
@@ -109,12 +167,10 @@ export default function VerifyQR() {
               {t('verify_page.verified_on')} {new Date().toLocaleString(isRTL ? 'ar-SA' : 'en-US')}
             </div>
           </Card>
-        )}
+        ) : null}
       </div>
       
-      <div className="mt-8 text-center text-xs text-muted-foreground">
-        {t('verify_page.powered_by')} &copy; {new Date().getFullYear()}
-      </div>
+      <VerificationFooter t={t} />
     </div>
   );
 }

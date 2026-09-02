@@ -1,12 +1,12 @@
-import type { TotpAdminDisableInput } from "@workspace/api-client-react";
+import type {
+  AdminStepUpInput,
+  TotpAdminDisableInput,
+} from "@workspace/api-client-react";
 
 export const ADMIN_MFA_CURRENT_PASSWORD_FIELD = "currentPassword";
 export const ADMIN_MFA_CODE_FIELD = "code";
 
-export type AdminMfaStepUpCredentials = Pick<
-  TotpAdminDisableInput,
-  "currentPassword" | "code"
->;
+export type AdminMfaStepUpCredentials = AdminStepUpInput;
 
 export function readCurrentPassword(formData: FormData): string | null {
   const currentPassword = formData.get(ADMIN_MFA_CURRENT_PASSWORD_FIELD);
@@ -30,9 +30,21 @@ export function readVerificationCode(formData: FormData): string | null {
 export function readAdminMfaStepUpCredentials(
   formData: FormData,
 ): AdminMfaStepUpCredentials | null {
+  return readAdminStepUpCredentials(formData, true);
+}
+
+/**
+ * Password step-up applies to every administrator. Only the immutable account
+ * marked by the API as MFA-protected must also provide a TOTP or backup code.
+ */
+export function readAdminStepUpCredentials(
+  formData: FormData,
+  mfaRequired: boolean | undefined,
+): AdminMfaStepUpCredentials | null {
   const currentPassword = readCurrentPassword(formData);
   const code = readVerificationCode(formData);
-  return currentPassword && code ? { currentPassword, code } : null;
+  if (!currentPassword || (mfaRequired !== false && !code)) return null;
+  return code ? { currentPassword, code } : { currentPassword };
 }
 
 /**
@@ -43,8 +55,9 @@ export function readAdminMfaStepUpCredentials(
 export function readAdminMfaStepUpInput(
   formData: FormData,
   userId: number,
+  mfaRequired = true,
 ): TotpAdminDisableInput | null {
-  const credentials = readAdminMfaStepUpCredentials(formData);
+  const credentials = readAdminStepUpCredentials(formData, mfaRequired);
   if (!Number.isInteger(userId) || userId <= 0 || !credentials) return null;
   return { userId, ...credentials };
 }

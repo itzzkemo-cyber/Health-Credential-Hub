@@ -3,36 +3,40 @@ import { describe, expect, it } from "vitest";
 
 import {
   isMfaEnrollmentRequiredApiError,
+  isProtectedMfaAccount,
   mustEnrollPrivilegedMfa,
   withMfaEnrollmentState,
 } from "./account-security-state";
 
 describe("privileged MFA enrollment state", () => {
-  it.each([
-    "supervisor",
-    "department_manager",
-    "hospital_admin",
-    "system_admin",
-  ] as const)("requires TOTP for a %s profile without it", (role) => {
-    expect(mustEnrollPrivilegedMfa({ role, totpEnabled: false })).toBe(true);
-    expect(mustEnrollPrivilegedMfa({ role })).toBe(true);
+  it("requires TOTP only when the API marks the account as protected", () => {
+    expect(
+      mustEnrollPrivilegedMfa({ mfaRequired: true, totpEnabled: false }),
+    ).toBe(true);
+    expect(mustEnrollPrivilegedMfa({ mfaRequired: true })).toBe(true);
+    expect(isProtectedMfaAccount({ mfaRequired: true })).toBe(true);
   });
 
-  it("does not restrict employees or privileged profiles with TOTP", () => {
+  it("does not infer MFA policy from a role or an unprotected TOTP state", () => {
     expect(
-      mustEnrollPrivilegedMfa({ role: "employee", totpEnabled: false }),
+      mustEnrollPrivilegedMfa({ mfaRequired: false, totpEnabled: false }),
     ).toBe(false);
     expect(
-      mustEnrollPrivilegedMfa({ role: "system_admin", totpEnabled: true }),
+      mustEnrollPrivilegedMfa({ mfaRequired: false, totpEnabled: true }),
+    ).toBe(false);
+    expect(mustEnrollPrivilegedMfa({ totpEnabled: false })).toBe(false);
+    expect(isProtectedMfaAccount(undefined)).toBe(false);
+    expect(
+      mustEnrollPrivilegedMfa({ mfaRequired: true, totpEnabled: true }),
     ).toBe(false);
   });
 
   it("updates only the local server-backed TOTP flag", () => {
-    const user = { id: 9, role: "system_admin" as const, totpEnabled: false };
+    const user = { id: 9, mfaRequired: true, totpEnabled: false };
 
     expect(withMfaEnrollmentState(user, false)).toEqual({
       id: 9,
-      role: "system_admin",
+      mfaRequired: true,
       totpEnabled: true,
     });
     expect(user.totpEnabled).toBe(false);

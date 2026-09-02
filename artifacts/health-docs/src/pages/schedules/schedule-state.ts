@@ -108,6 +108,38 @@ export function coveragePreview(
   );
 }
 
+export function rosterCapacity(
+  schedule: Pick<Schedule, "month" | "employeeIds" | "shiftTypes" | "constraints">,
+): { required: number; available: number; minimumEmployees: number } {
+  const requiredPerDay = schedule.shiftTypes.reduce(
+    (sum, shift) => sum + shift.requiredPerDay,
+    0,
+  );
+  const required = monthDates(schedule.month).length * requiredPerDay;
+  const perEmployee = Math.max(1, schedule.constraints.maxShiftsPerMonth);
+  return {
+    required,
+    available: schedule.employeeIds.length * perEmployee,
+    minimumEmployees: Math.ceil(required / perEmployee),
+  };
+}
+
+export function scheduleIssueKey(code: string): string {
+  const keys: Record<string, string> = {
+    monthly_shift_limit: "issue_monthly_shift_limit",
+    minimum_rest: "issue_minimum_rest",
+    insufficient_rest: "issue_minimum_rest",
+    consecutive_day_limit: "issue_consecutive_day_limit",
+    employee_unavailable: "issue_employee_unavailable",
+    overlapping_shifts: "issue_overlapping_shifts",
+    duplicate_employee_day: "issue_duplicate_employee_day",
+    invalid_adjacent_assignments: "issue_adjacent",
+    coverage_shortage: "issue_coverage",
+    approved_request_conflict: "issue_request_conflict",
+  };
+  return keys[code.toLowerCase()] ?? "invalid";
+}
+
 export function canPublish(
   schedule: Schedule,
   assignments: ShiftAssignment[],
@@ -120,6 +152,7 @@ export function canPublish(
     !conflict &&
     assignmentSignature(schedule.assignments) ===
       assignmentSignature(assignments) &&
+    schedule.issues.length === 0 &&
     schedule.shortages.length === 0
   );
 }
@@ -132,6 +165,8 @@ export function scheduleErrorKey(error: unknown, creating = false): string {
   if (error.status === 403 || error.status === 404) return "forbidden";
   if (/VERSION_CONFLICT|INVALID_SCHEDULE_STATUS/.test(code)) return "conflict";
   if (/EMPLOYEE_MONTH_ALREADY_SCHEDULED/.test(code)) return "overlap";
+  const issueKey = scheduleIssueKey(code);
+  if (issueKey !== "invalid") return issueKey;
   if (error.status === 409) return "invalid";
   if (error.status === 400 || error.status === 422) return "invalid";
   return creating ? "create_error" : "failed";

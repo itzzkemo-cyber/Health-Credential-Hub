@@ -6,10 +6,14 @@ Supported code is the latest commit on `main`. Security fixes should include ten
 
 Operational requirements include administrator-provisioned accounts, a strong managed `SESSION_SECRET`, private object storage, reviewed database migrations, approved OCR data processing, and secret rotation after any exposure. Public registration and test-only authentication are not part of the release.
 
-Every direct account-provisioning operation, role/scope changes, and MFA
-recovery require an administrator password plus current TOTP step-up;
-invitation onboarding remains the default account-creation path. Administrator
-MFA must be enabled before real workforce data is introduced. The encrypted
+Every direct account-provisioning operation and role/scope change requires an
+administrator password step-up. The immutable account selected by
+`PROTECTED_MFA_USER_ID` must additionally provide a current TOTP or backup code
+and cannot disable its own MFA; other accounts are not enrolled or challenged
+for TOTP. Invitation onboarding remains the default account-creation path. This
+single-account MFA policy is an explicit owner risk decision and is weaker than
+requiring MFA for every privileged account. The protected account MFA must be
+enabled before real workforce data is introduced. The encrypted
 Windows filesystem profile is a controlled single-host acceptance path, not a
 high-availability healthcare production claim. GCS and OCI direct uploads must
 remain synthetic-only until bounded provider ingress, malware quarantine,

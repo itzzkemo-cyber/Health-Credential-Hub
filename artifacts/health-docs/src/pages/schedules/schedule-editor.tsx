@@ -40,7 +40,9 @@ import {
   employeeName,
   monthDates,
   replaceAssignment,
+  rosterCapacity,
   scheduleErrorKey,
+  scheduleIssueKey,
   shiftName,
 } from "./schedule-state";
 import { NativeSelect, ScheduleLoading } from "./schedule-ui";
@@ -164,6 +166,8 @@ export function ScheduleDraftEditor({
     (sum, entry) => sum + Math.max(0, entry.required - entry.assigned),
     0,
   );
+  const capacity = useMemo(() => rosterCapacity(schedule), [schedule]);
+  const capacityShortfall = capacity.available < capacity.required;
   const displayName = (id: number) => {
     const employee = employeeMap.get(id);
     return employee
@@ -342,24 +346,6 @@ export function ScheduleDraftEditor({
           }}
         />
       ) : null}
-      {errorKey ? (
-        <div
-          role="alert"
-          className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm"
-        >
-          <p>{t(`schedules.${errorKey}`)}</p>
-          {conflict ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="min-h-11"
-              onClick={() => setConfirmation("reload")}
-            >
-              {t("schedules.reload")}
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
       <div className="flex flex-wrap gap-2">
         {schedule.shiftTypes.map((shift) => (
           <span
@@ -534,6 +520,51 @@ export function ScheduleDraftEditor({
         </CardContent>
       </Card>
       <div className="space-y-3 rounded-lg border bg-card p-4">
+        {capacityShortfall ? (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+            <p className="font-semibold">{t("schedules.capacity_title")}</p>
+            <p className="mt-1">
+              {t("schedules.capacity_detail")
+                .replace("{required}", String(capacity.required))
+                .replace("{employees}", String(schedule.employeeIds.length))
+                .replace("{limit}", String(schedule.constraints.maxShiftsPerMonth))
+                .replace("{available}", String(capacity.available))
+                .replace("{minimum}", String(capacity.minimumEmployees))}
+            </p>
+          </div>
+        ) : null}
+        {!dirty && schedule.status === "draft" && schedule.issues.length ? (
+          <div
+            role="alert"
+            className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+          >
+            <p className="font-semibold">{t("schedules.draft_saved_blocked")}</p>
+            <p className="mt-1">{t("schedules.draft_saved_blocked_hint")}</p>
+            <ul className="mt-2 list-inside list-disc space-y-1">
+              {[...new Set(schedule.issues)].map((issue) => (
+                <li key={issue}>{t(`schedules.${scheduleIssueKey(issue)}`)}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {errorKey ? (
+          <div
+            role="alert"
+            className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm"
+          >
+            <p>{t(`schedules.${errorKey}`)}</p>
+            {conflict ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11"
+                onClick={() => setConfirmation("reload")}
+              >
+                {t("schedules.reload")}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         <p className="text-sm text-muted-foreground">
           {t(
             schedule.status === "published"

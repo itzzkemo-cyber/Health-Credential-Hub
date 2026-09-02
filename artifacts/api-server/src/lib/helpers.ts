@@ -13,6 +13,7 @@ import {
 } from "@workspace/db";
 import { eq, inArray, and, isNull } from "drizzle-orm";
 import { canAccessCredentialOwner } from "./roleHierarchy";
+import { isProtectedMfaUser } from "./protectedMfa";
 
 // ---------------------------------------------------------------------------
 // Dates & status
@@ -67,7 +68,11 @@ export function serializeUser(u: User) {
     avatarUrl: u.avatarUrl,
     isActive: u.isActive,
     mustChangePassword: u.mustChangePassword,
-    totpEnabled: u.totpEnabled,
+    // Do not expose stale legacy TOTP state for accounts outside the single
+    // protected identity. Their authentication and sensitive actions are
+    // password-only under the current policy.
+    totpEnabled: isProtectedMfaUser(u) && u.totpEnabled,
+    mfaRequired: isProtectedMfaUser(u),
     createdAt: u.createdAt.toISOString(),
   };
 }

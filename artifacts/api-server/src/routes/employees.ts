@@ -28,6 +28,7 @@ import {
   ADMIN_ROLES,
 } from "../lib/auth";
 import { consumeSecondFactor } from "../lib/secondFactor";
+import { isProtectedMfaUser } from "../lib/protectedMfa";
 import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
 import { rateLimit } from "../lib/rateLimit";
 import {
@@ -63,6 +64,7 @@ import {
 } from "../lib/roleHierarchy";
 
 const router: IRouter = Router();
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 function isPostgresUniqueViolation(error: unknown): boolean {
   let current = error;
@@ -104,6 +106,27 @@ function requiredTrimmedString(
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed && trimmed.length <= maxLength ? trimmed : null;
+}
+
+async function verifyAdministrativeStepUp(
+  tx: Transaction,
+  actor: User,
+  currentPassword: string | null,
+  code: string | null,
+): Promise<"verified" | "admin_mfa_required" | "step_up_failed"> {
+  const protectedAccount = isProtectedMfaUser(actor);
+  if (protectedAccount && (!actor.totpEnabled || !actor.totpSecret)) {
+    return "admin_mfa_required";
+  }
+  if (
+    !currentPassword ||
+    !(await comparePassword(currentPassword, actor.passwordHash))
+  ) {
+    return "step_up_failed";
+  }
+  if (!protectedAccount) return "verified";
+  const steppedUp = code ? await consumeSecondFactor(tx, actor, code) : null;
+  return steppedUp ? "verified" : "step_up_failed";
 }
 
 function rateLimitOrganizationalPatch(
@@ -382,19 +405,13 @@ router.post(
         // the default. Re-prove both administrator factors for every direct
         // account, even the least-privileged employee role. The route-wide
         // limiter bounds guesses and the factor is consumed transactionally.
-        if (!actor.totpEnabled || !actor.totpSecret) {
-          return { kind: "admin_mfa_required" as const };
-        }
-        if (
-          !currentPassword ||
-          !(await comparePassword(currentPassword, actor.passwordHash))
-        ) {
-          return { kind: "step_up_failed" as const };
-        }
-        const steppedUp = stepUpCode
-          ? await consumeSecondFactor(tx, actor, stepUpCode)
-          : null;
-        if (!steppedUp) return { kind: "step_up_failed" as const };
+        const stepUp = await verifyAdministrativeStepUp(
+          tx,
+          actor,
+          currentPassword,
+          stepUpCode,
+        );
+        if (stepUp !== "verified") return { kind: stepUp };
 
         const inserted = await tx
           .insert(usersTable)
@@ -494,6 +511,10 @@ router.post(
       res.status(409).json({ message: "Email already registered" });
       return;
     }
+    if (result.kind !== "created" || !result.user) {
+      res.status(500).json({ message: "Internal server error" });
+      return;
+    }
     res.status(201).json(serializeUser(result.user));
   },
 );
@@ -566,7 +587,7 @@ router.post(
       !employeeNumber ||
       !requestedRole ||
       !currentPassword ||
-      !stepUpCode ||
+      (isProtectedMfaUser(requestUser) && !stepUpCode) ||
       phone === undefined
     ) {
       res.status(400).json({
@@ -682,14 +703,13 @@ router.post(
         if (!canAssignRole(actor, requestedRole)) {
           return { kind: "role_forbidden" as const };
         }
-        if (!actor.totpEnabled || !actor.totpSecret) {
-          return { kind: "admin_mfa_required" as const };
-        }
-        if (!(await comparePassword(currentPassword, actor.passwordHash))) {
-          return { kind: "step_up_failed" as const };
-        }
-        const steppedUp = await consumeSecondFactor(tx, actor, stepUpCode);
-        if (!steppedUp) return { kind: "step_up_failed" as const };
+        const stepUp = await verifyAdministrativeStepUp(
+          tx,
+          actor,
+          currentPassword,
+          stepUpCode,
+        );
+        if (stepUp !== "verified") return { kind: stepUp };
 
         const facilityId =
           actor.role === "system_admin" && requestedFacilityId != null
@@ -863,6 +883,11 @@ router.post(
       });
       return;
     }
+    if (result.kind !== "created" || result.invitationId == null) {
+      res.status(500).json({ message: "Internal server error" });
+      return;
+    }
+    const invitationId = result.invitationId;
 
     try {
       await sendEmail({
@@ -884,7 +909,7 @@ router.post(
             .set({ revokedAt: new Date() })
             .where(
               and(
-                eq(employeeInvitationsTable.id, result.invitationId),
+                eq(employeeInvitationsTable.id, invitationId),
                 isNull(employeeInvitationsTable.acceptedAt),
                 isNull(employeeInvitationsTable.revokedAt),
               ),
@@ -920,25 +945,25 @@ router.post(
             .set({ revokedAt: new Date() })
             .where(
               and(
-                eq(employeeInvitationsTable.id, result.invitationId),
+                eq(employeeInvitationsTable.id, invitationId),
                 isNull(employeeInvitationsTable.acceptedAt),
                 isNull(employeeInvitationsTable.revokedAt),
               ),
             );
           logger.error(
-            { invitationId: result.invitationId },
+            { invitationId },
             "Employee invitation was revoked without an audit row after audit persistence failed",
           );
         } catch {
           logger.error(
-            { invitationId: result.invitationId },
+            { invitationId },
             "Undelivered employee invitation could not be safely revoked",
           );
           throw new Error("Undelivered invitation revocation failed");
         }
       }
       logger.error(
-        { invitationId: result.invitationId },
+        { invitationId },
         "Employee invitation delivery failed and the invitation was revoked",
       );
       res.status(502).json({
@@ -1100,19 +1125,13 @@ router.delete(
       ) {
         return { kind: "not_found" as const };
       }
-      if (!actor.totpEnabled || !actor.totpSecret) {
-        return { kind: "admin_mfa_required" as const };
-      }
-      if (
-        !currentPassword ||
-        !(await comparePassword(currentPassword, actor.passwordHash))
-      ) {
-        return { kind: "step_up_failed" as const };
-      }
-      const steppedUp = stepUpCode
-        ? await consumeSecondFactor(tx, actor, stepUpCode)
-        : null;
-      if (!steppedUp) return { kind: "step_up_failed" as const };
+      const stepUp = await verifyAdministrativeStepUp(
+        tx,
+        actor,
+        currentPassword,
+        stepUpCode,
+      );
+      if (stepUp !== "verified") return { kind: stepUp };
 
       const revoked = await tx
         .update(employeeInvitationsTable)
@@ -1470,28 +1489,23 @@ router.patch(
         }
       }
 
-      // Scope, reporting-line, and activation changes require a fresh
-      // password plus replay-safe second factor. Role-only changes still run
-      // through the locked RBAC hierarchy, audit trail, and session revocation
-      // above, but deliberately do not require step-up verification.
-      const requiresOrganizationStepUp =
+      // Role, scope, reporting-line, and activation changes require fresh
+      // administrator verification. Every administrator re-proves their
+      // password; only the immutable protected account also consumes its
+      // replay-safe second factor.
+      const requiresAdministrativeStepUp =
+        Object.prototype.hasOwnProperty.call(patch, "role") ||
         Object.prototype.hasOwnProperty.call(patch, "departmentId") ||
         Object.prototype.hasOwnProperty.call(patch, "supervisorId") ||
         Object.prototype.hasOwnProperty.call(patch, "isActive");
-      if (requiresOrganizationStepUp) {
-        if (!actor.totpEnabled || !actor.totpSecret) {
-          return { kind: "admin_mfa_required" as const };
-        }
-        if (
-          !currentPassword ||
-          !(await comparePassword(currentPassword, actor.passwordHash))
-        ) {
-          return { kind: "step_up_failed" as const };
-        }
-        const steppedUp = stepUpCode
-          ? await consumeSecondFactor(tx, actor, stepUpCode)
-          : null;
-        if (!steppedUp) return { kind: "step_up_failed" as const };
+      if (requiresAdministrativeStepUp) {
+        const stepUp = await verifyAdministrativeStepUp(
+          tx,
+          actor,
+          currentPassword,
+          stepUpCode,
+        );
+        if (stepUp !== "verified") return { kind: stepUp };
       }
       if (invalidatesTargetSessions) {
         patch.sessionVersion = sql`${usersTable.sessionVersion} + 1`;
@@ -1647,6 +1661,10 @@ router.patch(
         .json({ message: "Employee changed — reload it and try again" });
       return;
     }
+    if (result.kind !== "updated" || !result.user) {
+      res.status(500).json({ message: "Internal server error" });
+      return;
+    }
     res.json(serializeUser(result.user));
   },
 );
@@ -1694,19 +1712,13 @@ router.delete(
       if (!canManageTarget(actor, target)) {
         return { kind: "not_found" as const };
       }
-      if (!actor.totpEnabled || !actor.totpSecret) {
-        return { kind: "admin_mfa_required" as const };
-      }
-      if (
-        !currentPassword ||
-        !(await comparePassword(currentPassword, actor.passwordHash))
-      ) {
-        return { kind: "step_up_failed" as const };
-      }
-      const steppedUp = stepUpCode
-        ? await consumeSecondFactor(tx, actor, stepUpCode)
-        : null;
-      if (!steppedUp) return { kind: "step_up_failed" as const };
+      const stepUp = await verifyAdministrativeStepUp(
+        tx,
+        actor,
+        currentPassword,
+        stepUpCode,
+      );
+      if (stepUp !== "verified") return { kind: stepUp };
       if (!target.isActive) return { kind: "deactivated" as const };
       const updated = await tx
         .update(usersTable)
@@ -1823,19 +1835,13 @@ async function setActive(
     if (!canManageTarget(actor, target)) {
       return { kind: "not_found" as const };
     }
-    if (!actor.totpEnabled || !actor.totpSecret) {
-      return { kind: "admin_mfa_required" as const };
-    }
-    if (
-      !currentPassword ||
-      !(await comparePassword(currentPassword, actor.passwordHash))
-    ) {
-      return { kind: "step_up_failed" as const };
-    }
-    const steppedUp = stepUpCode
-      ? await consumeSecondFactor(tx, actor, stepUpCode)
-      : null;
-    if (!steppedUp) return { kind: "step_up_failed" as const };
+    const stepUp = await verifyAdministrativeStepUp(
+      tx,
+      actor,
+      currentPassword,
+      stepUpCode,
+    );
+    if (stepUp !== "verified") return { kind: stepUp };
     if (target.isActive === isActive) {
       return { kind: "updated" as const, user: target };
     }
@@ -1910,6 +1916,10 @@ async function setActive(
     res
       .status(409)
       .json({ message: "Employee changed — reload it and try again" });
+    return;
+  }
+  if (result.kind !== "updated" || !result.user) {
+    res.status(500).json({ message: "Internal server error" });
     return;
   }
   res.json(serializeUser(result.user));

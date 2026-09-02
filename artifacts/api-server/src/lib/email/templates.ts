@@ -17,6 +17,14 @@ const BRAND = {
   border: "#e2e8f0",
 };
 
+// Outlook/Hotmail can select a different face for bold Arabic runs than for
+// the surrounding regular text.  On some mobile/web combinations that face
+// has no Arabic glyphs, which renders headings and CTA labels as square boxes.
+// Keep Arabic runs on a conservative, locally available font stack and use
+// size/colour (rather than bold weight) for hierarchy.
+const ARABIC_FONT = "Arial,Tahoma,'Segoe UI',sans-serif";
+const LATIN_FONT = "Arial,'Segoe UI',Tahoma,sans-serif";
+
 export function getAppBaseUrl(): string | null {
   const appUrl = getPublicAppUrl();
   return appUrl ? `${appUrl}/` : null;
@@ -56,12 +64,13 @@ function esc(s: string): string {
  * anchor keep the whole visual button tappable in Gmail and Outlook instead
  * of relying on an inline anchor's painted area.
  */
-function emailButton(href: string, labelHtml: string): string {
+function emailButton(href: string, labelAr: string, labelEn: string): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center">
     <tr>
-      <td bgcolor="${BRAND.primary}" style="background:${BRAND.primary};border-radius:8px;text-align:center;">
-        <a href="${esc(href)}" target="_blank" rel="noopener noreferrer" style="display:block;color:#ffffff;text-decoration:none;font-weight:bold;padding:14px 32px;border-radius:8px;font-size:16px;line-height:1.5;">
-          ${labelHtml}
+      <td bgcolor="${BRAND.primary}" style="background:${BRAND.primary};border-radius:8px;text-align:center;mso-padding-alt:14px 32px;">
+        <a href="${esc(href)}" target="_blank" rel="noopener noreferrer" style="display:block;color:#ffffff;text-decoration:none;padding:12px 32px;border-radius:8px;font-size:16px;line-height:1.5;font-family:${LATIN_FONT};font-weight:400;">
+          <span lang="ar" dir="rtl" style="display:block;color:#ffffff;font-family:${ARABIC_FONT};mso-bidi-font-family:Arial;font-weight:400;">${esc(labelAr)}</span>
+          <span lang="en" dir="ltr" style="display:block;color:#ffffff;font-family:${LATIN_FONT};font-weight:700;">${esc(labelEn)}</span>
         </a>
       </td>
     </tr>
@@ -91,19 +100,19 @@ function layout(bodyHtml: string): string {
   const appUrl = getAppBaseUrl();
   const cta = appUrl
     ? `<tr><td align="center" style="padding:8px 32px 28px;">
-         ${emailButton(appUrl, "فتح المنصة &nbsp;·&nbsp; Open HealthDocs")}
+         ${emailButton(appUrl, "فتح المنصة", "Open HealthDocs")}
        </td></tr>`
     : "";
   return `<!doctype html>
 <html lang="ar" dir="rtl">
-<body style="margin:0;padding:0;background:${BRAND.bg};font-family:Tahoma,'Segoe UI',Arial,sans-serif;color:${BRAND.text};">
+<body style="margin:0;padding:0;background:${BRAND.bg};font-family:${ARABIC_FONT};color:${BRAND.text};">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BRAND.bg};padding:24px 12px;">
     <tr><td align="center">
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid ${BRAND.border};">
         <tr>
           <td style="background:${BRAND.primary};padding:20px 32px;" align="center">
-            <div style="font-size:20px;font-weight:bold;color:#ffffff;">وثائقي الصحي</div>
-            <div style="font-size:13px;color:#c7f0ec;letter-spacing:1px;">HEALTHDOCS</div>
+            <div lang="ar" dir="rtl" style="font-family:${ARABIC_FONT};mso-bidi-font-family:Arial;font-size:20px;font-weight:400;line-height:1.5;color:#ffffff;">وثائقي الصحي</div>
+            <div lang="en" dir="ltr" style="font-family:${LATIN_FONT};font-size:13px;color:#c7f0ec;letter-spacing:1px;">HEALTHDOCS</div>
           </td>
         </tr>
         ${bodyHtml}
@@ -185,7 +194,8 @@ export function passwordResetEmail(input: PasswordResetEmailInput): string {
           <td align="center" style="padding:20px 32px;">
             ${emailButton(
               input.resetUrl,
-              "إعادة تعيين كلمة المرور &nbsp;·&nbsp; Reset Password",
+              "إعادة تعيين كلمة المرور",
+              "Reset Password",
             )}
           </td>
         </tr>
@@ -220,12 +230,12 @@ export function employeeInvitationEmail(
 ): string {
   const body = `
         <tr>
-          <td style="padding:28px 32px 8px;" dir="rtl" align="right">
-            <div style="font-size:17px;font-weight:bold;margin-bottom:8px;">مرحباً ${esc(input.nameAr)}،</div>
-            <div style="font-size:14px;line-height:1.9;">
+          <td lang="ar" style="padding:28px 32px 8px;font-family:${ARABIC_FONT};mso-bidi-font-family:Arial;" dir="rtl" align="right">
+            <div lang="ar" dir="rtl" style="font-family:${ARABIC_FONT};mso-bidi-font-family:Arial;font-size:18px;font-weight:400;line-height:1.7;margin-bottom:8px;color:${BRAND.primaryDark};">مرحباً ${esc(input.nameAr)}،</div>
+            <div lang="ar" dir="rtl" style="font-family:${ARABIC_FONT};mso-bidi-font-family:Arial;font-size:14px;font-weight:400;line-height:1.9;">
               أنشأ مسؤول منشأتك دعوة لك للانضمام إلى منصة وثائقي الصحي.
               استخدم الزر أدناه لإنشاء كلمة المرور وتفعيل حساب الموظف. الدعوة
-              صالحة لمدة <strong>24 ساعة</strong> ولاستخدام واحد فقط.
+              صالحة لمدة <span style="font-family:${ARABIC_FONT};mso-bidi-font-family:Arial;font-weight:400;color:${BRAND.primaryDark};">24 ساعة</span> ولاستخدام واحد فقط.
             </div>
           </td>
         </tr>
@@ -233,7 +243,8 @@ export function employeeInvitationEmail(
           <td align="center" style="padding:20px 32px;">
             ${emailButton(
               input.invitationUrl,
-              "تفعيل حساب الموظف &nbsp;·&nbsp; Activate employee account",
+              "تفعيل حساب الموظف",
+              "Activate employee account",
             )}
           </td>
         </tr>

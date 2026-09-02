@@ -102,6 +102,48 @@ describe("employee invitation links", () => {
     expect(html.split(invitationUrl)).toHaveLength(4);
   });
 
+  it("keeps bold Arabic runs out of the Outlook invitation markup", () => {
+    const html = employeeInvitationEmail({
+      name: "Abdulkarim",
+      nameAr: "عبدالكريم",
+      invitationUrl:
+        "https://credentials.example.sa/register#token=one-time-token",
+    });
+
+    const arabicRuns = [
+      ...html.matchAll(
+        /<(?:div|span)[^>]*lang="ar"[^>]*style="([^"]*)"[^>]*>([^<]*)/g,
+      ),
+    ];
+
+    expect(arabicRuns.length).toBeGreaterThanOrEqual(4);
+    for (const [, style] of arabicRuns) {
+      expect(style).toContain("font-family:Arial,Tahoma,'Segoe UI',sans-serif");
+      expect(style).toContain("mso-bidi-font-family:Arial");
+      expect(style).not.toMatch(/font-weight:(?:bold|[6-9]00)/);
+    }
+    expect(html).not.toContain("<strong>24 ساعة</strong>");
+  });
+
+  it("isolates Arabic and English CTA labels for Outlook direction handling", () => {
+    const html = employeeInvitationEmail({
+      name: "Employee",
+      nameAr: "موظف",
+      invitationUrl:
+        "https://credentials.example.sa/register#token=one-time-token",
+    });
+
+    expect(html).toContain(
+      '<span lang="ar" dir="rtl" style="display:block;color:#ffffff;font-family:Arial,Tahoma,\'Segoe UI\',sans-serif;mso-bidi-font-family:Arial;font-weight:400;">تفعيل حساب الموظف</span>',
+    );
+    expect(html).toContain(
+      '<span lang="en" dir="ltr" style="display:block;color:#ffffff;font-family:Arial,\'Segoe UI\',Tahoma,sans-serif;font-weight:700;">Activate employee account</span>',
+    );
+    expect(html).not.toContain(
+      "تفعيل حساب الموظف &nbsp;·&nbsp; Activate employee account",
+    );
+  });
+
   it("provides a plain-text alternative with the same private link", () => {
     const invitationUrl =
       "https://credentials.example.sa/register#token=one-time-token";

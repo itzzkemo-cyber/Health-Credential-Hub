@@ -11,7 +11,10 @@ import {
   withPasswordChangeState,
   type AccountSetupUser,
 } from "@/lib/password-change-state";
-import { mustEnrollPrivilegedMfa } from "@/lib/account-security-state";
+import {
+  isProtectedMfaAccount,
+  mustEnrollPrivilegedMfa,
+} from "@/lib/account-security-state";
 import { useTheme } from "@/components/theme-provider";
 import TwoFactorCard from "@/components/settings/TwoFactorCard";
 import { Button } from "@/components/ui/button";
@@ -33,12 +36,21 @@ import {
 } from "@/components/ui/select";
 import { Eye, EyeOff, Globe, KeyRound, Loader2, Moon } from "lucide-react";
 
+export function ProtectedMfaSettings({
+  user,
+}: {
+  user: AccountSetupUser | null;
+}) {
+  return isProtectedMfaAccount(user) ? <TwoFactorCard /> : null;
+}
+
 export default function Settings() {
   const { t, language, setLanguage } = useLanguage();
   const { theme, setTheme } = useTheme();
   const user = getAuthUser() as AccountSetupUser | null;
   const mustChangePassword = mustReplaceTemporaryPassword(user);
   const mfaEnrollmentRequired = mustEnrollPrivilegedMfa(user);
+  const showMfaSettings = isProtectedMfaAccount(user);
 
   if (mustChangePassword) {
     return (
@@ -93,7 +105,7 @@ export default function Settings() {
       <div className="grid gap-6">
         <ChangePasswordCard />
 
-        <TwoFactorCard />
+        {showMfaSettings && <ProtectedMfaSettings user={user} />}
 
         <Card className="hover-elevate">
           <CardHeader>

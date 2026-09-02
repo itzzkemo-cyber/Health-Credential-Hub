@@ -5,7 +5,7 @@ const testState = vi.hoisted(() => {
   process.env.SESSION_SECRET = "test-session-secret-that-is-long-enough";
   return {
     user: {
-      id: 7,
+      id: 1,
       role: "supervisor",
       isActive: true,
       sessionVersion: 0,
@@ -19,7 +19,7 @@ const testState = vi.hoisted(() => {
 vi.mock("jsonwebtoken", () => ({
   default: {
     sign: vi.fn(),
-    verify: vi.fn(() => ({ sub: "7", v: 0 })),
+    verify: vi.fn(() => ({ sub: String(testState.user.id), v: 0 })),
   },
 }));
 
@@ -69,8 +69,9 @@ async function authorize(method: string, originalUrl: string) {
   return { response, next };
 }
 
-describe("privileged-account TOTP enrollment gate", () => {
+describe("protected-account TOTP enrollment gate", () => {
   beforeEach(() => {
+    testState.user.id = 1;
     testState.user.role = "supervisor";
     testState.user.isActive = true;
     testState.user.sessionVersion = 0;
@@ -80,11 +81,12 @@ describe("privileged-account TOTP enrollment gate", () => {
   });
 
   it.each([
+    "employee",
     "supervisor",
     "department_manager",
     "hospital_admin",
     "system_admin",
-  ])("blocks ordinary API access for a %s until TOTP is enabled", async (role) => {
+  ])("blocks protected account access after a role change to %s", async (role) => {
     testState.user.role = role;
 
     const { response, next } = await authorize("GET", "/api/dashboard");
@@ -124,8 +126,15 @@ describe("privileged-account TOTP enrollment gate", () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it("does not impose the privileged enrollment requirement on employees", async () => {
-    testState.user.role = "employee";
+  it.each([
+    "employee",
+    "supervisor",
+    "department_manager",
+    "hospital_admin",
+    "system_admin",
+  ])("does not impose the enrollment gate on non-protected %s accounts", async (role) => {
+    testState.user.id = 2;
+    testState.user.role = role;
 
     const { response, next } = await authorize("GET", "/api/dashboard");
 
@@ -133,7 +142,7 @@ describe("privileged-account TOTP enrollment gate", () => {
     expect(response.status).not.toHaveBeenCalled();
   });
 
-  it("allows a privileged account only when enabled TOTP has a stored secret", async () => {
+  it("allows the protected account only when enabled TOTP has a stored secret", async () => {
     testState.user.role = "hospital_admin";
     testState.user.totpEnabled = true;
     testState.user.totpSecret = "encrypted-secret";

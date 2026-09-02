@@ -5,12 +5,14 @@
  * HealthDocs - Healthcare Credential Management Platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { CredentialVerificationVerificationState } from './credentialVerificationVerificationState';
 
 export interface CredentialVerification {
-  type: string;
-  issuerName: string;
-  issueDate: string;
-  expiryDate: string;
-  status: string;
-  verificationCode: string;
+  verificationState: CredentialVerificationVerificationState;
+  type?: string;
+  issuerName?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  status?: string;
+  verificationCode?: string;
 }

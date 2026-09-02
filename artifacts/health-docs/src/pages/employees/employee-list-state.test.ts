@@ -257,7 +257,7 @@ describe("employee list presentation", () => {
     expect(payload).not.toHaveProperty("facilityId");
   });
 
-  it("requires step-up for department or supervisor changes but not a role-only change", () => {
+  it("requires step-up for role, department, or supervisor changes", () => {
     const employee = {
       role: "employee",
       departmentId: 4,
@@ -277,7 +277,7 @@ describe("employee list presentation", () => {
         ...unchanged,
         role: "supervisor",
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       hasEmployeeScopeChangesRequiringStepUp(employee, {
         ...unchanged,

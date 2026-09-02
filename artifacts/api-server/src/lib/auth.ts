@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import type { CookieOptions, Request, Response, NextFunction } from "express";
 import { db, usersTable, type User } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { isProtectedMfaUser } from "./protectedMfa";
 
 function requireSecret(): string {
   const s = process.env.SESSION_SECRET;
@@ -255,7 +256,7 @@ export async function requireAuth(
       return;
     }
     if (
-      MANAGER_ROLES.includes(user.role) &&
+      isProtectedMfaUser(user) &&
       (!user.totpEnabled || !user.totpSecret) &&
       !canAccessWhilePrivilegedMfaEnrollmentRequired(req)
     ) {

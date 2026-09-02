@@ -15,7 +15,9 @@ import {
   employeeName,
   monthDates,
   replaceAssignment,
+  rosterCapacity,
   scheduleErrorKey,
+  scheduleIssueKey,
   shiftName,
 } from "./schedule-state";
 
@@ -47,6 +49,7 @@ const schedule: Schedule = {
   },
   unavailability: [],
   assignments: [{ employeeId: 4, date: "2028-02-01", shiftCode: "M" }],
+  issues: [],
   shortages: [],
   warnings: ["planning_assistance_only", "boundary_review_required"],
 };
@@ -166,6 +169,37 @@ describe("schedule presentation and editing state", () => {
         false,
       ),
     ).toBe(false);
+    expect(
+      canPublish(
+        { ...schedule, issues: ["monthly_shift_limit"] },
+        schedule.assignments,
+        false,
+        false,
+      ),
+    ).toBe(false);
+  });
+  it("calculates the monthly staffing lower bound from coverage and limits", () => {
+    expect(
+      rosterCapacity({
+        ...schedule,
+        month: "2026-09",
+        employeeIds: [1, 2, 3],
+        shiftTypes: [
+          { ...shift, code: "M" },
+          { ...shift, code: "A" },
+          { ...shift, code: "N" },
+        ],
+      }),
+    ).toEqual({ required: 90, available: 66, minimumEmployees: 5 });
+  });
+  it("maps stored planning issue codes without exposing unknown server text", () => {
+    expect(scheduleIssueKey("monthly_shift_limit")).toBe(
+      "issue_monthly_shift_limit",
+    );
+    expect(scheduleIssueKey("approved_request_conflict")).toBe(
+      "issue_request_conflict",
+    );
+    expect(scheduleIssueKey("private_internal_detail")).toBe("invalid");
   });
   it("keeps all recognized management roles and fails closed for unknown roles", () => {
     for (const role of [
@@ -190,8 +224,10 @@ describe("schedule presentation and editing state", () => {
     [409, "schedule_version_conflict", "conflict"],
     [409, "invalid_schedule_status", "conflict"],
     [409, "employee_month_already_scheduled", "overlap"],
-    [409, "coverage_shortage", "invalid"],
-    [400, "insufficient_rest", "invalid"],
+    [409, "coverage_shortage", "issue_coverage"],
+    [400, "insufficient_rest", "issue_minimum_rest"],
+    [400, "monthly_shift_limit", "issue_monthly_shift_limit"],
+    [409, "approved_request_conflict", "issue_request_conflict"],
     [403, "forbidden", "forbidden"],
     [404, "schedule_not_found", "forbidden"],
     [500, "failed", "failed"],

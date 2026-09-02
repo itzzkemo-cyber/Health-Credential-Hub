@@ -18,6 +18,7 @@ import {
   evaluateCredentialVerificationChange,
   hasMaterialCredentialChange,
   missingTypesFor,
+  serializeUser,
 } from "./helpers";
 import { isUserInScope } from "./roleHierarchy";
 
@@ -27,6 +28,41 @@ const employee = {
   departmentId: 4,
   role: "employee",
 } as User;
+
+describe("protected MFA serialization", () => {
+  const serializableUser = (id: number): User =>
+    ({
+      id,
+      email: `user-${id}@example.invalid`,
+      name: `User ${id}`,
+      nameAr: `مستخدم ${id}`,
+      role: "hospital_admin",
+      departmentId: null,
+      supervisorId: null,
+      facilityId: 10,
+      jobTitle: null,
+      jobTitleAr: null,
+      employeeNumber: null,
+      phone: null,
+      phoneVerifiedAt: null,
+      avatarUrl: null,
+      isActive: true,
+      mustChangePassword: false,
+      totpEnabled: true,
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    }) as unknown as User;
+
+  it("publishes MFA state only for the immutable protected account", () => {
+    expect(serializeUser(serializableUser(1))).toMatchObject({
+      mfaRequired: true,
+      totpEnabled: true,
+    });
+    expect(serializeUser(serializableUser(2))).toMatchObject({
+      mfaRequired: false,
+      totpEnabled: false,
+    });
+  });
+});
 
 function credential(overrides: Partial<CredentialRow> = {}): CredentialRow {
   return {

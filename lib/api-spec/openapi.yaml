@@ -252,7 +252,14 @@ paths:
       tags: [schedules]
       operationId: updateSchedule
       summary: Validate and replace all assignments in a draft
-      description: Rejects duplicate employee/day assignments, unknown shifts or employees, unavailable days, insufficient overnight rest, and configured work limits. A published roster is immutable. Adjacent saved rosters are considered for boundary rest and consecutive-day checks.
+      description: >-
+        Rejects structurally invalid assignments such as duplicate employee/day
+        entries and unknown shifts or employees. A draft may retain reviewable
+        planning issues (unavailable days, insufficient overnight rest,
+        consecutive-day limits, or monthly work limits) so a manager can save
+        work in progress. Publication revalidates and rejects every remaining
+        issue or coverage shortage. A published roster is immutable. Adjacent
+        saved rosters are considered for boundary rest and consecutive-day checks.
       requestBody:
         required: true
         content:
@@ -1233,11 +1240,13 @@ paths:
             type: string
       responses:
         "200":
-          description: Public verification data
+          description: Public verification state. Pending credentials do not expose document metadata.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/CredentialVerification"
+        "404":
+          description: Invalid, revoked, or deleted QR token
 
   /credentials/check-duplicate:
     post:
@@ -2124,6 +2133,7 @@ components:
               constraints,
               unavailability,
               assignments,
+              issues,
               shortages,
               warnings,
             ]
@@ -2142,6 +2152,10 @@ components:
             assignments:
               type: array
               items: { $ref: "#/components/schemas/ShiftAssignment" }
+            issues:
+              type: array
+              description: Planning issue codes that must be resolved before publication.
+              items: { type: string }
             shortages:
               type: array
               items: { $ref: "#/components/schemas/ScheduleShortage" }
@@ -2409,7 +2423,7 @@ components:
     AdminStepUpInput:
       type: object
       additionalProperties: false
-      required: [currentPassword, code]
+      required: [currentPassword]
       properties:
         currentPassword:
           type: string
@@ -2421,11 +2435,13 @@ components:
           type: string
           minLength: 1
           maxLength: 128
-          description: Single-use TOTP or backup code for administrator step-up verification.
+          description: >-
+            Single-use TOTP or backup code. Required only when the authenticated
+            administrator is the account identified by PROTECTED_MFA_USER_ID.
 
     TotpAdminDisableInput:
       type: object
-      required: [userId, currentPassword, code]
+      required: [userId, currentPassword]
       properties:
         userId:
           type: number
@@ -2438,6 +2454,9 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+          description: >-
+            Required only when the authenticated administrator is the protected
+            MFA account. Other administrators step up with their password.
 
     ChangePasswordInput:
       type: object
@@ -2641,6 +2660,7 @@ components:
           isActive,
           mustChangePassword,
           totpEnabled,
+          mfaRequired,
           createdAt,
         ]
       properties:
@@ -2688,6 +2708,11 @@ components:
           type: boolean
         totpEnabled:
           type: boolean
+        mfaRequired:
+          type: boolean
+          description: >-
+            True only for the immutable administrator account that must enroll
+            and use TOTP. Clients must not infer this policy from name or role.
         createdAt:
           type: string
 
@@ -2940,9 +2965,11 @@ components:
 
     CredentialVerification:
       type: object
-      required:
-        [type, issuerName, issueDate, expiryDate, status, verificationCode]
+      required: [verificationState]
       properties:
+        verificationState:
+          type: string
+          enum: [pending, verified]
         type:
           type: string
         issuerName:
@@ -3075,10 +3102,13 @@ components:
 
     Employee:
       type: object
-      required: [id, name, nameAr, email, role, facilityId, isActive, createdAt]
+      required: [id, name, nameAr, email, role, facilityId, isActive, totpEnabled, mfaRequired, createdAt]
       properties:
         totpEnabled:
           type: boolean
+        mfaRequired:
+          type: boolean
+          description: True only for the protected administrator account.
         id:
           type: number
         name:
@@ -3162,7 +3192,6 @@ components:
           jobTitleAr,
           employeeNumber,
           currentPassword,
-          code,
         ]
       properties:
         name:
@@ -3197,12 +3226,15 @@ components:
           format: password
           minLength: 12
           maxLength: 1024
-          description: Required with code for every direct account provisioning operation.
+          description: Required for every direct account provisioning operation.
         code:
           type: string
           minLength: 1
           maxLength: 128
-          description: Required with currentPassword for every direct account provisioning operation; accepts TOTP or a backup code.
+          description: >-
+            Required with currentPassword only when the authenticated
+            administrator is the protected MFA account; accepts TOTP or a
+            backup code.
 
     CreateEmployeeInvitationInput:
       type: object
@@ -3216,7 +3248,6 @@ components:
           jobTitleAr,
           employeeNumber,
           currentPassword,
-          code,
         ]
       properties:
         name:
@@ -3270,11 +3301,14 @@ components:
           format: password
           minLength: 1
           maxLength: 1024
+          description: Required for administrator step-up verification.
         code:
           type: string
           minLength: 1
           maxLength: 128
-          description: Single-use TOTP or backup code for administrator step-up.
+          description: >-
+            Single-use TOTP or backup code. Required only when the authenticated
+            administrator is the protected MFA account.
 
     EmployeeInvitationCreated:
       type: object
@@ -3317,12 +3351,17 @@ components:
           format: password
           minLength: 1
           maxLength: 1024
-          description: Required with code when departmentId, supervisorId, or isActive actually changes. A role-only change is protected by RBAC, audit logging, and target-session revocation without step-up.
+          description: >-
+            Required when role, departmentId, supervisorId, or isActive actually
+            changes.
         code:
           type: string
           minLength: 1
           maxLength: 128
-          description: Required with currentPassword when departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code. A role-only change does not consume a code.
+          description: >-
+            Required with currentPassword for role or organizational-scope
+            changes only when the authenticated administrator is the protected
+            MFA account; accepts a single-use TOTP or backup code.
 
     # Department
     DepartmentSummary:

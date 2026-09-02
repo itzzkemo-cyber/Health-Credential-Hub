@@ -50,6 +50,7 @@ import { isFreshActiveSessionActor } from "../lib/sessionFreshness";
 import { logger } from "../lib/logger";
 import { safeErrorLogFields } from "../lib/safeError";
 import { rateLimit } from "../lib/rateLimit";
+import { isProtectedMfaUser } from "../lib/protectedMfa";
 import {
   hasAllowedPasswordInputLength,
   hasAllowedPasswordLength,
@@ -213,7 +214,7 @@ router.post(
       res.status(401).json({ message: "Invalid credentials" });
       return;
     }
-    if (user.totpEnabled && !user.totpSecret) {
+    if (isProtectedMfaUser(user) && user.totpEnabled && !user.totpSecret) {
       logger.error(
         { userId: user.id },
         "Blocked login because the 2FA account state is inconsistent",
@@ -225,7 +226,7 @@ router.post(
       });
       return;
     }
-    if (user.totpEnabled) {
+    if (isProtectedMfaUser(user) && user.totpEnabled) {
       respondWithTwoFactorChallenge(user, res);
       return;
     }
@@ -420,6 +421,14 @@ router.post(
   totpSensitiveRateLimit,
   async (req, res) => {
     const user = getUser(req);
+    if (!isProtectedMfaUser(user)) {
+      res.status(403).json({
+        code: "mfa_not_required",
+        message: "Two-factor authentication is reserved for the protected administrator account",
+        messageAr: "المصادقة الثنائية مخصصة لحساب المسؤول المحمي",
+      });
+      return;
+    }
     const body = req.body as { currentPassword?: unknown };
     const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
       ? body.currentPassword
@@ -489,6 +498,14 @@ router.post(
   totpSensitiveRateLimit,
   async (req, res) => {
     const user = getUser(req);
+    if (!isProtectedMfaUser(user)) {
+      res.status(403).json({
+        code: "mfa_not_required",
+        message: "Two-factor authentication is reserved for the protected administrator account",
+        messageAr: "المصادقة الثنائية مخصصة لحساب المسؤول المحمي",
+      });
+      return;
+    }
     const body = req.body as { setupToken?: unknown; code?: unknown };
     const setupToken =
       typeof body.setupToken === "string" ? body.setupToken : "";
@@ -656,6 +673,7 @@ router.post(
               if (
                 !locked ||
                 !locked.isActive ||
+                !isProtectedMfaUser(locked) ||
                 !locked.totpEnabled ||
                 !locked.totpSecret ||
                 (typeof payload.v === "number" ? payload.v : -1) !==
@@ -706,6 +724,14 @@ router.delete(
   totpSensitiveRateLimit,
   async (req, res) => {
     const user = getUser(req);
+    if (isProtectedMfaUser(user)) {
+      res.status(403).json({
+        code: "protected_mfa_cannot_be_disabled",
+        message: "Two-factor authentication cannot be disabled for this protected account",
+        messageAr: "لا يمكن إلغاء المصادقة الثنائية لهذا الحساب المحمي",
+      });
+      return;
+    }
     const body = req.body as { currentPassword?: unknown; code?: unknown };
     const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
       ? body.currentPassword
@@ -797,14 +823,23 @@ router.delete(
   },
 );
 
-// Fresh batch of backup codes (invalidates all previous ones). Requires
-// password + second factor, same bar as disabling.
+// Fresh batch of backup codes (invalidates all previous ones). This lifecycle
+// is reserved for the one protected account and requires password + factor.
 router.post(
   "/auth/totp/regenerate-backup",
   requireAuth,
   totpSensitiveRateLimit,
   async (req, res) => {
     const user = getUser(req);
+    if (!isProtectedMfaUser(user)) {
+      res.status(403).json({
+        code: "mfa_not_required",
+        message:
+          "Two-factor authentication is reserved for the protected administrator account",
+        messageAr: "المصادقة الثنائية مخصصة لحساب المسؤول المحمي",
+      });
+      return;
+    }
     const body = req.body as { currentPassword?: unknown; code?: unknown };
     const currentPassword = hasAllowedPasswordInputLength(body.currentPassword)
       ? body.currentPassword
@@ -887,9 +922,10 @@ router.post(
   },
 );
 
-// Admin recovery path: a fully stepped-up administrator can switch 2FA off for
-// a lower-ranked, in-scope account. A long-lived/stolen session is insufficient:
-// the actor must re-prove their password and their own second factor.
+// Admin recovery path for legacy non-protected accounts. A long-lived/stolen
+// session is insufficient: every actor re-proves their password, and the one
+// protected actor also re-proves their second factor. The protected target can
+// never be disabled through this route.
 router.post(
   "/auth/totp/admin-disable",
   requireAuth,
@@ -948,8 +984,14 @@ router.post(
       ) {
         return { kind: "not_found" as const };
       }
+      if (isProtectedMfaUser(target)) {
+        return { kind: "protected_target" as const };
+      }
       if (!target.totpEnabled) return { kind: "not_enabled" as const };
-      if (!actor.totpEnabled || !actor.totpSecret) {
+      if (
+        isProtectedMfaUser(actor) &&
+        (!actor.totpEnabled || !actor.totpSecret)
+      ) {
         return { kind: "admin_mfa_required" as const };
       }
       if (
@@ -958,9 +1000,11 @@ router.post(
       ) {
         return { kind: "step_up_failed" as const };
       }
-      const steppedUp = code
-        ? await consumeSecondFactor(tx, actor, code)
-        : null;
+      const steppedUp = isProtectedMfaUser(actor)
+        ? code
+          ? await consumeSecondFactor(tx, actor, code)
+          : null
+        : true;
       if (!steppedUp) return { kind: "step_up_failed" as const };
 
       const updated = (
@@ -1012,6 +1056,14 @@ router.post(
       res.status(400).json({
         message: "Two-factor authentication is not enabled for this account",
         messageAr: "المصادقة الثنائية غير مفعّلة لهذا الحساب",
+      });
+      return;
+    }
+    if (result.kind === "protected_target") {
+      res.status(403).json({
+        code: "protected_mfa_cannot_be_disabled",
+        message: "Two-factor authentication cannot be disabled for this protected account",
+        messageAr: "لا يمكن إلغاء المصادقة الثنائية لهذا الحساب المحمي",
       });
       return;
     }
@@ -2208,9 +2260,14 @@ router.post(
       invalid();
       return;
     }
-    // A password reset proves email control, not the second factor — 2FA
-    // accounts still have to pass the OTP challenge before getting a session.
-    if (updated.totpEnabled && !updated.totpSecret) {
+    // A password reset proves email control, not the protected account's
+    // second factor. Legacy TOTP state on any other account is intentionally
+    // ignored by login under the single-protected-account policy.
+    if (
+      isProtectedMfaUser(updated) &&
+      updated.totpEnabled &&
+      !updated.totpSecret
+    ) {
       logger.error(
         { userId: updated.id },
         "Blocked post-reset login because the 2FA account state is inconsistent",
@@ -2222,7 +2279,7 @@ router.post(
       });
       return;
     }
-    if (updated.totpEnabled) {
+    if (isProtectedMfaUser(updated) && updated.totpEnabled) {
       respondWithTwoFactorChallenge(updated, res);
       return;
     }

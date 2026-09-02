@@ -104,6 +104,11 @@ async function isObjectLinkedToCredentialOwner(
 // ---------------------------------------------------------------------------
 router.get("/credentials/:id/verify", async (req, res) => {
   const token = String(req.params.id);
+  res.setHeader("Cache-Control", "no-store");
+  if (!/^[a-f0-9]{32}$/.test(token)) {
+    res.status(404).json({ message: "Credential not found" });
+    return;
+  }
   const rows = await db
     .select()
     .from(credentialsTable)
@@ -114,11 +119,16 @@ router.get("/credentials/:id/verify", async (req, res) => {
       ),
     );
   const cred = rows[0];
-  if (!cred || !cred.isVerified) {
+  if (!cred) {
     res.status(404).json({ message: "Credential not found" });
     return;
   }
+  if (!cred.isVerified) {
+    res.json({ verificationState: "pending" });
+    return;
+  }
   res.json({
+    verificationState: "verified",
     type: cred.customTypeName ?? cred.type,
     issuerName: cred.issuerName,
     issueDate: cred.issueDate,

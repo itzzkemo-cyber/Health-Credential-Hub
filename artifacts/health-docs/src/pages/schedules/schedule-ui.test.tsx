@@ -103,6 +103,7 @@ const schedule: Schedule = {
   },
   unavailability: [{ employeeId: 4, date: "2028-02-02" }],
   assignments: [{ employeeId: 4, date: "2028-02-01", shiftCode: "M" }],
+  issues: [],
   shortages: [{ date: "2028-02-02", shiftCode: "M", required: 1, assigned: 0 }],
   warnings: ["planning_assistance_only", "boundary_review_required"],
 };
@@ -352,6 +353,44 @@ describe("responsive schedule UI", () => {
     expect(html).not.toContain("Save changes");
     expect(html).toContain("Withdraw publication");
   });
+
+  it.each(["ar", "en"] as const)(
+    "shows saved planning issues and the roster capacity explanation beside actions in %s",
+    (language) => {
+      const constrained: Schedule = {
+        ...schedule,
+        month: "2026-09",
+        employeeIds: [4, 5, 6],
+        employeeCount: 3,
+        shiftTypes: [
+          { ...schedule.shiftTypes[0], code: "M" },
+          { ...schedule.shiftTypes[0], code: "A" },
+          { ...schedule.shiftTypes[0], code: "N" },
+        ],
+        issues: ["monthly_shift_limit", "consecutive_day_limit"],
+        shortages: [],
+        shortageCount: 0,
+      };
+      const html = render(
+        <ScheduleDraftEditor
+          initialSchedule={constrained}
+          onBack={vi.fn()}
+          onReload={async () => {}}
+        />,
+        language,
+      );
+      expect(html).toContain(translate(language, "schedules.capacity_title"));
+      expect(html).toContain(
+        translate(language, "schedules.draft_saved_blocked"),
+      );
+      expect(html).toContain("90");
+      expect(html).toContain("66");
+      expect(html).toContain("5");
+      expect(html).toContain(
+        translate(language, "schedules.issue_monthly_shift_limit"),
+      );
+    },
+  );
 
   it("does not offer mutations for retained cancelled history", () => {
     const html = render(

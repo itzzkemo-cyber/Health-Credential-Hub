@@ -328,10 +328,16 @@ export default function CredentialDetail() {
               <CardTitle className="text-lg flex justify-between items-center">
                 {t("credential.verification_qr")}
                 <Badge
-                  className={getStatusColor(cred.status)}
+                  className={
+                    cred.isVerified
+                      ? getStatusColor(cred.status)
+                      : "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+                  }
                   variant="outline"
                 >
-                  {t(`common.${cred.status}`)}
+                  {cred.isVerified
+                    ? t(`common.${cred.status}`)
+                    : t("credential.verification_pending")}
                 </Badge>
               </CardTitle>
             </CardHeader>
@@ -345,6 +351,11 @@ export default function CredentialDetail() {
                   level="Q"
                 />
               </div>
+              {!cred.isVerified && (
+                <p className="mb-5 text-center text-sm text-amber-700 dark:text-amber-300">
+                  {t("credential.qr_pending_hint")}
+                </p>
+              )}
               <div className="w-full space-y-3">
                 <Button
                   variant="outline"

@@ -141,7 +141,8 @@ export const en = {
       "The code is sent only to the work email your facility manager entered when creating the invitation. The email and permissions cannot be changed here.",
     send_code: "Send verification code",
     code_title: "Enter the verification code",
-    code_subtitle: "We sent a code to the work email linked to this invitation.",
+    code_subtitle:
+      "We sent a code to the work email linked to this invitation.",
     code: "6-digit verification code",
     code_hint:
       "Open your work email and enter the latest code. Never share it; the code is verified when you complete account creation.",
@@ -359,6 +360,8 @@ export const en = {
       "Choose the employee's role before sending the invitation. Only roles within your administrative scope are available.",
     invitation_step_up_hint:
       "Sending an employee invitation is a protected administrative action. Enter your current password and two-factor or backup code.",
+    invitation_step_up_password_hint:
+      "Sending an employee invitation is a protected administrative action. Enter your current password.",
     invitation_email_title: "Secure delivery to the employee's email",
     invitation_email_hint:
       "The employee receives a short-lived, single-use link, then a verification code at the same work email before choosing a password. No password or invitation code is shown here. If email delivery fails, no account is created.",
@@ -384,6 +387,8 @@ export const en = {
       "The employee will no longer be able to use this invitation link. You can send a new invitation later if needed.",
     invitation_revoke_step_up_hint:
       "Revoking an invitation is a protected administrative action. Enter your current password exactly and your two-factor or backup code.",
+    invitation_revoke_step_up_password_hint:
+      "Revoking an invitation is a protected administrative action. Enter your current password exactly.",
     invitation_revoked: "Registration invitation revoked.",
     invitation_revoke_not_found:
       "This invitation is no longer active or is outside your authorized scope. Refresh the list and try again.",
@@ -430,10 +435,16 @@ export const en = {
     step_up_title: "Confirm protected administrative change",
     create_step_up_hint:
       "Creating any employee account directly is a protected administrative action that requires your current password and two-factor or backup code.",
+    create_step_up_password_hint:
+      "Creating any employee account directly is a protected administrative action that requires your current password.",
     update_step_up_hint:
-      "Changing the department or supervisor requires your current password and two-factor or backup code. A role-only change can be saved directly within your permissions.",
+      "Changing the role, department, or supervisor requires your current password and two-factor or backup code.",
+    update_step_up_password_hint:
+      "Changing the role, department, or supervisor requires your current password.",
     step_up_required:
       "Enter your current administrator password and verification code to complete this change.",
+    step_up_password_required:
+      "Enter your current administrator password to complete this change.",
     temporary_password: "Temporary password",
     generate_password: "Generate strong password",
     show_password: "Show temporary password",
@@ -476,6 +487,8 @@ export const en = {
       "The employee will be signed out and blocked from signing in. Credential and audit history will be preserved.",
     account_state_step_up_hint:
       "Confirm this action with your current administrator password and your own two-factor code or a backup code. These values are used only for this request.",
+    account_state_step_up_password_hint:
+      "Confirm this action with your current administrator password. It is used only for this request.",
     activate_success: "Employee account activated.",
     deactivate_success: "Employee account deactivated.",
     account_state_forbidden:
@@ -498,9 +511,12 @@ export const en = {
   verify_page: {
     title: "Watha'iqi Health Verification",
     registry: "Official Credential Registry",
-    invalid_title: "Invalid or Expired QR",
+    invalid_title: "Invalid or Revoked QR",
     invalid_description:
-      "This credential could not be verified. It may have been revoked, expired, or the QR code is invalid.",
+      "This credential could not be found. It may have been revoked, deleted, or the QR code is invalid.",
+    pending_title: "Credential Awaiting Approval",
+    pending_description:
+      "This QR code is valid, but an authorized manager has not approved the credential yet. Verification details will appear here after approval.",
     authentic_expired: "Authentic — Expired",
     verified_active: "Verified & Active",
     auth_code: "Auth Code",
@@ -510,6 +526,7 @@ export const en = {
     expiry_date: "Expiry Date",
     verified_on: "Verified on",
     powered_by: "Powered by Watha'iqi Health",
+    developed_by: "Developed by:",
   },
   credential: {
     add_new: "Add Credential",
@@ -561,7 +578,8 @@ export const en = {
     upload_checking_title: "Checking secure document upload availability",
     upload_checking_desc:
       "You can continue entering the details; file selection will appear when the check is complete.",
-    upload_unavailable_title: "Document attachments are temporarily unavailable",
+    upload_unavailable_title:
+      "Document attachments are temporarily unavailable",
     upload_unavailable_desc:
       "You can save the credential record without an attachment. File selection remains disabled until secure scanning and storage are enabled by an administrator.",
     record_without_attachment_hint:
@@ -600,6 +618,9 @@ export const en = {
     link_copied: "Verification link copied",
     details: "Document Details",
     verification_qr: "Verification QR",
+    verification_pending: "Awaiting manager approval",
+    qr_pending_hint:
+      "This QR code is valid and will show a pending state until an authorized manager reviews the credential.",
     copy_link: "Copy Verification Link",
     print_badge: "Print QR Badge",
     status_timeline: "Status Timeline",

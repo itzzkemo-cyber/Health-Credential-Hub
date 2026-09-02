@@ -434,6 +434,7 @@ export const CreateScheduleResponse = zod.object({
   "date": zod.string().regex(createScheduleResponseTwoAssignmentsItemDateRegExp),
   "shiftCode": zod.string().regex(createScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
 })),
+  "issues": zod.array(zod.string()).describe('Planning issue codes that must be resolved before publication.'),
   "shortages": zod.array(zod.object({
   "date": zod.string(),
   "shiftCode": zod.string(),
@@ -604,6 +605,7 @@ export const GetScheduleResponse = zod.object({
   "date": zod.string().regex(getScheduleResponseTwoAssignmentsItemDateRegExp),
   "shiftCode": zod.string().regex(getScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
 })),
+  "issues": zod.array(zod.string()).describe('Planning issue codes that must be resolved before publication.'),
   "shortages": zod.array(zod.object({
   "date": zod.string(),
   "shiftCode": zod.string(),
@@ -615,7 +617,7 @@ export const GetScheduleResponse = zod.object({
 
 
 /**
- * Rejects duplicate employee/day assignments, unknown shifts or employees, unavailable days, insufficient overnight rest, and configured work limits. A published roster is immutable. Adjacent saved rosters are considered for boundary rest and consecutive-day checks.
+ * Rejects structurally invalid assignments such as duplicate employee/day entries and unknown shifts or employees. A draft may retain reviewable planning issues (unavailable days, insufficient overnight rest, consecutive-day limits, or monthly work limits) so a manager can save work in progress. Publication revalidates and rejects every remaining issue or coverage shortage. A published roster is immutable. Adjacent saved rosters are considered for boundary rest and consecutive-day checks.
  * @summary Validate and replace all assignments in a draft
  */
 
@@ -701,6 +703,7 @@ export const UpdateScheduleResponse = zod.object({
   "date": zod.string().regex(updateScheduleResponseTwoAssignmentsItemDateRegExp),
   "shiftCode": zod.string().regex(updateScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
 })),
+  "issues": zod.array(zod.string()).describe('Planning issue codes that must be resolved before publication.'),
   "shortages": zod.array(zod.object({
   "date": zod.string(),
   "shiftCode": zod.string(),
@@ -788,6 +791,7 @@ export const PublishScheduleResponse = zod.object({
   "date": zod.string().regex(publishScheduleResponseTwoAssignmentsItemDateRegExp),
   "shiftCode": zod.string().regex(publishScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
 })),
+  "issues": zod.array(zod.string()).describe('Planning issue codes that must be resolved before publication.'),
   "shortages": zod.array(zod.object({
   "date": zod.string(),
   "shiftCode": zod.string(),
@@ -875,6 +879,7 @@ export const ReopenScheduleResponse = zod.object({
   "date": zod.string().regex(reopenScheduleResponseTwoAssignmentsItemDateRegExp),
   "shiftCode": zod.string().regex(reopenScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
 })),
+  "issues": zod.array(zod.string()).describe('Planning issue codes that must be resolved before publication.'),
   "shortages": zod.array(zod.object({
   "date": zod.string(),
   "shiftCode": zod.string(),
@@ -962,6 +967,7 @@ export const CancelScheduleResponse = zod.object({
   "date": zod.string().regex(cancelScheduleResponseTwoAssignmentsItemDateRegExp),
   "shiftCode": zod.string().regex(cancelScheduleResponseTwoAssignmentsItemShiftCodeRegExp)
 })),
+  "issues": zod.array(zod.string()).describe('Planning issue codes that must be resolved before publication.'),
   "shortages": zod.array(zod.object({
   "date": zod.string(),
   "shiftCode": zod.string(),
@@ -1118,6 +1124,7 @@ export const LoginResponse = zod.object({
   "isActive": zod.boolean(),
   "mustChangePassword": zod.boolean(),
   "totpEnabled": zod.boolean(),
+  "mfaRequired": zod.boolean().describe('True only for the immutable administrator account that must enroll and use TOTP. Clients must not infer this policy from name or role.'),
   "createdAt": zod.string()
 })
 })
@@ -1162,6 +1169,7 @@ export const GetMeResponse = zod.object({
   "isActive": zod.boolean(),
   "mustChangePassword": zod.boolean(),
   "totpEnabled": zod.boolean(),
+  "mfaRequired": zod.boolean().describe('True only for the immutable administrator account that must enroll and use TOTP. Clients must not infer this policy from name or role.'),
   "createdAt": zod.string()
 })
 
@@ -1228,6 +1236,7 @@ export const ResetPasswordResponse = zod.object({
   "isActive": zod.boolean(),
   "mustChangePassword": zod.boolean(),
   "totpEnabled": zod.boolean(),
+  "mfaRequired": zod.boolean().describe('True only for the immutable administrator account that must enroll and use TOTP. Clients must not infer this policy from name or role.'),
   "createdAt": zod.string()
 })
 })
@@ -1346,6 +1355,7 @@ export const TotpChallengeResponse = zod.object({
   "isActive": zod.boolean(),
   "mustChangePassword": zod.boolean(),
   "totpEnabled": zod.boolean(),
+  "mfaRequired": zod.boolean().describe('True only for the immutable administrator account that must enroll and use TOTP. Clients must not infer this policy from name or role.'),
   "createdAt": zod.string()
 })
 })
@@ -1399,7 +1409,7 @@ export const totpAdminDisableBodyCodeMax = 128;
 export const TotpAdminDisableBody = zod.object({
   "userId": zod.number(),
   "currentPassword": zod.string().min(1).max(totpAdminDisableBodyCurrentPasswordMax),
-  "code": zod.string().min(1).max(totpAdminDisableBodyCodeMax)
+  "code": zod.string().min(1).max(totpAdminDisableBodyCodeMax).optional().describe('Required only when the authenticated administrator is the protected MFA account. Other administrators step up with their password.')
 })
 
 export const TotpAdminDisableResponse = zod.unknown()
@@ -1892,12 +1902,13 @@ export const VerifyCredentialParams = zod.object({
 })
 
 export const VerifyCredentialResponse = zod.object({
-  "type": zod.string(),
-  "issuerName": zod.string(),
-  "issueDate": zod.string(),
-  "expiryDate": zod.string(),
-  "status": zod.string(),
-  "verificationCode": zod.string()
+  "verificationState": zod.enum(['pending', 'verified']),
+  "type": zod.string().optional(),
+  "issuerName": zod.string().optional(),
+  "issueDate": zod.string().optional(),
+  "expiryDate": zod.string().optional(),
+  "status": zod.string().optional(),
+  "verificationCode": zod.string().optional()
 })
 
 
@@ -1971,7 +1982,8 @@ export const ListEmployeesQueryParams = zod.object({
 })
 
 export const ListEmployeesResponseItem = zod.object({
-  "totpEnabled": zod.boolean().optional(),
+  "totpEnabled": zod.boolean(),
+  "mfaRequired": zod.boolean().describe('True only for the protected administrator account.'),
   "id": zod.number(),
   "name": zod.string(),
   "nameAr": zod.string(),
@@ -2030,12 +2042,13 @@ export const CreateEmployeeBody = zod.object({
   "employeeNumber": zod.string(),
   "phone": zod.string().optional(),
   "facilityId": zod.number().optional().describe('Target facility; honored only for system administrators.'),
-  "currentPassword": zod.string().min(createEmployeeBodyCurrentPasswordMin).max(createEmployeeBodyCurrentPasswordMax).describe('Required with code for every direct account provisioning operation.'),
-  "code": zod.string().min(1).max(createEmployeeBodyCodeMax).describe('Required with currentPassword for every direct account provisioning operation; accepts TOTP or a backup code.')
+  "currentPassword": zod.string().min(createEmployeeBodyCurrentPasswordMin).max(createEmployeeBodyCurrentPasswordMax).describe('Required for every direct account provisioning operation.'),
+  "code": zod.string().min(1).max(createEmployeeBodyCodeMax).optional().describe('Required with currentPassword only when the authenticated administrator is the protected MFA account; accepts TOTP or a backup code.')
 })
 
 export const CreateEmployeeResponse = zod.object({
-  "totpEnabled": zod.boolean().optional(),
+  "totpEnabled": zod.boolean(),
+  "mfaRequired": zod.boolean().describe('True only for the protected administrator account.'),
   "id": zod.number(),
   "name": zod.string(),
   "nameAr": zod.string(),
@@ -2130,8 +2143,8 @@ export const CreateEmployeeInvitationBody = zod.object({
   "facilityId": zod.number().int().min(1).nullish().describe('Optional target facility; honored only for system administrators.'),
   "departmentId": zod.number().int().min(1).nullish(),
   "supervisorId": zod.number().int().min(1).nullish(),
-  "currentPassword": zod.string().min(1).max(createEmployeeInvitationBodyCurrentPasswordMax),
-  "code": zod.string().min(1).max(createEmployeeInvitationBodyCodeMax).describe('Single-use TOTP or backup code for administrator step-up.')
+  "currentPassword": zod.string().min(1).max(createEmployeeInvitationBodyCurrentPasswordMax).describe('Required for administrator step-up verification.'),
+  "code": zod.string().min(1).max(createEmployeeInvitationBodyCodeMax).optional().describe('Single-use TOTP or backup code. Required only when the authenticated administrator is the protected MFA account.')
 })
 
 export const CreateEmployeeInvitationResponse = zod.object({
@@ -2160,7 +2173,7 @@ export const revokeEmployeeInvitationBodyCodeMax = 128;
 
 export const RevokeEmployeeInvitationBody = zod.object({
   "currentPassword": zod.string().min(1).max(revokeEmployeeInvitationBodyCurrentPasswordMax).describe('Current password of the authenticated administrator.'),
-  "code": zod.string().min(1).max(revokeEmployeeInvitationBodyCodeMax).describe('Single-use TOTP or backup code for administrator step-up verification.')
+  "code": zod.string().min(1).max(revokeEmployeeInvitationBodyCodeMax).optional().describe('Single-use TOTP or backup code. Required only when the authenticated administrator is the account identified by PROTECTED_MFA_USER_ID.')
 })
 
 export const RevokeEmployeeInvitationResponse = zod.void()
@@ -2179,7 +2192,8 @@ export const getEmployeeResponseTwoCredentialsItemVersionMultipleOf = 1;
 
 
 export const GetEmployeeResponse = zod.object({
-  "totpEnabled": zod.boolean().optional(),
+  "totpEnabled": zod.boolean(),
+  "mfaRequired": zod.boolean().describe('True only for the protected administrator account.'),
   "id": zod.number(),
   "name": zod.string(),
   "nameAr": zod.string(),
@@ -2279,12 +2293,13 @@ export const UpdateEmployeeBody = zod.object({
   "jobTitleAr": zod.string().optional(),
   "phone": zod.string().regex(updateEmployeeBodyPhoneRegExp).nullish().describe('May update or clear an unverified phone. Changing a verified phone requires a dedicated re-verification flow.'),
   "isActive": zod.boolean().optional(),
-  "currentPassword": zod.string().min(1).max(updateEmployeeBodyCurrentPasswordMax).optional().describe('Required with code when departmentId, supervisorId, or isActive actually changes. A role-only change is protected by RBAC, audit logging, and target-session revocation without step-up.'),
-  "code": zod.string().min(1).max(updateEmployeeBodyCodeMax).optional().describe('Required with currentPassword when departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code. A role-only change does not consume a code.')
+  "currentPassword": zod.string().min(1).max(updateEmployeeBodyCurrentPasswordMax).optional().describe('Required when role, departmentId, supervisorId, or isActive actually changes.'),
+  "code": zod.string().min(1).max(updateEmployeeBodyCodeMax).optional().describe('Required with currentPassword for role or organizational-scope changes only when the authenticated administrator is the protected MFA account; accepts a single-use TOTP or backup code.')
 })
 
 export const UpdateEmployeeResponse = zod.object({
-  "totpEnabled": zod.boolean().optional(),
+  "totpEnabled": zod.boolean(),
+  "mfaRequired": zod.boolean().describe('True only for the protected administrator account.'),
   "id": zod.number(),
   "name": zod.string(),
   "nameAr": zod.string(),
@@ -2319,7 +2334,7 @@ export const deleteEmployeeBodyCodeMax = 128;
 
 export const DeleteEmployeeBody = zod.object({
   "currentPassword": zod.string().min(1).max(deleteEmployeeBodyCurrentPasswordMax).describe('Current password of the authenticated administrator.'),
-  "code": zod.string().min(1).max(deleteEmployeeBodyCodeMax).describe('Single-use TOTP or backup code for administrator step-up verification.')
+  "code": zod.string().min(1).max(deleteEmployeeBodyCodeMax).optional().describe('Single-use TOTP or backup code. Required only when the authenticated administrator is the account identified by PROTECTED_MFA_USER_ID.')
 })
 
 export const DeleteEmployeeResponse = zod.void()
@@ -2340,11 +2355,12 @@ export const activateEmployeeBodyCodeMax = 128;
 
 export const ActivateEmployeeBody = zod.object({
   "currentPassword": zod.string().min(1).max(activateEmployeeBodyCurrentPasswordMax).describe('Current password of the authenticated administrator.'),
-  "code": zod.string().min(1).max(activateEmployeeBodyCodeMax).describe('Single-use TOTP or backup code for administrator step-up verification.')
+  "code": zod.string().min(1).max(activateEmployeeBodyCodeMax).optional().describe('Single-use TOTP or backup code. Required only when the authenticated administrator is the account identified by PROTECTED_MFA_USER_ID.')
 })
 
 export const ActivateEmployeeResponse = zod.object({
-  "totpEnabled": zod.boolean().optional(),
+  "totpEnabled": zod.boolean(),
+  "mfaRequired": zod.boolean().describe('True only for the protected administrator account.'),
   "id": zod.number(),
   "name": zod.string(),
   "nameAr": zod.string(),
@@ -2379,11 +2395,12 @@ export const deactivateEmployeeBodyCodeMax = 128;
 
 export const DeactivateEmployeeBody = zod.object({
   "currentPassword": zod.string().min(1).max(deactivateEmployeeBodyCurrentPasswordMax).describe('Current password of the authenticated administrator.'),
-  "code": zod.string().min(1).max(deactivateEmployeeBodyCodeMax).describe('Single-use TOTP or backup code for administrator step-up verification.')
+  "code": zod.string().min(1).max(deactivateEmployeeBodyCodeMax).optional().describe('Single-use TOTP or backup code. Required only when the authenticated administrator is the account identified by PROTECTED_MFA_USER_ID.')
 })
 
 export const DeactivateEmployeeResponse = zod.object({
-  "totpEnabled": zod.boolean().optional(),
+  "totpEnabled": zod.boolean(),
+  "mfaRequired": zod.boolean().describe('True only for the protected administrator account.'),
   "id": zod.number(),
   "name": zod.string(),
   "nameAr": zod.string(),

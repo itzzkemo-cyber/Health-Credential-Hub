@@ -15,10 +15,16 @@ import {
 // These synthetic tests do not prove PostgreSQL locking or live account setup.
 const state = vi.hoisted(() => {
   const previousSecret = process.env.SESSION_SECRET;
+  const previousProtectedMfaUserId = process.env.PROTECTED_MFA_USER_ID;
   process.env.SESSION_SECRET =
     "synthetic-tenant-isolation-test-secret-not-for-runtime";
+  // Fixture 4 is the protected Abdulkarim-equivalent account in this matrix.
+  // Keeping the immutable identity explicit also prevents employee fixture 1
+  // from accidentally inheriting the non-production fallback policy.
+  process.env.PROTECTED_MFA_USER_ID = "4";
   return {
     previousSecret,
+    previousProtectedMfaUserId,
     users: [] as Record<string, any>[],
     credentials: [] as Record<string, any>[],
     writes: [] as { table: string; values: Record<string, any> }[],
@@ -305,6 +311,11 @@ describe("two-facility server-side authorization matrix", () => {
   afterAll(() => {
     if (state.previousSecret === undefined) delete process.env.SESSION_SECRET;
     else process.env.SESSION_SECRET = state.previousSecret;
+    if (state.previousProtectedMfaUserId === undefined) {
+      delete process.env.PROTECTED_MFA_USER_ID;
+    } else {
+      process.env.PROTECTED_MFA_USER_ID = state.previousProtectedMfaUserId;
+    }
   });
   function request(
     path: string,
@@ -356,6 +367,46 @@ describe("two-facility server-side authorization matrix", () => {
       ).toEqual(visible.map((id) => id + 100));
     },
   );
+  it("returns public verification data only for an approved credential", async () => {
+    const token = "a".repeat(32);
+    state.credentials[0].qrToken = token;
+
+    const response = await request(`/credentials/${token}/verify`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.json();
+    expect(body).toMatchObject({
+      verificationState: "verified",
+      type: "BLS",
+      issuerName: "Synthetic",
+      status: "active",
+      verificationCode: "AAAAAAAA",
+    });
+    expect(body).not.toHaveProperty("holderName");
+    expect(body).not.toHaveProperty("certificateNumber");
+    expect(body).not.toHaveProperty("employeeId");
+  });
+  it("returns only a pending state for a valid unapproved QR token", async () => {
+    const token = "b".repeat(32);
+    state.credentials[0].qrToken = token;
+    state.credentials[0].isVerified = false;
+
+    const response = await request(`/credentials/${token}/verify`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ verificationState: "pending" });
+  });
+  it("keeps malformed, deleted, and unknown QR tokens indistinguishable", async () => {
+    const deletedToken = "d".repeat(32);
+    state.credentials.at(-1)!.qrToken = deletedToken;
+
+    for (const token of ["not-a-token", deletedToken, "e".repeat(32)]) {
+      const response = await request(`/credentials/${token}/verify`);
+      expect(response.status).toBe(404);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual({ message: "Credential not found" });
+    }
+  });
   it.each(
     matrix.flatMap((entry) =>
       [1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 21, 22, 23].map((owner) => ({
@@ -442,7 +493,11 @@ describe("two-facility server-side authorization matrix", () => {
           facilityId: actor === 5 ? 20 : 10,
           mustChangePassword: true,
         });
-        expect(state.secondFactor).toHaveBeenCalledOnce();
+        if (actor === 4) {
+          expect(state.secondFactor).toHaveBeenCalledOnce();
+        } else {
+          expect(state.secondFactor).not.toHaveBeenCalled();
+        }
         const body = await response.json();
         expect(body).not.toHaveProperty("passwordHash");
         expect(body).not.toHaveProperty("totpSecret");

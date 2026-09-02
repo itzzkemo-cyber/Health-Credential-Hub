@@ -48,6 +48,8 @@ services:
         generateValue: true
       - key: TOTP_ENCRYPTION_KEY
         generateValue: true
+      - key: PROTECTED_MFA_USER_ID
+        value: "1"
       - key: SESSION_COOKIE_SAME_SITE
         value: lax
       - key: PUBLIC_APP_URL

@@ -492,6 +492,24 @@ describe("invite-only employee registration provisioning", () => {
     );
   });
 
+  it("uses password-only step-up for a non-protected administrator invitation", async () => {
+    state.actor.id = 3;
+    state.lockedActor = { ...state.actor, id: 3 };
+    state.actor.totpEnabled = false;
+    state.actor.totpSecret = null;
+    state.lockedActor.totpEnabled = false;
+    state.lockedActor.totpSecret = null;
+
+    const response = await invite({ code: undefined });
+
+    expect(response.status).toBe(201);
+    expect(state.comparePassword).toHaveBeenCalledOnce();
+    expect(state.consumeSecondFactor).not.toHaveBeenCalled();
+    expect(state.invitationValues).toEqual(
+      expect.objectContaining({ invitedBy: 3 }),
+    );
+  });
+
   it("allows an invitation without a phone and stores no verified phone claim", async () => {
     const response = await invite({ phone: undefined });
 

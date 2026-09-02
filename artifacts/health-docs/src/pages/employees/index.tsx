@@ -82,7 +82,7 @@ import {
   ADMIN_MFA_CODE_FIELD,
   ADMIN_MFA_CURRENT_PASSWORD_FIELD,
   getAdminMfaStepUpErrorKey,
-  readAdminMfaStepUpCredentials,
+  readAdminStepUpCredentials,
 } from "./admin-mfa-step-up";
 
 function apiErrorCode(error: unknown): string | undefined {
@@ -100,9 +100,11 @@ export default function EmployeesList() {
     id?: number;
     role?: string;
     facilityId?: number;
+    mfaRequired?: boolean;
   } | null;
   const isSystemAdmin = user?.role === "system_admin";
   const canCreateEmployee = user?.role === "hospital_admin" || isSystemAdmin;
+  const actorRequiresMfa = user?.mfaRequired !== false;
   const [search, setSearch] = useState("");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [invitationFacilityFilter, setInvitationFacilityFilter] = useState("");
@@ -268,9 +270,16 @@ export default function EmployeesList() {
 
     setCreateFeedbackKey(null);
     const form = event.currentTarget;
-    const stepUp = readAdminMfaStepUpCredentials(new FormData(form));
+    const stepUp = readAdminStepUpCredentials(
+      new FormData(form),
+      user?.mfaRequired,
+    );
     if (!stepUp) {
-      setCreateFeedbackKey("employees_page.step_up_required");
+      setCreateFeedbackKey(
+        actorRequiresMfa
+          ? "employees_page.step_up_required"
+          : "employees_page.step_up_password_required",
+      );
       createStepUpPasswordRef.current?.focus();
       return;
     }
@@ -383,11 +392,16 @@ export default function EmployeesList() {
     event.preventDefault();
     if (!invitationToRevoke) return;
 
-    const stepUp = readAdminMfaStepUpCredentials(
+    const stepUp = readAdminStepUpCredentials(
       new FormData(event.currentTarget),
+      user?.mfaRequired,
     );
     if (!stepUp) {
-      setRevokeFeedbackKey("employees_page.step_up_required");
+      setRevokeFeedbackKey(
+        actorRequiresMfa
+          ? "employees_page.step_up_required"
+          : "employees_page.step_up_password_required",
+      );
       revokeStepUpPasswordRef.current?.focus();
       return;
     }
@@ -950,8 +964,12 @@ export default function EmployeesList() {
                       >
                         {t(
                           isInvitationMode
-                            ? "employees_page.invitation_step_up_hint"
-                            : "employees_page.create_step_up_hint",
+                            ? actorRequiresMfa
+                              ? "employees_page.invitation_step_up_hint"
+                              : "employees_page.invitation_step_up_password_hint"
+                            : actorRequiresMfa
+                              ? "employees_page.create_step_up_hint"
+                              : "employees_page.create_step_up_password_hint",
                         )}
                       </p>
                     </div>
@@ -974,28 +992,30 @@ export default function EmployeesList() {
                         className="min-h-11"
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="create-step-up-code">
-                        {t("twofa.code_label")}
-                      </Label>
-                      <Input
-                        ref={createStepUpCodeRef}
-                        id="create-step-up-code"
-                        name={ADMIN_MFA_CODE_FIELD}
-                        type="text"
-                        dir="ltr"
-                        maxLength={128}
-                        inputMode="text"
-                        autoComplete="one-time-code"
-                        autoCapitalize="characters"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        aria-describedby="create-step-up-description"
-                        placeholder="123456 / XXXXX-XXXXX"
-                        required
-                        className="min-h-11 font-mono"
-                      />
-                    </div>
+                    {actorRequiresMfa && (
+                      <div className="space-y-2">
+                        <Label htmlFor="create-step-up-code">
+                          {t("twofa.code_label")}
+                        </Label>
+                        <Input
+                          ref={createStepUpCodeRef}
+                          id="create-step-up-code"
+                          name={ADMIN_MFA_CODE_FIELD}
+                          type="text"
+                          dir="ltr"
+                          maxLength={128}
+                          inputMode="text"
+                          autoComplete="one-time-code"
+                          autoCapitalize="characters"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          aria-describedby="create-step-up-description"
+                          placeholder="123456 / XXXXX-XXXXX"
+                          required
+                          className="min-h-11 font-mono"
+                        />
+                      </div>
+                    )}
                   </div>
                 </section>
               )}
@@ -1231,7 +1251,11 @@ export default function EmployeesList() {
                     id="revoke-step-up-description"
                     className="mt-1 text-sm leading-6 text-muted-foreground"
                   >
-                    {t("employees_page.invitation_revoke_step_up_hint")}
+                    {t(
+                      actorRequiresMfa
+                        ? "employees_page.invitation_revoke_step_up_hint"
+                        : "employees_page.invitation_revoke_step_up_password_hint",
+                    )}
                   </p>
                 </div>
               </div>
@@ -1254,28 +1278,30 @@ export default function EmployeesList() {
                     className="min-h-11"
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="revoke-step-up-code">
-                    {t("twofa.code_label")}
-                  </Label>
-                  <Input
-                    ref={revokeStepUpCodeRef}
-                    id="revoke-step-up-code"
-                    name={ADMIN_MFA_CODE_FIELD}
-                    type="text"
-                    dir="ltr"
-                    maxLength={128}
-                    inputMode="text"
-                    autoComplete="one-time-code"
-                    autoCapitalize="characters"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    aria-describedby="revoke-step-up-description"
-                    placeholder="123456 / XXXXX-XXXXX"
-                    required
-                    className="min-h-11 font-mono"
-                  />
-                </div>
+                {actorRequiresMfa && (
+                  <div className="space-y-2">
+                    <Label htmlFor="revoke-step-up-code">
+                      {t("twofa.code_label")}
+                    </Label>
+                    <Input
+                      ref={revokeStepUpCodeRef}
+                      id="revoke-step-up-code"
+                      name={ADMIN_MFA_CODE_FIELD}
+                      type="text"
+                      dir="ltr"
+                      maxLength={128}
+                      inputMode="text"
+                      autoComplete="one-time-code"
+                      autoCapitalize="characters"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      aria-describedby="revoke-step-up-description"
+                      placeholder="123456 / XXXXX-XXXXX"
+                      required
+                      className="min-h-11 font-mono"
+                    />
+                  </div>
+                )}
               </div>
             </section>
 

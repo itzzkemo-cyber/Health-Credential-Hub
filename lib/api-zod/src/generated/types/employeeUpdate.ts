@@ -27,13 +27,13 @@ export interface EmployeeUpdate {
   phone?: string | null;
   isActive?: boolean;
   /**
-     * Required with code when departmentId, supervisorId, or isActive actually changes. A role-only change is protected by RBAC, audit logging, and target-session revocation without step-up.
+     * Required when role, departmentId, supervisorId, or isActive actually changes.
      * @minLength 1
      * @maxLength 1024
      */
   currentPassword?: string;
   /**
-     * Required with currentPassword when departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code. A role-only change does not consume a code.
+     * Required with currentPassword for role or organizational-scope changes only when the authenticated administrator is the protected MFA account; accepts a single-use TOTP or backup code.
      * @minLength 1
      * @maxLength 128
      */

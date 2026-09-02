@@ -125,7 +125,29 @@ export const schedulesEn = {
   unsaved: "Unsaved changes",
   saved_state: "All changes saved",
   publish_hint:
-    "Save changes and resolve all unfilled places before publishing.",
+    "Save changes, then resolve planning issues and all unfilled places before publishing.",
+  capacity_title: "The current roster cannot cover this schedule",
+  capacity_detail:
+    "Coverage requires {required} shifts. {employees} employees at a limit of {limit} can cover only {available}; the monthly limit alone requires at least {minimum} employees.",
+  draft_saved_blocked: "Draft saved; publication is still blocked",
+  draft_saved_blocked_hint:
+    "Your edits are preserved. Resolve the following planning issues before publishing:",
+  issue_monthly_shift_limit:
+    "At least one employee exceeds the monthly shift limit.",
+  issue_minimum_rest:
+    "At least one assignment does not leave the required minimum rest.",
+  issue_consecutive_day_limit:
+    "At least one employee exceeds the consecutive workday limit.",
+  issue_employee_unavailable:
+    "At least one assignment is on a blocked or unavailable date.",
+  issue_overlapping_shifts: "At least one employee has overlapping shifts.",
+  issue_duplicate_employee_day:
+    "An employee has more than one assignment on the same day.",
+  issue_adjacent:
+    "Adjacent-month assignments could not be validated safely. Review the neighboring schedules.",
+  issue_coverage: "Some required shift places remain unfilled.",
+  issue_request_conflict:
+    "At least one assignment conflicts with an approved employee request.",
   published_hint:
     "Published schedules are read-only. Withdraw publication before making changes.",
   discard_title: "Discard unsaved changes?",
@@ -397,7 +419,29 @@ export const schedulesAr: Record<keyof typeof schedulesEn, string> = {
   reopened_success: "تم سحب النشر وأصبح الجدول مسودة",
   unsaved: "تغييرات غير محفوظة",
   saved_state: "جميع التغييرات محفوظة",
-  publish_hint: "احفظ التغييرات وعالج جميع الأماكن غير المغطاة قبل النشر.",
+  publish_hint:
+    "احفظ التغييرات، ثم عالج مشكلات التخطيط وجميع الأماكن غير المغطاة قبل النشر.",
+  capacity_title: "عدد الموظفين الحالي لا يكفي لتغطية الجدول",
+  capacity_detail:
+    "تحتاج التغطية إلى {required} مناوبة. يستطيع {employees} موظفين بحد {limit} تغطية {available} فقط؛ والحد الشهري وحده يتطلب {minimum} موظفين على الأقل.",
+  draft_saved_blocked: "حُفظت المسودة، لكن النشر ما زال متوقفاً",
+  draft_saved_blocked_hint:
+    "تم الاحتفاظ بتعديلاتك. عالج مشكلات التخطيط التالية قبل النشر:",
+  issue_monthly_shift_limit: "تجاوز موظف واحد على الأقل الحد الشهري للمناوبات.",
+  issue_minimum_rest:
+    "لا تترك إحدى المناوبات على الأقل الحد الأدنى المطلوب للراحة.",
+  issue_consecutive_day_limit:
+    "تجاوز موظف واحد على الأقل الحد الأقصى لأيام العمل المتتالية.",
+  issue_employee_unavailable:
+    "توجد مناوبة واحدة على الأقل في تاريخ محجوب أو غير متاح.",
+  issue_overlapping_shifts: "توجد مناوبات متداخلة لموظف واحد على الأقل.",
+  issue_duplicate_employee_day:
+    "لدى أحد الموظفين أكثر من مناوبة في اليوم نفسه.",
+  issue_adjacent:
+    "تعذر التحقق الآمن من مناوبات الأشهر المجاورة. راجع الجداول المجاورة.",
+  issue_coverage: "ما زالت بعض أماكن المناوبات المطلوبة غير مغطاة.",
+  issue_request_conflict:
+    "تتعارض إحدى المناوبات على الأقل مع طلب موظف معتمد.",
   published_hint: "الجداول المنشورة للقراءة فقط. اسحب النشر قبل التعديل.",
   discard_title: "هل تريد تجاهل التغييرات غير المحفوظة؟",
   discard_hint:

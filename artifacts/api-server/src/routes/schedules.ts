@@ -64,6 +64,15 @@ const updateBody = UpdateScheduleBody.strict().extend({
     .array()
     .max(6200),
 });
+const DRAFT_REVIEWABLE_ISSUES = new Set([
+  "monthly_shift_limit",
+  "minimum_rest",
+  "consecutive_day_limit",
+  "employee_unavailable",
+]);
+export function draftBlockingIssues(issues: string[]): string[] {
+  return issues.filter((issue) => !DRAFT_REVIEWABLE_ISSUES.has(issue));
+}
 
 class ScheduleError extends Error {
   constructor(
@@ -95,9 +104,10 @@ function requestedMonth(req: Request, required = false): string {
 function planningInput(row: ShiftScheduleRow): SchedulePlanningInput {
   return { ...row.configuration, title: row.title, month: row.month };
 }
-function serialize(row: ShiftScheduleRow) {
-  const input = planningInput(row);
-  const result = validateSchedule(input, row.assignments);
+function serialize(
+  row: ShiftScheduleRow,
+  validation = validateSchedule(planningInput(row), row.assignments),
+) {
   return {
     id: row.id,
     title: row.title,
@@ -107,10 +117,11 @@ function serialize(row: ShiftScheduleRow) {
     version: row.rowVersion,
     ...row.configuration,
     assignments: row.assignments,
-    shortages: result.shortages,
-    warnings: result.warnings,
+    issues: validation.issues,
+    shortages: validation.shortages,
+    warnings: validation.warnings,
     employeeCount: row.configuration.employeeIds.length,
-    shortageCount: result.shortages.reduce(
+    shortageCount: validation.shortages.reduce(
       (sum, item) => sum + item.required - item.assigned,
       0,
     ),
@@ -493,7 +504,7 @@ router.post(
     const input = parsed.data;
     const issues = validatePlanningInput(input);
     if (issues.length) return failure(400, issues[0]);
-    const row = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       const { actor, facilityId } = await lockParticipants(
         tx,
         getUser(req),
@@ -511,10 +522,8 @@ router.post(
         )
         .limit(1);
       if (existing.length) failure(409, "employee_month_already_scheduled");
-      const generated = generateSchedule(
-        input,
-        await adjacentAssignments(tx, input),
-      );
+      const adjacent = await adjacentAssignments(tx, input);
+      const generated = generateSchedule(input, adjacent);
       const { title, month, ...configuration } = input;
       const saved = (
         await tx
@@ -546,9 +555,12 @@ router.post(
         "إنشاء جدول مناوبات",
         req.ip,
       );
-      return saved;
+      return {
+        row: saved,
+        validation: validateSchedule(input, generated.assignments, adjacent),
+      };
     });
-    res.status(201).json(serialize(row));
+    res.status(201).json(serialize(result.row, result.validation));
   },
 );
 
@@ -557,7 +569,7 @@ router.get(
   requireRole(...MANAGER_ROLES),
   async (req, res) => {
     const id = idFrom(req);
-    const row = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       const actor = await lockedActor(tx, getUser(req), true);
       const saved = (
         await tx
@@ -569,9 +581,17 @@ router.get(
           .limit(1)
       )[0];
       if (!saved) failure(404, "schedule_not_found");
-      return saved;
+      const input = planningInput(saved);
+      return {
+        row: saved,
+        validation: validateSchedule(
+          input,
+          saved.assignments,
+          await adjacentAssignments(tx, input),
+        ),
+      };
     });
-    res.json(serialize(row));
+    res.json(serialize(result.row, result.validation));
   },
 );
 
@@ -598,7 +618,7 @@ async function mutate(
   ).safeParse(req.body);
   if (!parsed.success) return failure(400, "invalid_schedule_update");
   const expectedVersion = parsed.data.expectedVersion;
-  const row = await db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const initial = (
       await tx
         .select()
@@ -635,19 +655,24 @@ async function mutate(
       operation === "edit"
         ? updateBody.parse(req.body).assignments
         : current.assignments;
+    let validation: ReturnType<typeof validateSchedule> | undefined;
     if (operation === "edit" || operation === "publish") {
       const input = planningInput(current);
-      const result = validateSchedule(
+      validation = validateSchedule(
         input,
         assignments,
         await adjacentAssignments(tx, input),
       );
-      if (!result.valid)
+      const blockingIssues =
+        operation === "publish"
+          ? validation.issues
+          : draftBlockingIssues(validation.issues);
+      if (blockingIssues.length)
         failure(
           operation === "publish" ? 409 : 400,
-          result.issues[0] ?? "invalid_assignments",
+          blockingIssues[0] ?? "invalid_assignments",
         );
-      if (operation === "publish" && result.shortages.length)
+      if (operation === "publish" && validation.shortages.length)
         failure(409, "coverage_shortage");
       if (operation === "publish") {
         const approvedRequests = await tx
@@ -716,9 +741,19 @@ async function mutate(
       actions[operation][1],
       req.ip,
     );
-    return saved;
+    const responseInput = planningInput(saved);
+    return {
+      row: saved,
+      validation:
+        validation ??
+        validateSchedule(
+          responseInput,
+          saved.assignments,
+          await adjacentAssignments(tx, responseInput),
+        ),
+    };
   });
-  res.json(serialize(row));
+  res.json(serialize(result.row, result.validation));
 }
 router.patch("/schedules/:id", requireRole(...MANAGER_ROLES), (req, res) =>
   mutate(req, res, "edit"),

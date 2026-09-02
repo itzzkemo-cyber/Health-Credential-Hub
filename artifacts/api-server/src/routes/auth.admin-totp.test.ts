@@ -7,6 +7,7 @@ const testState = vi.hoisted(() => ({
   set: vi.fn(),
   insertValues: vi.fn(async () => undefined),
   logAudit: vi.fn(async () => undefined),
+  consumeSecondFactor: vi.fn(async (_tx: unknown, actor: unknown) => actor),
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -31,12 +32,17 @@ vi.mock("@workspace/db", () => {
     from: vi.fn(() => ({
       where: vi.fn(() => {
         const rows = [testState.admin, testState.target].filter(Boolean);
-        return {
+        const query = {
           for: vi.fn(async () => rows),
           orderBy: vi.fn(() => ({
             for: vi.fn(async () => rows),
           })),
+          then: (
+            resolve: (value: unknown) => unknown,
+            reject: (error: unknown) => unknown,
+          ) => Promise.resolve(rows).then(resolve, reject),
         };
+        return query;
       }),
     })),
   }));
@@ -103,6 +109,10 @@ vi.mock("../lib/totpSecret", () => ({
   encryptTotpSecret: vi.fn(),
 }));
 
+vi.mock("../lib/secondFactor", () => ({
+  consumeSecondFactor: testState.consumeSecondFactor,
+}));
+
 vi.mock("../lib/helpers", () => ({
   serializeUser: vi.fn(),
   logAudit: testState.logAudit,
@@ -144,6 +154,7 @@ describe("administrative TOTP recovery hierarchy", () => {
     testState.set.mockReset();
     testState.insertValues.mockClear();
     testState.logAudit.mockClear();
+    testState.consumeSecondFactor.mockClear();
   });
 
   afterEach(async () => {
@@ -243,6 +254,27 @@ describe("administrative TOTP recovery hierarchy", () => {
     expect(testState.set).not.toHaveBeenCalled();
   });
 
+  it("does not let the protected account disable its own MFA", async () => {
+    const response = await request("/auth/totp/disable", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "HealthCredentialHub",
+      },
+      body: JSON.stringify({
+        currentPassword: "admin-password",
+        code: "ABCD-EFGH-IJKL-MNOP",
+      }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "protected_mfa_cannot_be_disabled" }),
+    );
+    expect(testState.set).not.toHaveBeenCalled();
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+  });
+
   it("allows same-facility recovery for a lower-ranked account", async () => {
     const response = await disable(2);
 
@@ -257,6 +289,60 @@ describe("administrative TOTP recovery hierarchy", () => {
         target: "Account",
       }),
     );
+    expect(testState.consumeSecondFactor).toHaveBeenCalledOnce();
+  });
+
+  it("lets a non-protected administrator recover a legacy account with password only", async () => {
+    testState.admin = account(3, "system_admin");
+
+    const response = await post("/auth/totp/admin-disable", {
+      userId: 2,
+      currentPassword: "admin-password",
+    });
+
+    expect(response.status).toBe(200);
+    expect(testState.set).toHaveBeenCalledWith(
+      expect.objectContaining({ totpEnabled: false, totpSecret: null }),
+    );
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+  });
+
+  it("never lets another administrator disable the protected account", async () => {
+    testState.admin = account(3, "system_admin");
+    testState.target = account(1, "employee");
+
+    const response = await post("/auth/totp/admin-disable", {
+      userId: 1,
+      currentPassword: "admin-password",
+    });
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({ code: "protected_mfa_cannot_be_disabled" }),
+    );
+    expect(testState.set).not.toHaveBeenCalled();
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+  });
+
+  it("challenges only the protected account at password login", async () => {
+    const protectedResponse = await post("/auth/login", {
+      email: "protected@example.invalid",
+      password: "admin-password",
+    });
+    expect(protectedResponse.status).toBe(202);
+    expect(testState.consumeSecondFactor).not.toHaveBeenCalled();
+
+    await new Promise<void>((resolve, reject) =>
+      server!.close((error) => (error ? reject(error) : resolve())),
+    );
+    server = undefined;
+    testState.admin = account(3, "system_admin");
+
+    const ordinaryResponse = await post("/auth/login", {
+      email: "ordinary@example.invalid",
+      password: "admin-password",
+    });
+    expect(ordinaryResponse.status).toBe(200);
   });
 
   it("requires the administrator account to have MFA before recovery", async () => {

@@ -41,6 +41,7 @@ export * from './credentialStatus';
 export * from './credentialType';
 export * from './credentialUpdate';
 export * from './credentialVerification';
+export * from './credentialVerificationVerificationState';
 export * from './dashboardStats';
 export * from './department';
 export * from './departmentCompliance';

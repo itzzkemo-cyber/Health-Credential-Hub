@@ -117,10 +117,12 @@ are created with `mustChangePassword=true`. The API then permits only current
 profile, password-change, and logout requests until the temporary password has
 been replaced; the responsive web application sends the user directly to that
 required step. A successful change or password reset clears the flag and
-revokes older sessions. TOTP enrollment for administrators remains a separate
-operator gate: before loading real workforce data, verify that the first
-administrator enrolled TOTP, stored recovery codes in the approved password
-manager, and that the temporary password secret and bootstrap Job were removed.
+revokes older sessions. TOTP enrollment for the immutable account selected by
+`PROTECTED_MFA_USER_ID` remains a separate operator gate: before loading real
+workforce data, verify that the protected administrator enrolled TOTP, stored
+recovery codes in the approved password manager, and that the temporary
+password secret and bootstrap Job were removed. Other administrators use a
+fresh password step-up for sensitive operations without TOTP.
 
 ## Migration database identity
 

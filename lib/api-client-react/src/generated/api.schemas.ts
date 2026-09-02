@@ -272,6 +272,8 @@ export type Schedule = ScheduleSummary & {
   constraints: ScheduleConstraints;
   unavailability: ScheduleUnavailability[];
   assignments: ShiftAssignment[];
+  /** Planning issue codes that must be resolved before publication. */
+  issues: string[];
   shortages: ScheduleShortage[];
   warnings: string[];
 };
@@ -507,6 +509,8 @@ export interface User {
   isActive: boolean;
   mustChangePassword: boolean;
   totpEnabled: boolean;
+  /** True only for the immutable administrator account that must enroll and use TOTP. Clients must not infer this policy from name or role. */
+  mfaRequired: boolean;
   createdAt: string;
 }
 
@@ -577,11 +581,11 @@ export interface AdminStepUpInput {
      */
   currentPassword: string;
   /**
-     * Single-use TOTP or backup code for administrator step-up verification.
+     * Single-use TOTP or backup code. Required only when the authenticated administrator is the account identified by PROTECTED_MFA_USER_ID.
      * @minLength 1
      * @maxLength 128
      */
-  code: string;
+  code?: string;
 }
 
 export interface TotpAdminDisableInput {
@@ -592,10 +596,11 @@ export interface TotpAdminDisableInput {
      */
   currentPassword: string;
   /**
+     * Required only when the authenticated administrator is the protected MFA account. Other administrators step up with their password.
      * @minLength 1
      * @maxLength 128
      */
-  code: string;
+  code?: string;
 }
 
 export interface ChangePasswordInput {
@@ -912,13 +917,22 @@ export interface CredentialListResponse {
   pageSize: number;
 }
 
+export type CredentialVerificationVerificationState = typeof CredentialVerificationVerificationState[keyof typeof CredentialVerificationVerificationState];
+
+
+export const CredentialVerificationVerificationState = {
+  pending: 'pending',
+  verified: 'verified',
+} as const;
+
 export interface CredentialVerification {
-  type: string;
-  issuerName: string;
-  issueDate: string;
-  expiryDate: string;
-  status: string;
-  verificationCode: string;
+  verificationState: CredentialVerificationVerificationState;
+  type?: string;
+  issuerName?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  status?: string;
+  verificationCode?: string;
 }
 
 export interface DuplicateCheckInput {
@@ -993,7 +1007,9 @@ export interface MissingCredential {
 }
 
 export interface Employee {
-  totpEnabled?: boolean;
+  totpEnabled: boolean;
+  /** True only for the protected administrator account. */
+  mfaRequired: boolean;
   id: number;
   name: string;
   nameAr: string;
@@ -1060,17 +1076,17 @@ export interface EmployeeInput {
   /** Target facility; honored only for system administrators. */
   facilityId?: number;
   /**
-     * Required with code for every direct account provisioning operation.
+     * Required for every direct account provisioning operation.
      * @minLength 12
      * @maxLength 1024
      */
   currentPassword: string;
   /**
-     * Required with currentPassword for every direct account provisioning operation; accepts TOTP or a backup code.
+     * Required with currentPassword only when the authenticated administrator is the protected MFA account; accepts TOTP or a backup code.
      * @minLength 1
      * @maxLength 128
      */
-  code: string;
+  code?: string;
 }
 
 /**
@@ -1139,16 +1155,17 @@ export interface CreateEmployeeInvitationInput {
      */
   supervisorId?: number | null;
   /**
+     * Required for administrator step-up verification.
      * @minLength 1
      * @maxLength 1024
      */
   currentPassword: string;
   /**
-     * Single-use TOTP or backup code for administrator step-up.
+     * Single-use TOTP or backup code. Required only when the authenticated administrator is the protected MFA account.
      * @minLength 1
      * @maxLength 128
      */
-  code: string;
+  code?: string;
 }
 
 export type EmployeeInvitationCreatedStatus = typeof EmployeeInvitationCreatedStatus[keyof typeof EmployeeInvitationCreatedStatus];
@@ -1185,13 +1202,13 @@ export interface EmployeeUpdate {
   phone?: string | null;
   isActive?: boolean;
   /**
-     * Required with code when departmentId, supervisorId, or isActive actually changes. A role-only change is protected by RBAC, audit logging, and target-session revocation without step-up.
+     * Required when role, departmentId, supervisorId, or isActive actually changes.
      * @minLength 1
      * @maxLength 1024
      */
   currentPassword?: string;
   /**
-     * Required with currentPassword when departmentId, supervisorId, or isActive actually changes; accepts a single-use TOTP or backup code. A role-only change does not consume a code.
+     * Required with currentPassword for role or organizational-scope changes only when the authenticated administrator is the protected MFA account; accepts a single-use TOTP or backup code.
      * @minLength 1
      * @maxLength 128
      */

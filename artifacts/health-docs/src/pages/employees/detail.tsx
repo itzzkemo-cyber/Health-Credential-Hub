@@ -13,7 +13,6 @@ import {
   useGetFacilities,
   useListDepartments,
   useListEmployees,
-  useTotpAdminDisable,
   useUpdateEmployee,
 } from "@workspace/api-client-react";
 import {
@@ -81,10 +80,8 @@ import {
   ADMIN_MFA_CODE_FIELD,
   ADMIN_MFA_CURRENT_PASSWORD_FIELD,
   getAccountStateStepUpErrorKey,
-  getAdminMfaDisableErrorKey,
   getAdminMfaStepUpErrorKey,
-  readAdminMfaStepUpCredentials,
-  readAdminMfaStepUpInput,
+  readAdminStepUpCredentials,
 } from "./admin-mfa-step-up";
 
 const ADMIN_ROLES = ["hospital_admin", "system_admin"];
@@ -106,8 +103,10 @@ export default function EmployeeDetail() {
     id?: number;
     role?: string;
     facilityId?: number;
+    mfaRequired?: boolean;
   } | null;
   const isAdmin = !!me?.role && ADMIN_ROLES.includes(me.role);
+  const actorRequiresMfa = me?.mfaRequired !== false;
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<EmployeeEditForm | null>(null);
   const [editFeedbackKey, setEditFeedbackKey] = useState<string | null>(null);
@@ -121,10 +120,6 @@ export default function EmployeeDetail() {
   const accountStateFormRef = useRef<HTMLFormElement>(null);
   const accountStatePasswordRef = useRef<HTMLInputElement>(null);
   const accountStateTriggerRef = useRef<HTMLButtonElement>(null);
-  const [isAdminDisableOpen, setIsAdminDisableOpen] = useState(false);
-  const adminDisableFormRef = useRef<HTMLFormElement>(null);
-  const adminDisablePasswordRef = useRef<HTMLInputElement>(null);
-  const adminDisableTriggerRef = useRef<HTMLButtonElement>(null);
 
   const employeeQuery = useGetEmployee(id);
   const emp = employeeQuery.data;
@@ -152,9 +147,6 @@ export default function EmployeeDetail() {
   const updateEmployee = useUpdateEmployee({ mutation: { gcTime: 0 } });
   const activateEmployee = useActivateEmployee({ mutation: { gcTime: 0 } });
   const deactivateEmployee = useDeactivateEmployee({
-    mutation: { gcTime: 0 },
-  });
-  const adminDisableMutation = useTotpAdminDisable({
     mutation: { gcTime: 0 },
   });
 
@@ -228,10 +220,17 @@ export default function EmployeeDetail() {
 
     setEditFeedbackKey(null);
     const stepUp = editRequiresStepUp
-      ? readAdminMfaStepUpCredentials(new FormData(event.currentTarget))
+      ? readAdminStepUpCredentials(
+          new FormData(event.currentTarget),
+          me?.mfaRequired,
+        )
       : undefined;
     if (editRequiresStepUp && !stepUp) {
-      setEditFeedbackKey("employees_page.step_up_required");
+      setEditFeedbackKey(
+        actorRequiresMfa
+          ? "employees_page.step_up_required"
+          : "employees_page.step_up_password_required",
+      );
       editStepUpPasswordRef.current?.focus();
       return;
     }
@@ -310,11 +309,16 @@ export default function EmployeeDetail() {
       return;
     }
 
-    const credentials = readAdminMfaStepUpCredentials(
+    const credentials = readAdminStepUpCredentials(
       new FormData(event.currentTarget),
+      me?.mfaRequired,
     );
     if (!credentials) {
-      setAccountStateFeedbackKey("employees_page.step_up_required");
+      setAccountStateFeedbackKey(
+        actorRequiresMfa
+          ? "employees_page.step_up_required"
+          : "employees_page.step_up_password_required",
+      );
       accountStatePasswordRef.current?.focus();
       return;
     }
@@ -347,53 +351,6 @@ export default function EmployeeDetail() {
           clearAccountStateSecrets();
           setAccountStateFeedbackKey(errorKey);
           requestAnimationFrame(() => accountStatePasswordRef.current?.focus());
-        },
-      },
-    );
-  };
-
-  const clearAdminDisableSecrets = () => {
-    adminDisableFormRef.current?.reset();
-    adminDisableMutation.reset();
-  };
-
-  const openAdminDisable = () => {
-    clearAdminDisableSecrets();
-    setIsAdminDisableOpen(true);
-  };
-
-  const closeAdminDisable = () => {
-    if (adminDisableMutation.isPending) return;
-    clearAdminDisableSecrets();
-    setIsAdminDisableOpen(false);
-  };
-
-  const handleAdminDisable = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (adminDisableMutation.isPending) return;
-
-    const form = event.currentTarget;
-    const data = readAdminMfaStepUpInput(new FormData(form), id);
-    if (!data) return;
-
-    adminDisableMutation.mutate(
-      { data },
-      {
-        onSuccess: () => {
-          form.reset();
-          adminDisableMutation.reset();
-          setIsAdminDisableOpen(false);
-          void queryClient.invalidateQueries({
-            queryKey: getGetEmployeeQueryKey(id),
-          });
-          toast.success(t("twofa.admin_disabled_success"));
-        },
-        onError: (error) => {
-          const errorKey = getAdminMfaDisableErrorKey(apiErrorCode(error));
-          form.reset();
-          adminDisableMutation.reset();
-          requestAnimationFrame(() => adminDisablePasswordRef.current?.focus());
-          toast.error(t(errorKey));
         },
       },
     );
@@ -523,7 +480,11 @@ export default function EmployeeDetail() {
                           )}
                         </span>
                         <span className="block">
-                          {t("employees_page.account_state_step_up_hint")}
+                          {t(
+                            actorRequiresMfa
+                              ? "employees_page.account_state_step_up_hint"
+                              : "employees_page.account_state_step_up_password_hint",
+                          )}
                         </span>
                       </AlertDialogDescription>
                     </AlertDialogHeader>
@@ -553,31 +514,33 @@ export default function EmployeeDetail() {
                           className="min-h-11"
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="account-state-code">
-                          {t("twofa.code_label")}
-                        </Label>
-                        <Input
-                          id="account-state-code"
-                          name={ADMIN_MFA_CODE_FIELD}
-                          type="text"
-                          dir="ltr"
-                          maxLength={128}
-                          inputMode="text"
-                          autoComplete="one-time-code"
-                          autoCapitalize="characters"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          aria-describedby={
-                            accountStateFeedbackKey
-                              ? "account-state-step-up-description account-state-feedback"
-                              : "account-state-step-up-description"
-                          }
-                          placeholder="123456 / XXXXX-XXXXX"
-                          required
-                          className="min-h-11 font-mono"
-                        />
-                      </div>
+                      {actorRequiresMfa && (
+                        <div className="space-y-2">
+                          <Label htmlFor="account-state-code">
+                            {t("twofa.code_label")}
+                          </Label>
+                          <Input
+                            id="account-state-code"
+                            name={ADMIN_MFA_CODE_FIELD}
+                            type="text"
+                            dir="ltr"
+                            maxLength={128}
+                            inputMode="text"
+                            autoComplete="one-time-code"
+                            autoCapitalize="characters"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            aria-describedby={
+                              accountStateFeedbackKey
+                                ? "account-state-step-up-description account-state-feedback"
+                                : "account-state-step-up-description"
+                            }
+                            placeholder="123456 / XXXXX-XXXXX"
+                            required
+                            className="min-h-11 font-mono"
+                          />
+                        </div>
+                      )}
                       {accountStateFeedbackKey && (
                         <p
                           id="account-state-feedback"
@@ -691,116 +654,12 @@ export default function EmployeeDetail() {
                     {isRTL ? emp.supervisor.nameAr : emp.supervisor.name}
                   </ProfileRow>
                 )}
-                {emp.totpEnabled && (
+                {emp.mfaRequired && emp.totpEnabled && (
                   <ProfileRow icon={ShieldCheck} emphasize>
                     {t("twofa.admin_badge")}
                   </ProfileRow>
                 )}
               </div>
-
-              {emp.totpEnabled && isAdmin && !isOwnAccount && (
-                <div className="border-b border-border py-6">
-                  <Button
-                    ref={adminDisableTriggerRef}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="min-h-11 w-full border-destructive/40 text-destructive hover:bg-destructive/10"
-                    disabled={adminDisableMutation.isPending}
-                    onClick={openAdminDisable}
-                  >
-                    {t("twofa.admin_disable")}
-                  </Button>
-                  <AlertDialog
-                    open={isAdminDisableOpen}
-                    onOpenChange={(open) =>
-                      open ? openAdminDisable() : closeAdminDisable()
-                    }
-                  >
-                    <AlertDialogContent
-                      className="max-h-[90vh] w-[calc(100%-2rem)] overflow-y-auto sm:max-w-md"
-                      onOpenAutoFocus={(event) => {
-                        event.preventDefault();
-                        adminDisablePasswordRef.current?.focus();
-                      }}
-                      onCloseAutoFocus={(event) => {
-                        event.preventDefault();
-                        adminDisableTriggerRef.current?.focus();
-                      }}
-                    >
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>
-                          {t("twofa.admin_disable")}
-                        </AlertDialogTitle>
-                        <AlertDialogDescription id="admin-mfa-disable-hint">
-                          {t("twofa.admin_disable_hint")}
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <form
-                        ref={adminDisableFormRef}
-                        onSubmit={handleAdminDisable}
-                        className="space-y-4"
-                      >
-                        <div className="space-y-2">
-                          <Label htmlFor="admin-mfa-current-password">
-                            {t("twofa.current_password")}
-                          </Label>
-                          <Input
-                            ref={adminDisablePasswordRef}
-                            id="admin-mfa-current-password"
-                            name={ADMIN_MFA_CURRENT_PASSWORD_FIELD}
-                            type="password"
-                            dir="ltr"
-                            maxLength={1024}
-                            autoComplete="current-password"
-                            aria-describedby="admin-mfa-disable-hint"
-                            required
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="admin-mfa-code">
-                            {t("twofa.code_label")}
-                          </Label>
-                          <Input
-                            id="admin-mfa-code"
-                            name={ADMIN_MFA_CODE_FIELD}
-                            type="text"
-                            dir="ltr"
-                            maxLength={128}
-                            className="font-mono"
-                            autoComplete="one-time-code"
-                            autoCapitalize="characters"
-                            autoCorrect="off"
-                            spellCheck={false}
-                            aria-describedby="admin-mfa-disable-hint"
-                            placeholder="123456"
-                            required
-                          />
-                        </div>
-                        <AlertDialogFooter className="gap-2 sm:space-x-0">
-                          <AlertDialogCancel
-                            type="button"
-                            className="min-h-11 w-full sm:w-auto"
-                            disabled={adminDisableMutation.isPending}
-                          >
-                            {t("common.cancel")}
-                          </AlertDialogCancel>
-                          <Button
-                            type="submit"
-                            variant="destructive"
-                            className="min-h-11 w-full sm:w-auto"
-                            disabled={adminDisableMutation.isPending}
-                          >
-                            {adminDisableMutation.isPending
-                              ? t("common.loading")
-                              : t("twofa.admin_disable_confirm")}
-                          </Button>
-                        </AlertDialogFooter>
-                      </form>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              )}
 
               <div className="pt-6">
                 <p className="mb-3 text-sm font-medium">
@@ -1134,7 +993,11 @@ export default function EmployeeDetail() {
                         id="edit-step-up-description"
                         className="mt-1 text-sm leading-6 text-muted-foreground"
                       >
-                        {t("employees_page.update_step_up_hint")}
+                        {t(
+                          actorRequiresMfa
+                            ? "employees_page.update_step_up_hint"
+                            : "employees_page.update_step_up_password_hint",
+                        )}
                       </p>
                     </div>
                   </div>
@@ -1156,28 +1019,30 @@ export default function EmployeeDetail() {
                         className="min-h-11"
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="edit-step-up-code">
-                        {t("twofa.code_label")}
-                      </Label>
-                      <Input
-                        ref={editStepUpCodeRef}
-                        id="edit-step-up-code"
-                        name={ADMIN_MFA_CODE_FIELD}
-                        type="text"
-                        dir="ltr"
-                        maxLength={128}
-                        inputMode="text"
-                        autoComplete="one-time-code"
-                        autoCapitalize="characters"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        aria-describedby="edit-step-up-description"
-                        placeholder="123456 / XXXXX-XXXXX"
-                        required
-                        className="min-h-11 font-mono"
-                      />
-                    </div>
+                    {actorRequiresMfa && (
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-step-up-code">
+                          {t("twofa.code_label")}
+                        </Label>
+                        <Input
+                          ref={editStepUpCodeRef}
+                          id="edit-step-up-code"
+                          name={ADMIN_MFA_CODE_FIELD}
+                          type="text"
+                          dir="ltr"
+                          maxLength={128}
+                          inputMode="text"
+                          autoComplete="one-time-code"
+                          autoCapitalize="characters"
+                          autoCorrect="off"
+                          spellCheck={false}
+                          aria-describedby="edit-step-up-description"
+                          placeholder="123456 / XXXXX-XXXXX"
+                          required
+                          className="min-h-11 font-mono"
+                        />
+                      </div>
+                    )}
                   </div>
                 </section>
               )}

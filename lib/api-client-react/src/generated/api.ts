@@ -931,7 +931,7 @@ export const getUpdateScheduleUrl = (id: number,) => {
 }
 
 /**
- * Rejects duplicate employee/day assignments, unknown shifts or employees, unavailable days, insufficient overnight rest, and configured work limits. A published roster is immutable. Adjacent saved rosters are considered for boundary rest and consecutive-day checks.
+ * Rejects structurally invalid assignments such as duplicate employee/day entries and unknown shifts or employees. A draft may retain reviewable planning issues (unavailable days, insufficient overnight rest, consecutive-day limits, or monthly work limits) so a manager can save work in progress. Publication revalidates and rejects every remaining issue or coverage shortage. A published roster is immutable. Adjacent saved rosters are considered for boundary rest and consecutive-day checks.
  * @summary Validate and replace all assignments in a draft
  */
 export const updateSchedule = async (id: number,
@@ -3651,7 +3651,7 @@ export const getVerifyCredentialQueryKey = (id: string,) => {
     }
 
 
-export const getVerifyCredentialQueryOptions = <TData = Awaited<ReturnType<typeof verifyCredential>>, TError = ErrorType<unknown>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof verifyCredential>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getVerifyCredentialQueryOptions = <TData = Awaited<ReturnType<typeof verifyCredential>>, TError = ErrorType<void>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof verifyCredential>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -3670,14 +3670,14 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type VerifyCredentialQueryResult = NonNullable<Awaited<ReturnType<typeof verifyCredential>>>
-export type VerifyCredentialQueryError = ErrorType<unknown>
+export type VerifyCredentialQueryError = ErrorType<void>
 
 
 /**
  * @summary Public credential verification by QR token
  */
 
-export function useVerifyCredential<TData = Awaited<ReturnType<typeof verifyCredential>>, TError = ErrorType<unknown>>(
+export function useVerifyCredential<TData = Awaited<ReturnType<typeof verifyCredential>>, TError = ErrorType<void>>(
  id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof verifyCredential>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {

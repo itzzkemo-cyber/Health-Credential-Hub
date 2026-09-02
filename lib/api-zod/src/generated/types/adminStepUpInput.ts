@@ -14,9 +14,9 @@ export interface AdminStepUpInput {
      */
   currentPassword: string;
   /**
-     * Single-use TOTP or backup code for administrator step-up verification.
+     * Single-use TOTP or backup code. Required only when the authenticated administrator is the account identified by PROTECTED_MFA_USER_ID.
      * @minLength 1
      * @maxLength 128
      */
-  code: string;
+  code?: string;
 }
