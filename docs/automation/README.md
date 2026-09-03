@@ -157,7 +157,7 @@ activate the imported workflow, or change production environment variables.
 
 3. Inventory every connectable database and the current `public`-schema objects.
    Keep `wathaiqi_n8n` as the main database owner, and use targeted `ALTER ...
-   OWNER` statements only; do not use `REASSIGN OWNED`, because it can touch
+OWNER` statements only; do not use `REASSIGN OWNED`, because it can touch
    shared objects and is not permitted by this managed-provider plan:
 
    ```sql
@@ -218,7 +218,7 @@ activate the imported workflow, or change production environment variables.
    GRANT CONNECT ON DATABASE wathaiqi_n8n_receipts
      TO wathaiqi_n8n_receiver_operator, wathaiqi_n8n_receiver_login;
 
-    ```
+   ```
 
    Run the sequence with `ON_ERROR_STOP` (or a driver `try/finally`). Connect
    explicitly to `wathaiqi_n8n_receipts` and run `n8n-inbox.sql`. Its
@@ -268,7 +268,7 @@ activate the imported workflow, or change production environment variables.
     JOIN pg_catalog.pg_roles AS owner ON owner.oid = database.datdba
     WHERE database.datallowconn AND NOT database.datistemplate
    ORDER BY database.datname;
-    ```
+   ```
 
    While connected to the main database, inventory the n8n relations, routines,
    and standalone types in `public` (excluding extension-owned members). Each
@@ -404,10 +404,71 @@ activate the imported workflow, or change production environment variables.
    must include the exact `eventId`; the worker rejects a mismatched or missing
    event ID even when an intermediary returns a successful HTTP status.
 10. Review the n8n execution-retention configuration and verify that successful,
-   failed, and manual execution bodies are not retained. Run `n8n audit` and
-   restrict workflow/credential editors.
+    failed, and manual execution bodies are not retained. Run `n8n audit` and
+    restrict workflow/credential editors.
 11. Only after explicit approval, set the worker URL/host allowlist and secret,
     then enable the outbox and webhook switches for the reviewed facilities.
+
+## Dedicated Render worker
+
+The reviewed deployment topology runs the outbox consumer separately from the
+public API. The checked-in `render.yaml` defines
+`wathaiqi-automation-worker` as a narrow Docker web service whose command is:
+
+```sh
+node --enable-source-maps dist/automation-worker.mjs
+```
+
+It is declared as a web service, rather than a Render background worker,
+because Render only supports application-level HTTP health checks for web
+services. The process serves exactly two unauthenticated, data-free endpoints:
+
+- `GET /healthz` confirms only that the worker process is alive.
+- `GET /readyz` returns success only after configuration and least-privilege
+  database-boundary validation passed, the continuous worker is running, and a
+  recent `select 1` database probe succeeds. Concurrent probes are coalesced
+  and the result is cached for two seconds so public health traffic cannot
+  consume the worker's small connection pool.
+
+All other paths return 404 and no endpoint returns event bodies, database
+errors, provider URLs, or configuration values. Render must use `/readyz` as
+its health check. An uptime monitor may check that same path, but free Render
+instances provide no production SLA; use a paid always-on service for a
+production healthcare deployment.
+
+The API creates outbox rows but never owns delivery:
+
+```dotenv
+AUTOMATION_OUTBOX_ENABLED=true
+AUTOMATION_FACILITY_ALLOWLIST=1
+AUTOMATION_WEBHOOK_ENABLED=false
+AUTOMATION_EMBEDDED_WORKER_ENABLED=false
+```
+
+The dedicated worker receives the same restricted application `DATABASE_URL`
+and database role-boundary variables, plus:
+
+```dotenv
+AUTOMATION_WORKER_MODE=continuous
+AUTOMATION_OUTBOX_ENABLED=true
+AUTOMATION_WEBHOOK_ENABLED=true
+AUTOMATION_EMBEDDED_WORKER_ENABLED=false
+AUTOMATION_WEBHOOK_MODE=SINGLE_CONTROLLER
+AUTOMATION_FACILITY_ALLOWLIST=1
+AUTOMATION_WEBHOOK_URL=https://wathaiqi-n8n.onrender.com/webhook/health-credential-events-v1
+AUTOMATION_WEBHOOK_HOST_ALLOWLIST=wathaiqi-n8n.onrender.com
+AUTOMATION_WEBHOOK_SECRET=<same canonical Base64 secret stored by the receiver>
+```
+
+Provision `DATABASE_URL` and `AUTOMATION_WEBHOOK_SECRET` through Render's
+secret prompts; never commit either value. Deploy the worker from the exact
+same reviewed commit as the API after migrations complete. Confirm `/readyz`
+returns 200, then verify one safe event reaches the receipt database before
+disabling the previous embedded worker. Render's free plan does not support a
+custom shutdown allowance; if it terminates an active delivery, the outbox lock
+expires and a later cycle safely reclaims it. When upgrading to a paid service,
+set `maxShutdownDelaySeconds: 300` so the current bounded batch can normally
+release or complete its database claim before Render uses `SIGKILL`.
 
 ## Pilot-only embedded worker
 

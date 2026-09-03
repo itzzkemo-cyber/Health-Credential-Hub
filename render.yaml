@@ -4,6 +4,7 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
+    repo: https://github.com/wathaiqihealth/Health-Credential-Hub.git
     branch: main
     dockerfilePath: ./Dockerfile
     dockerContext: .
@@ -11,7 +12,6 @@ services:
     # The free plan has no isolated pre-deploy job. Keep deploys manual so the
     # reviewed migration command can finish before a new image is released.
     autoDeployTrigger: off
-    maxShutdownDelaySeconds: 30
     envVars:
       - key: NODE_ENV
         value: production
@@ -83,6 +83,74 @@ services:
       - key: RESEND_API_KEY
         sync: false
       - key: AUTOMATION_OUTBOX_ENABLED
-        value: "false"
+        value: "true"
+      - key: AUTOMATION_FACILITY_ALLOWLIST
+        value: "1"
       - key: AUTOMATION_WEBHOOK_ENABLED
         value: "false"
+      - key: AUTOMATION_EMBEDDED_WORKER_ENABLED
+        value: "false"
+
+  # Render HTTP health checks do not apply to background workers. This narrow
+  # web service runs only the durable outbox poller plus fixed health endpoints,
+  # allowing Render and an external uptime monitor to restart it independently
+  # from the public API. It does not serve the product UI or business data.
+  - type: web
+    name: wathaiqi-automation-worker
+    runtime: docker
+    plan: free
+    region: frankfurt
+    repo: https://github.com/wathaiqihealth/Health-Credential-Hub.git
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: node --enable-source-maps dist/automation-worker.mjs
+    healthCheckPath: /readyz
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: BIND_HOST
+        value: 0.0.0.0
+      - key: LOG_LEVEL
+        value: info
+      - key: DB_POOL_MAX
+        value: "2"
+      - key: NODE_EXTRA_CA_CERTS
+        value: /app/certs/supabase-prod-ca-2021.crt
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_DATABASE_USER
+        value: healthdocs_app
+      - key: APP_DATABASE_ROLE
+        value: healthdocs_app_dml
+      - key: MIGRATOR_DATABASE_USER
+        value: healthdocs_migrator
+      - key: MIGRATOR_DATABASE_ROLE
+        value: healthdocs_migrator_ddl
+      - key: VERIFY_DATABASE_ROLE_BOUNDARY
+        value: "true"
+      - key: DATABASE_OWNERSHIP_MODE
+        value: managed
+      - key: DATABASE_BLOCKED_ROLES
+        value: anon,authenticated,service_role
+      - key: AUTOMATION_WORKER_MODE
+        value: continuous
+      - key: AUTOMATION_OUTBOX_ENABLED
+        value: "true"
+      - key: AUTOMATION_WEBHOOK_ENABLED
+        value: "true"
+      - key: AUTOMATION_EMBEDDED_WORKER_ENABLED
+        value: "false"
+      - key: AUTOMATION_WEBHOOK_MODE
+        value: SINGLE_CONTROLLER
+      - key: AUTOMATION_FACILITY_ALLOWLIST
+        value: "1"
+      - key: AUTOMATION_WEBHOOK_URL
+        value: https://wathaiqi-n8n.onrender.com/webhook/health-credential-events-v1
+      - key: AUTOMATION_WEBHOOK_HOST_ALLOWLIST
+        value: wathaiqi-n8n.onrender.com
+      - key: AUTOMATION_WEBHOOK_SECRET
+        sync: false
