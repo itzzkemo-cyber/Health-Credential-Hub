@@ -17,8 +17,54 @@ export const AUTOMATION_EVENT_TYPES = [
   "credential.created",
   "credential.verification_changed",
   "credential.expiry_due",
+  "credential.lifecycle_changed",
+  "employee.lifecycle_changed",
+  "employee.invitation_changed",
+  "schedule.lifecycle_changed",
+  "schedule_request.lifecycle_changed",
 ] as const;
 export type AutomationEventType = (typeof AUTOMATION_EVENT_TYPES)[number];
+
+export const CREDENTIAL_LIFECYCLE_CHANGES = ["updated", "deleted"] as const;
+export type CredentialLifecycleChange =
+  (typeof CREDENTIAL_LIFECYCLE_CHANGES)[number];
+
+export const EMPLOYEE_LIFECYCLE_CHANGES = [
+  "created",
+  "updated",
+  "activated",
+  "deactivated",
+] as const;
+export type EmployeeLifecycleChange =
+  (typeof EMPLOYEE_LIFECYCLE_CHANGES)[number];
+
+export const EMPLOYEE_INVITATION_CHANGES = [
+  "created",
+  "revoked",
+  "accepted",
+] as const;
+export type EmployeeInvitationChange =
+  (typeof EMPLOYEE_INVITATION_CHANGES)[number];
+
+export const SCHEDULE_LIFECYCLE_CHANGES = [
+  "created",
+  "updated",
+  "published",
+  "reopened",
+  "cancelled",
+] as const;
+export type ScheduleLifecycleChange =
+  (typeof SCHEDULE_LIFECYCLE_CHANGES)[number];
+
+export const SCHEDULE_REQUEST_LIFECYCLE_CHANGES = [
+  "submitted",
+  "withdrawn",
+  "approved",
+  "rejected",
+  "approval_revoked",
+] as const;
+export type ScheduleRequestLifecycleChange =
+  (typeof SCHEDULE_REQUEST_LIFECYCLE_CHANGES)[number];
 
 export type AutomationEventData =
   | {
@@ -39,6 +85,21 @@ export type AutomationEventData =
       expiryDate: string;
       dueInDays: number;
       thresholdDays: number;
+    }
+  | {
+      change: CredentialLifecycleChange;
+    }
+  | {
+      change: EmployeeLifecycleChange;
+    }
+  | {
+      change: EmployeeInvitationChange;
+    }
+  | {
+      change: ScheduleLifecycleChange;
+    }
+  | {
+      change: ScheduleRequestLifecycleChange;
     };
 
 /**
@@ -53,9 +114,9 @@ export const automationOutboxTable = pgTable(
     facilityId: integer("facility_id")
       .notNull()
       .references(() => facilitiesTable.id),
-    credentialId: integer("credential_id")
-      .notNull()
-      .references(() => credentialsTable.id),
+    credentialId: integer("credential_id").references(
+      () => credentialsTable.id,
+    ),
     eventType: text("event_type", { enum: AUTOMATION_EVENT_TYPES }).notNull(),
     deduplicationKey: text("deduplication_key").notNull(),
     payload: jsonb("payload").$type<AutomationEventData>().notNull(),
@@ -84,7 +145,12 @@ export const automationOutboxTable = pgTable(
     ),
     check(
       "automation_outbox_event_type_allowed",
-      sql`${table.eventType} in ('credential.created', 'credential.verification_changed', 'credential.expiry_due')`,
+      sql`${table.eventType} in ('credential.created', 'credential.verification_changed', 'credential.expiry_due', 'credential.lifecycle_changed', 'employee.lifecycle_changed', 'employee.invitation_changed', 'schedule.lifecycle_changed', 'schedule_request.lifecycle_changed')`,
+    ),
+    check(
+      "automation_outbox_credential_reference_matches_event",
+      sql`((${table.eventType} in ('credential.created', 'credential.verification_changed', 'credential.expiry_due', 'credential.lifecycle_changed')) and ${table.credentialId} is not null)
+        or ((${table.eventType} in ('employee.lifecycle_changed', 'employee.invitation_changed', 'schedule.lifecycle_changed', 'schedule_request.lifecycle_changed')) and ${table.credentialId} is null)`,
     ),
     check(
       "automation_outbox_attempts_nonnegative",
@@ -125,7 +191,7 @@ export const automationDeliveryLogTable = pgTable(
     ),
     check(
       "automation_delivery_log_event_type_allowed",
-      sql`${table.eventType} in ('credential.created', 'credential.verification_changed', 'credential.expiry_due')`,
+      sql`${table.eventType} in ('credential.created', 'credential.verification_changed', 'credential.expiry_due', 'credential.lifecycle_changed', 'employee.lifecycle_changed', 'employee.invitation_changed', 'schedule.lifecycle_changed', 'schedule_request.lifecycle_changed')`,
     ),
     check(
       "automation_delivery_log_status_allowed",

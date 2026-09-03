@@ -1,22 +1,45 @@
 import { createHmac } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import type { IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { LookupFunction } from "node:net";
 import {
   AUTOMATION_EVENT_TYPES,
   CREDENTIAL_TYPES,
-  type AutomationEventData,
+  CREDENTIAL_LIFECYCLE_CHANGES,
+  EMPLOYEE_INVITATION_CHANGES,
+  EMPLOYEE_LIFECYCLE_CHANGES,
+  SCHEDULE_LIFECYCLE_CHANGES,
+  SCHEDULE_REQUEST_LIFECYCLE_CHANGES,
   type AutomationEventType,
   type AutomationOutboxRow,
+  type CredentialLifecycleChange,
+  type EmployeeInvitationChange,
+  type EmployeeLifecycleChange,
+  type ScheduleLifecycleChange,
+  type ScheduleRequestLifecycleChange,
 } from "@workspace/db/schema";
 import type { AutomationConfig } from "./config";
+
+export type AutomationWebhookData =
+  | Record<string, never>
+  | { isVerified: boolean }
+  | { thresholdDays: number }
+  | {
+      change:
+        | CredentialLifecycleChange
+        | EmployeeLifecycleChange
+        | EmployeeInvitationChange
+        | ScheduleLifecycleChange
+        | ScheduleRequestLifecycleChange;
+    };
 
 export interface AutomationWebhookEnvelope {
   id: string;
   type: AutomationEventType;
   occurredAt: string;
   facilityId: number;
-  data: AutomationEventData;
+  data: AutomationWebhookData;
 }
 
 export interface SignedWebhookRequest {
@@ -39,26 +62,43 @@ function isPositiveInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) > 0;
 }
 
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
+function isAllowedChange<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): value is T {
+  return typeof value === "string" && allowed.includes(value as T);
+}
+
 function sanitizeData(
   eventType: AutomationEventType,
   value: unknown,
-): AutomationEventData | null {
+): AutomationWebhookData | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
   const data = value as Record<string, unknown>;
-  const baseValid =
-    isPositiveInteger(data.credentialId) &&
-    isPositiveInteger(data.employeeId) &&
-    typeof data.credentialType === "string" &&
-    CREDENTIAL_TYPES.includes(data.credentialType as never);
-  if (!baseValid) return null;
+  if (
+    eventType === "credential.created" ||
+    eventType === "credential.verification_changed" ||
+    eventType === "credential.expiry_due"
+  ) {
+    const baseValid =
+      isPositiveInteger(data.credentialId) &&
+      isPositiveInteger(data.employeeId) &&
+      typeof data.credentialType === "string" &&
+      CREDENTIAL_TYPES.includes(data.credentialType as never);
+    if (!baseValid) return null;
+  }
 
   if (eventType === "credential.created") {
     if (!exactKeys(data, ["credentialId", "employeeId", "credentialType"])) {
       return null;
     }
-    return data as AutomationEventData;
+    return {};
   }
   if (eventType === "credential.verification_changed") {
     if (
@@ -72,25 +112,73 @@ function sanitizeData(
     ) {
       return null;
     }
-    return data as AutomationEventData;
+    return { isVerified: data.isVerified };
   }
-  if (
-    !exactKeys(data, [
-      "credentialId",
-      "employeeId",
-      "credentialType",
-      "expiryDate",
-      "dueInDays",
-      "thresholdDays",
-    ]) ||
-    typeof data.expiryDate !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(data.expiryDate) ||
-    !Number.isSafeInteger(data.dueInDays) ||
-    !Number.isSafeInteger(data.thresholdDays)
-  ) {
-    return null;
+  if (eventType === "credential.expiry_due") {
+    if (
+      !exactKeys(data, [
+        "credentialId",
+        "employeeId",
+        "credentialType",
+        "expiryDate",
+        "dueInDays",
+        "thresholdDays",
+      ]) ||
+      typeof data.expiryDate !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(data.expiryDate) ||
+      !isSafeInteger(data.dueInDays) ||
+      !isSafeInteger(data.thresholdDays)
+    ) {
+      return null;
+    }
+    return { thresholdDays: data.thresholdDays };
   }
-  return data as AutomationEventData;
+  if (eventType === "credential.lifecycle_changed") {
+    if (
+      !exactKeys(data, ["change"]) ||
+      !isAllowedChange(data.change, CREDENTIAL_LIFECYCLE_CHANGES)
+    ) {
+      return null;
+    }
+    return { change: data.change };
+  }
+  if (eventType === "employee.lifecycle_changed") {
+    if (
+      !exactKeys(data, ["change"]) ||
+      !isAllowedChange(data.change, EMPLOYEE_LIFECYCLE_CHANGES)
+    ) {
+      return null;
+    }
+    return { change: data.change };
+  }
+  if (eventType === "employee.invitation_changed") {
+    if (
+      !exactKeys(data, ["change"]) ||
+      !isAllowedChange(data.change, EMPLOYEE_INVITATION_CHANGES)
+    ) {
+      return null;
+    }
+    return { change: data.change };
+  }
+  if (eventType === "schedule.lifecycle_changed") {
+    if (
+      !exactKeys(data, ["change"]) ||
+      !isAllowedChange(data.change, SCHEDULE_LIFECYCLE_CHANGES)
+    ) {
+      return null;
+    }
+    return { change: data.change };
+  }
+  if (eventType === "schedule_request.lifecycle_changed") {
+    if (
+      !exactKeys(data, ["change"]) ||
+      !isAllowedChange(data.change, SCHEDULE_REQUEST_LIFECYCLE_CHANGES)
+    ) {
+      return null;
+    }
+    return { change: data.change };
+  }
+  return null;
 }
 
 export function buildAutomationEnvelope(
@@ -139,6 +227,134 @@ export type DeliveryResult =
       permanent?: boolean;
       retryAfterMs?: number;
     };
+
+const MAX_ACKNOWLEDGEMENT_BYTES = 1024;
+
+function acknowledgementResult(
+  status: number,
+  rawBody: string,
+  expectedEventId: string,
+): DeliveryResult {
+  if (status !== 200 && status !== 202) {
+    if (status >= 200 && status < 300) {
+      return {
+        ok: false,
+        errorCode: "unexpected_success_status",
+        permanent: true,
+      };
+    }
+    return responseFailure(status);
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(rawBody);
+  } catch {
+    return {
+      ok: false,
+      errorCode: "invalid_acknowledgement",
+      permanent: false,
+    };
+  }
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    !exactKeys(value as Record<string, unknown>, [
+      "accepted",
+      "duplicate",
+      "eventId",
+    ])
+  ) {
+    return {
+      ok: false,
+      errorCode: "invalid_acknowledgement",
+      permanent: false,
+    };
+  }
+  const acknowledgement = value as Record<string, unknown>;
+  if (
+    acknowledgement.accepted !== true ||
+    acknowledgement.eventId !== expectedEventId ||
+    acknowledgement.duplicate !== (status === 200)
+  ) {
+    return {
+      ok: false,
+      errorCode: "invalid_acknowledgement",
+      permanent: false,
+    };
+  }
+  return { ok: true };
+}
+
+async function readFetchAcknowledgement(
+  response: Response,
+): Promise<string | null> {
+  const declaredLength = Number(response.headers.get("Content-Length"));
+  if (
+    Number.isFinite(declaredLength) &&
+    declaredLength > MAX_ACKNOWLEDGEMENT_BYTES
+  ) {
+    await response.body?.cancel();
+    return null;
+  }
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_ACKNOWLEDGEMENT_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString(
+    "utf8",
+  );
+}
+
+function readNodeAcknowledgement(
+  response: IncomingMessage,
+  callback: (body: string | null) => void,
+): void {
+  const declaredLength = Number(response.headers["content-length"]);
+  if (
+    Number.isFinite(declaredLength) &&
+    declaredLength > MAX_ACKNOWLEDGEMENT_BYTES
+  ) {
+    response.resume();
+    callback(null);
+    return;
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  let completed = false;
+  const finish = (body: string | null) => {
+    if (completed) return;
+    completed = true;
+    callback(body);
+  };
+  response.on("data", (chunk: Buffer | string) => {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.byteLength;
+    if (total > MAX_ACKNOWLEDGEMENT_BYTES) {
+      response.destroy();
+      finish(null);
+      return;
+    }
+    chunks.push(buffer);
+  });
+  response.on("end", () => finish(Buffer.concat(chunks).toString("utf8")));
+  response.on("error", () => finish(null));
+}
 
 function retryAfterMs(raw: string | null | undefined): number | undefined {
   if (!raw) return undefined;
@@ -194,7 +410,12 @@ function responseFailure(
   status: number,
   retryAfter?: string | null,
 ): DeliveryResult {
-  const retryable = [408, 409, 425, 429].includes(status) || status >= 500;
+  // A 401 can be caused by a brief secret/config rollout mismatch. Keep the
+  // durable event pending for a small, worker-enforced retry window so the
+  // operator can repair the receiver without losing the first delivery. A
+  // 409 is deliberately excluded: the receiver reserves it for conflicting
+  // content under an existing idempotency key, which can never self-heal.
+  const retryable = [401, 408, 425, 429].includes(status) || status >= 500;
   return {
     ok: false,
     errorCode: `http_${status}`,
@@ -253,10 +474,34 @@ async function deliverWithPinnedPublicLookup(
         signal,
       },
       (response) => {
-        response.resume();
         const status = response.statusCode ?? 0;
+        if (status === 200 || status === 202) {
+          readNodeAcknowledgement(response, (body) =>
+            resolve(
+              body == null
+                ? {
+                    ok: false,
+                    errorCode: "invalid_acknowledgement",
+                    permanent: false,
+                  }
+                : acknowledgementResult(
+                    status,
+                    body,
+                    request.headers["X-Health-Credential-Event-Id"]!,
+                  ),
+            ),
+          );
+          return;
+        }
+        response.resume();
         if (status >= 200 && status < 300) {
-          resolve({ ok: true });
+          resolve(
+            acknowledgementResult(
+              status,
+              "",
+              request.headers["X-Health-Credential-Event-Id"]!,
+            ),
+          );
           return;
         }
         const rawRetry = response.headers["retry-after"];
@@ -310,8 +555,17 @@ export async function deliverAutomationWebhook(
       signal: AbortSignal.timeout(config.timeoutMs),
       redirect: "error",
     });
+    if (response.ok) {
+      const body = await readFetchAcknowledgement(response);
+      return body == null
+        ? {
+            ok: false,
+            errorCode: "invalid_acknowledgement",
+            permanent: false,
+          }
+        : acknowledgementResult(response.status, body, envelope.id);
+    }
     await response.body?.cancel();
-    if (response.ok) return { ok: true };
     return responseFailure(
       response.status,
       response.headers.get("Retry-After"),

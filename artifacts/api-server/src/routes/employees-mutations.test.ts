@@ -60,6 +60,7 @@ const testState = vi.hoisted(() => ({
   transactionRolledBack: false,
   committedUpdate: null as Record<string, unknown> | null,
   committedAudit: null as Record<string, unknown> | null,
+  automationEvents: [] as Array<Record<string, unknown>>,
   updateCondition: null as unknown,
   failAudit: false,
   casConflict: false,
@@ -183,12 +184,15 @@ vi.mock("@workspace/db", () => {
               };
             },
             insert: (table: unknown) => ({
-              values: async (values: Record<string, unknown>) => {
+              values: (values: Record<string, unknown>) => {
                 if (table !== auditLogsTable) {
                   throw new Error("Unexpected insert table");
                 }
                 stagedAudit = values;
                 if (testState.failAudit) throw new Error("audit insert failed");
+                return {
+                  returning: async () => [{ id: 101 }],
+                };
               },
             }),
           };
@@ -270,6 +274,14 @@ vi.mock("../lib/helpers", () => ({
   serializeUser: vi.fn((user: Record<string, unknown>) => user),
 }));
 
+vi.mock("../lib/automation/outbox", () => ({
+  enqueueAutomationEvent: vi.fn(
+    async (_tx: unknown, event: Record<string, unknown>) => {
+      testState.automationEvents.push(event);
+    },
+  ),
+}));
+
 import router from "./employees";
 
 describe("administrative employee mutations", () => {
@@ -308,6 +320,7 @@ describe("administrative employee mutations", () => {
     testState.transactionRolledBack = false;
     testState.committedUpdate = null;
     testState.committedAudit = null;
+    testState.automationEvents = [];
     testState.updateCondition = null;
     testState.failAudit = false;
     testState.casConflict = false;
@@ -492,6 +505,55 @@ describe("administrative employee mutations", () => {
         facilityId: 10,
       }),
     );
+    expect(testState.automationEvents).toEqual([
+      expect.objectContaining({
+        facilityId: 10,
+        credentialId: null,
+        eventType: "employee.lifecycle_changed",
+        payload: { change: "updated" },
+      }),
+    ]);
+  });
+
+  it.each([
+    { from: true, to: false, expectedChange: "deactivated" },
+    { from: false, to: true, expectedChange: "activated" },
+  ])(
+    "emits $expectedChange when PATCH transitions isActive from $from to $to",
+    async ({ from, to, expectedChange }) => {
+      testState.target.isActive = from;
+
+      const response = await request("PATCH", "/employees/2", {
+        isActive: to,
+        currentPassword: "admin-password",
+        code: "123456",
+      });
+
+      expect(response.status).toBe(200);
+      expect(testState.automationEvents).toEqual([
+        expect.objectContaining({
+          facilityId: 10,
+          credentialId: null,
+          eventType: "employee.lifecycle_changed",
+          payload: { change: expectedChange },
+        }),
+      ]);
+    },
+  );
+
+  it("emits updated when PATCH includes an unchanged isActive value", async () => {
+    const response = await request("PATCH", "/employees/2", {
+      name: "Updated Employee",
+      isActive: true,
+    });
+
+    expect(response.status).toBe(200);
+    expect(testState.automationEvents).toEqual([
+      expect.objectContaining({
+        eventType: "employee.lifecycle_changed",
+        payload: { change: "updated" },
+      }),
+    ]);
   });
 
   it("rolls a profile update back when its audit insert fails", async () => {

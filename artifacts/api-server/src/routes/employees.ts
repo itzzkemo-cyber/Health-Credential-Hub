@@ -62,6 +62,11 @@ import {
   canSuperviseTarget,
   isUserInScope,
 } from "../lib/roleHierarchy";
+import {
+  employeeInvitationLifecycleEvent,
+  employeeLifecycleEvent,
+} from "../lib/automation/events";
+import { enqueueAutomationEvent } from "../lib/automation/outbox";
 
 const router: IRouter = Router();
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -447,6 +452,15 @@ router.post(
           details: null,
           ipAddress: req.ip ?? null,
         });
+        await enqueueAutomationEvent(
+          tx,
+          employeeLifecycleEvent(
+            insertedUser.facilityId,
+            insertedUser.id,
+            insertedUser.sessionVersion,
+            "created",
+          ),
+        );
         return { kind: "created" as const, user: insertedUser };
       });
     } catch (error) {
@@ -808,6 +822,15 @@ router.post(
           }),
           ipAddress: req.ip ?? null,
         });
+        await enqueueAutomationEvent(
+          tx,
+          employeeInvitationLifecycleEvent(
+            facilityId,
+            invitation.id,
+            "created",
+            "created",
+          ),
+        );
         return { kind: "created" as const, invitationId: invitation.id };
       });
     } catch (error) {
@@ -934,6 +957,15 @@ router.post(
             details: null,
             ipAddress: req.ip ?? null,
           });
+          await enqueueAutomationEvent(
+            tx,
+            employeeInvitationLifecycleEvent(
+              invitation.facilityId,
+              invitation.id,
+              "delivery-failed",
+              "revoked",
+            ),
+          );
         });
       } catch {
         // The normal path keeps revocation and audit atomic. If audit storage
@@ -1158,6 +1190,15 @@ router.delete(
         details: null,
         ipAddress: req.ip ?? null,
       });
+      await enqueueAutomationEvent(
+        tx,
+        employeeInvitationLifecycleEvent(
+          invitation.facilityId,
+          invitation.id,
+          "revoked",
+          "revoked",
+        ),
+      );
       return { kind: "revoked" as const };
     });
 
@@ -1527,18 +1568,40 @@ router.patch(
       const updatedUser = updated[0];
       if (!updatedUser) return { kind: "conflict" as const };
 
-      await tx.insert(auditLogsTable).values({
-        userId: actor.id,
-        facilityId: updatedUser.facilityId,
-        userName: actor.name,
-        userNameAr: actor.nameAr,
-        action: "Updated employee",
-        actionAr: "تحديث موظف",
-        target: updatedUser.name,
-        targetAr: updatedUser.nameAr,
-        details: accountChangeDetails(target, updatedUser),
-        ipAddress: req.ip ?? null,
-      });
+      const auditRows = await tx
+        .insert(auditLogsTable)
+        .values({
+          userId: actor.id,
+          facilityId: updatedUser.facilityId,
+          userName: actor.name,
+          userNameAr: actor.nameAr,
+          action: "Updated employee",
+          actionAr: "تحديث موظف",
+          target: updatedUser.name,
+          targetAr: updatedUser.nameAr,
+          details: accountChangeDetails(target, updatedUser),
+          ipAddress: req.ip ?? null,
+        })
+        .returning({ id: auditLogsTable.id });
+      const auditId = auditRows[0]?.id;
+      if (auditId == null) {
+        throw new Error("Employee update audit insert returned no id");
+      }
+      const lifecycleChange =
+        updatedUser.isActive !== target.isActive
+          ? updatedUser.isActive
+            ? "activated"
+            : "deactivated"
+          : "updated";
+      await enqueueAutomationEvent(
+        tx,
+        employeeLifecycleEvent(
+          updatedUser.facilityId,
+          updatedUser.id,
+          auditId,
+          lifecycleChange,
+        ),
+      );
       return { kind: "updated" as const, user: updatedUser };
     });
 
@@ -1747,6 +1810,15 @@ router.delete(
         details: accountChangeDetails(target, updatedUser),
         ipAddress: req.ip ?? null,
       });
+      await enqueueAutomationEvent(
+        tx,
+        employeeLifecycleEvent(
+          updatedUser.facilityId,
+          updatedUser.id,
+          updatedUser.sessionVersion,
+          "deactivated",
+        ),
+      );
       return { kind: "deactivated" as const };
     });
 
@@ -1875,6 +1947,15 @@ async function setActive(
       details: accountChangeDetails(target, updatedUser),
       ipAddress: req.ip ?? null,
     });
+    await enqueueAutomationEvent(
+      tx,
+      employeeLifecycleEvent(
+        updatedUser.facilityId,
+        updatedUser.id,
+        updatedUser.sessionVersion,
+        isActive ? "activated" : "deactivated",
+      ),
+    );
     return { kind: "updated" as const, user: updatedUser };
   });
 

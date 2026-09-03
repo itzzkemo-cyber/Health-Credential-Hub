@@ -72,6 +72,11 @@ import {
   hashInvitationEmailOtp,
   invitationEmailOtpMatches,
 } from "../lib/email/invitationOtp";
+import {
+  employeeInvitationLifecycleEvent,
+  employeeLifecycleEvent,
+} from "../lib/automation/events";
+import { enqueueAutomationEvent } from "../lib/automation/outbox";
 
 const router: IRouter = Router();
 
@@ -2045,6 +2050,24 @@ router.post(
           }),
           ipAddress: req.ip ?? null,
         });
+        await enqueueAutomationEvent(
+          tx,
+          employeeInvitationLifecycleEvent(
+            acceptedUser.facilityId,
+            acceptedInvitation.id,
+            "accepted",
+            "accepted",
+          ),
+        );
+        await enqueueAutomationEvent(
+          tx,
+          employeeLifecycleEvent(
+            acceptedUser.facilityId,
+            acceptedUser.id,
+            acceptedUser.sessionVersion,
+            "created",
+          ),
+        );
         return { kind: "accepted" as const };
       });
     } catch (error) {

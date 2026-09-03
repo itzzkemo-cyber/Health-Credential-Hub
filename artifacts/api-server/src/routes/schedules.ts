@@ -42,6 +42,8 @@ import {
   type AdjacentAssignment,
 } from "../lib/shiftScheduling";
 import { assignmentConflictsWithApprovedRequest } from "../lib/scheduleRequestFeasibility";
+import { scheduleLifecycleEvent } from "../lib/automation/events";
+import { enqueueAutomationEvent } from "../lib/automation/outbox";
 
 const router: IRouter = Router();
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -362,6 +364,7 @@ async function audit(
   row: ShiftScheduleRow,
   action: string,
   actionAr: string,
+  change: "created" | "updated" | "published" | "reopened" | "cancelled",
   ipAddress?: string,
 ) {
   await tx.insert(auditLogsTable).values({
@@ -383,6 +386,15 @@ async function audit(
     }),
     ipAddress: ipAddress ?? null,
   });
+  await enqueueAutomationEvent(
+    tx,
+    scheduleLifecycleEvent(
+      row.facilityId,
+      row.id,
+      row.rowVersion,
+      change,
+    ),
+  );
 }
 function isUniqueViolation(error: unknown): boolean {
   let current = error;
@@ -553,6 +565,7 @@ router.post(
         saved,
         "Created shift schedule",
         "إنشاء جدول مناوبات",
+        "created",
         req.ip,
       );
       return {
@@ -728,10 +741,10 @@ async function mutate(
         .set({ releasedAt: new Date() })
         .where(eq(shiftScheduleMembersTable.scheduleId, id));
     const actions = {
-      edit: ["Edited shift schedule", "تعديل جدول مناوبات"],
-      publish: ["Published shift schedule", "نشر جدول مناوبات"],
-      reopen: ["Reopened shift schedule", "إعادة فتح جدول مناوبات"],
-      cancel: ["Cancelled shift schedule", "إلغاء جدول مناوبات"],
+      edit: ["Edited shift schedule", "تعديل جدول مناوبات", "updated"],
+      publish: ["Published shift schedule", "نشر جدول مناوبات", "published"],
+      reopen: ["Reopened shift schedule", "إعادة فتح جدول مناوبات", "reopened"],
+      cancel: ["Cancelled shift schedule", "إلغاء جدول مناوبات", "cancelled"],
     } as const;
     await audit(
       tx,
@@ -739,6 +752,7 @@ async function mutate(
       saved,
       actions[operation][0],
       actions[operation][1],
+      actions[operation][2],
       req.ip,
     );
     const responseInput = planningInput(saved);

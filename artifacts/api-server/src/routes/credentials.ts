@@ -30,6 +30,7 @@ import {
 import { canAccessCredentialOwner } from "../lib/roleHierarchy";
 import {
   credentialCreatedEvent,
+  credentialLifecycleEvent,
   credentialVerificationChangedEvent,
 } from "../lib/automation/events";
 import {
@@ -1125,6 +1126,19 @@ router.patch("/credentials/:id", async (req, res) => {
         details: null,
         ipAddress: req.ip ?? null,
       });
+      if (automationEnabledForFacility(owner.facilityId)) {
+        await tx
+          .insert(automationOutboxTable)
+          .values(
+            credentialLifecycleEvent(
+              owner.facilityId,
+              cred.id,
+              cred.rowVersion,
+              "updated",
+            ),
+          )
+          .onConflictDoNothing();
+      }
       return { kind: "updated" as const, cred, owner };
     });
   } catch (error) {
@@ -1227,6 +1241,19 @@ router.delete("/credentials/:id", async (req, res) => {
         "Credential record and private object retained for the configured retention and cleanup process",
       ipAddress: req.ip ?? null,
     });
+    if (automationEnabledForFacility(owner.facilityId)) {
+      await tx
+        .insert(automationOutboxTable)
+        .values(
+          credentialLifecycleEvent(
+            owner.facilityId,
+            current.id,
+            current.rowVersion + 1,
+            "deleted",
+          ),
+        )
+        .onConflictDoNothing();
+    }
     return { kind: "deleted" as const };
   });
   if (deletion.kind === "unauthorized") {

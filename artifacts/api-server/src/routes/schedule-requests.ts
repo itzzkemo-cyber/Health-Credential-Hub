@@ -43,6 +43,8 @@ import type {
   SchedulePlanningInput,
   ShiftAssignment,
 } from "../lib/shiftScheduling";
+import { scheduleRequestLifecycleEvent } from "../lib/automation/events";
+import { enqueueAutomationEvent } from "../lib/automation/outbox";
 
 const router: IRouter = Router();
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -556,6 +558,12 @@ async function writeAudit(
   row: ScheduleRequestRow,
   action: string,
   actionAr: string,
+  change:
+    | "submitted"
+    | "withdrawn"
+    | "approved"
+    | "rejected"
+    | "approval_revoked",
   ipAddress?: string,
 ) {
   await tx.insert(auditLogsTable).values({
@@ -571,6 +579,15 @@ async function writeAudit(
     details: scheduleRequestAuditDetails(row),
     ipAddress: ipAddress ?? null,
   });
+  await enqueueAutomationEvent(
+    tx,
+    scheduleRequestLifecycleEvent(
+      row.facilityId,
+      row.id,
+      row.rowVersion,
+      change,
+    ),
+  );
 }
 
 async function notifyReviewers(tx: Transaction, employee: RequestUser) {
@@ -698,6 +715,7 @@ router.post(
         saved,
         "Submitted schedule request",
         "تقديم طلب جدول",
+        "submitted",
         req.ip,
       );
       await notifyReviewers(tx, actor);
@@ -824,6 +842,7 @@ router.post("/schedule-requests/:id/withdraw", async (req, res) => {
       saved,
       "Withdrew schedule request",
       "سحب طلب جدول",
+      "withdrawn",
       req.ip,
     );
     return { saved, actor };
@@ -960,6 +979,9 @@ router.post(
           : parsed.data.decision === "approved"
             ? "الموافقة على طلب جدول"
             : "رفض طلب جدول",
+        decisionMode === "revocation"
+          ? "approval_revoked"
+          : parsed.data.decision,
         req.ip,
       );
       await notifyDecision(

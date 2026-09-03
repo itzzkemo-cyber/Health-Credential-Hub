@@ -12,14 +12,14 @@ Every enabled integration below must use the reviewed production controls.
 
 ## Status at a glance
 
-| Integration                        | Implemented in the repository                                                                                                                        | Provisioned by supplied infrastructure                                                                                                                                                                                  | Production status                                                                                                                                                                                                                                                                                                     |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Supabase private Storage (S3 API) | Bounded JPEG/PNG rebuilding and flat PDF image-only reconstruction, private reads and application ACL checks. | The operator configures the private bucket/MIME limits and injects server-only S3 keys into Render. | **Controlled pilot only.** Original bytes are not persisted. Active/encrypted/signed/form PDFs and general files are rejected. Reconstruction is not antivirus certification; worker isolation, Frankfurt transfer, free-tier SLA, backup, retention, orphan cleanup and incident controls remain approval gates. |
-| Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                                 | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | **No-go for real documents in this release.** Signed direct PUT has no provider-ingress byte cap and no malware quarantine. Keep synthetic-only until bounded ingress, AV/quarantine, orphan cleanup, and restore drills are accepted.                                                                                |
-| Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.                       | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | **No-go for real documents in this release.** Keep disabled until the same bounded-ingress, AV/quarantine, lifecycle, tenancy, IAM/CORS, and synthetic restore gates pass.                                                                                                                                            |
-| Gemini OCR                         | Authenticated users can send an authorized stored JPEG/PNG image to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields. PDF suggestions use the separate local worker and never call Gemini. | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint. | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete. |
-| Resend email                       | Password resets, invitations, employee activation email OTP, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API. | The Render manifest declares operator-supplied `EMAIL_FROM` and `RESEND_API_KEY`; it cannot create or verify the sender domain. | **Required for employee invitation and activation.** Fail-closed until configured. Approve Resend retention, region/subprocessors, tracking, bounce handling, delivery reconciliation, quotas and incident handling. |
-| Signed automation webhook          | A PostgreSQL transactional outbox and optional HMAC-signed worker emit three minimized credential lifecycle events.                                  | Partly. The bootstrap provisions or updates an inert one-shot Cloud Run Job, dedicated worker/scheduler identities, a regional HMAC secret, and a paused five-minute Scheduler job. It does not provision the receiver. | Disabled by default. Supports explicit facility routing, exact-host/public-IP enforcement, idempotency, bounded timeout, retry/backoff, stale-claim recovery, dead-letter retention, and no document/token fields. The recipient remains an operator-approved subprocessor and must verify signatures/replay windows. |
+| Integration                        | Implemented in the repository                                                                                                                                                                                         | Provisioned by supplied infrastructure                                                                                                                                                                                  | Production status                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Supabase private Storage (S3 API)  | Bounded JPEG/PNG rebuilding and flat PDF image-only reconstruction, private reads and application ACL checks.                                                                                                         | The operator configures the private bucket/MIME limits and injects server-only S3 keys into Render.                                                                                                                     | **Controlled pilot only.** Original bytes are not persisted. Active/encrypted/signed/form PDFs and general files are rejected. Reconstruction is not antivirus certification; worker isolation, Frankfurt transfer, free-tier SLA, backup, retention, orphan cleanup and incident controls remain approval gates.                              |
+| Private Google Cloud Storage (GCS) | Direct upload, private reads, per-object application ACL metadata, and OCR download are implemented.                                                                                                                  | Yes. The script creates a private `me-central2` bucket, enables versioning and seven-day soft delete, and attaches a runtime service account.                                                                           | **No-go for real documents in this release.** Signed direct PUT has no provider-ingress byte cap and no malware quarantine. Keep synthetic-only until bounded ingress, AV/quarantine, orphan cleanup, and restore drills are accepted.                                                                                                         |
+| Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.                                                                                        | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | **No-go for real documents in this release.** Keep disabled until the same bounded-ingress, AV/quarantine, lifecycle, tenancy, IAM/CORS, and synthetic restore gates pass.                                                                                                                                                                     |
+| Gemini OCR                         | Authenticated users can send an authorized stored JPEG/PNG image to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields. PDF suggestions use the separate local worker and never call Gemini. | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                                                 |
+| Resend email                       | Password resets, invitations, employee activation email OTP, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API.                                                                    | The Render manifest declares operator-supplied `EMAIL_FROM` and `RESEND_API_KEY`; it cannot create or verify the sender domain.                                                                                         | **Required for employee invitation and activation.** Fail-closed until configured. Approve Resend retention, region/subprocessors, tracking, bounce handling, delivery reconciliation, quotas and incident handling.                                                                                                                           |
+| Signed automation webhook          | A transactional outbox and optional HMAC-signed worker emit eight minimized credential, employee, invitation, schedule, and request lifecycle events.                                                                 | Partly. The bootstrap provisions or updates an inert one-shot Cloud Run Job, dedicated worker/scheduler identities, a regional HMAC secret, and a paused five-minute Scheduler job. It does not provision the receiver. | Disabled by default. Supports explicit facility routing, exact-host/public-IP enforcement, digest-bound idempotency, bounded timeout, retry/backoff, stale-claim recovery, dead-letter retention, and no document/token/resource-ID fields. The recipient remains an operator-approved subprocessor and must verify signatures/replay windows. |
 
 "Implemented" does not mean that the provider has been enabled in a deployed
 environment. No FHIR, HL7, SMART on FHIR, regulator API, or other health-data
@@ -509,9 +509,10 @@ provider response body.
 
 Workflow automation has two independent, disabled-by-default switches:
 
-- `AUTOMATION_OUTBOX_ENABLED=true` makes credential create and verification
-  changes write an outbox row in the same PostgreSQL transaction as the source
-  record. The API does not need the webhook secret.
+- `AUTOMATION_OUTBOX_ENABLED=true` makes supported credential, employee,
+  invitation, schedule, and schedule-request lifecycle mutations write an
+  outbox row in the same PostgreSQL transaction as the source record. The API
+  does not need the webhook secret.
 - `AUTOMATION_WEBHOOK_ENABLED=true` enables the separate worker. It requires an
   HTTPS `AUTOMATION_WEBHOOK_URL` and a canonical Base64 HMAC secret containing
   at least 32 random bytes. HTTP is accepted only for localhost outside
@@ -520,8 +521,8 @@ Workflow automation has two independent, disabled-by-default switches:
   the common feature gate.
 - `AUTOMATION_FACILITY_ALLOWLIST` is a required comma-separated list of
   positive facility IDs whenever event production is enabled. There is no
-  wildcard. Credential create/update enqueue, expiry scans, and delivery claims
-  all apply this same database-level boundary.
+  wildcard. Every producer, expiry scan, and delivery claim applies this same
+  database-level boundary.
 - Delivery additionally requires
   `AUTOMATION_WEBHOOK_MODE=SINGLE_CONTROLLER` to acknowledge that one receiver
   is privileged across the listed facilities, plus an exact
@@ -530,8 +531,13 @@ Workflow automation has two independent, disabled-by-default switches:
 
 The worker may run as a scheduled one-shot Cloud Run Job
 (`AUTOMATION_WORKER_MODE=once`) or as a dedicated continuously polling worker
-(`continuous`). Do not run it inside the public API process. The shipped Google
-Cloud bootstrap provisions or updates the one-shot job with its own identity,
+(`continuous`). Production must use one of those dedicated topologies. A
+constrained single-instance pilot may explicitly set
+`AUTOMATION_EMBEDDED_WORKER_ENABLED=true` to run the same fail-closed loop after
+the API starts; it remains disabled by default, shares API resource/lifecycle
+limits, exits the API after its bounded retry budget is exhausted, and is not a
+production topology. The shipped Google Cloud bootstrap provisions or updates
+the one-shot job with its own identity,
 Cloud SQL access, and the HMAC secret while keeping both switches false by
 default. It also provisions a five-minute Cloud Scheduler invocation in
 `me-central2` under a separate identity with `roles/run.invoker` only on this
@@ -541,31 +547,42 @@ settings.
 
 ### Event contract and data minimization
 
-The exact JSON envelope is:
+The exact JSON envelope contains no resource identifier:
 
 ```json
 {
   "id": "outbox-uuid-used-for-idempotency",
-  "type": "credential.created | credential.verification_changed | credential.expiry_due",
+  "type": "credential.created",
   "occurredAt": "2026-08-19T12:00:00.000Z",
   "facilityId": 17,
-  "data": {
-    "credentialId": 42,
-    "employeeId": 7,
-    "credentialType": "BLS"
-  }
+  "data": {}
 }
 ```
 
-`credential.verification_changed` additionally has `isVerified`.
-`credential.expiry_due` additionally has `expiryDate`, `dueInDays`, and the
-crossed `thresholdDays` (`90, 60, 30, 15, 7, 1, 0`). A delayed worker emits the
-closest crossed threshold and database uniqueness prevents repeating that
-threshold for the same credential expiry date. Renewing the credential changes
-the deduplication key so the new lifecycle can emit its own due events.
+The only accepted `data` payloads are:
+
+- `credential.created`: `{}`;
+- `credential.verification_changed`: `{ "isVerified": boolean }`;
+- `credential.expiry_due`: `{ "thresholdDays": 90|60|30|15|7|1|0 }`;
+- `credential.lifecycle_changed`: `{ "change": "updated"|"deleted" }`;
+- `employee.lifecycle_changed`:
+  `{ "change": "created"|"updated"|"activated"|"deactivated" }`;
+- `employee.invitation_changed`:
+  `{ "change": "created"|"revoked"|"accepted" }`;
+- `schedule.lifecycle_changed`:
+  `{ "change": "created"|"updated"|"published"|"reopened"|"cancelled" }`;
+- `schedule_request.lifecycle_changed`:
+  `{ "change": "submitted"|"withdrawn"|"approved"|"rejected"|"approval_revoked" }`.
+
+The transactional outbox keeps the internal identifiers needed for source-state
+checks and deduplication, but the worker validates and projects each row onto
+the minimized external payload above before serializing it. A delayed worker
+emits the closest crossed expiry threshold and database uniqueness prevents
+repeating that threshold for the same credential expiry lifecycle.
 
 The payload validator rejects unexpected keys. In particular, events never
-contain a document body/path, original filename, presigned URL, QR token,
+contain an employee/credential/schedule/request/invitation ID, credential type
+or date, document body/path, original filename, presigned URL, QR token,
 certificate number, OCR body/result, employee name/email/phone, password,
 session token, or TOTP material. `facilityId` is the affected tenant, not a
 value derived from a cross-facility actor.
@@ -580,12 +597,24 @@ The worker serializes the exact body once and sends:
 - `X-Health-Credential-Signature`: `sha256=<hex HMAC>`, calculated over
   `<timestamp>.<exact raw request body>`.
 
-The receiver must read the raw bytes before JSON parsing, calculate HMAC-SHA256
-with the Secret Manager value, compare in constant time, reject timestamps
-outside an approved short window (recommended five minutes), and atomically
-deduplicate the event ID before starting a workflow. Returning any non-2xx
-status leaves the event undelivered. Never return provider secrets or document
-content in an error response.
+The supplied n8n compatibility receiver preserves the raw bytes, limits and
+validates the envelope and facility, then passes only timestamp, signature, and
+exact-body Base64 to a SECURITY DEFINER function in a separate
+`wathaiqi_n8n_receipts` database. That function calculates HMAC-SHA256 with a
+private-table secret, performs a best-effort fixed-work 32-byte XOR comparison,
+rejects timestamps outside five minutes, revalidates the exact minimized event
+contract and facility `1`, and atomically binds the event ID to a stable
+SHA-256 of the exact raw body. The workflow login has CONNECT plus EXECUTE
+through a NOLOGIN writer role, but no table or secret access. The body digest
+excludes the request timestamp, so an unchanged retry remains stable. The first
+receipt returns 202 with exactly
+`{accepted:true, duplicate:false, eventId}`; same UUID plus the same digest
+returns 200 with `duplicate:true` and the same event ID; same UUID plus changed
+digest returns 409. The worker reads at most 1 KiB and marks delivery complete
+only when that exact acknowledgement matches the sent event. An unexpected,
+oversized, or malformed 2xx response is a permanent configuration failure;
+other non-2xx statuses leave the event undelivered according to the retry rules.
+Never return provider secrets or document content in an error response.
 
 Before production delivery, the URL hostname must exactly match the configured
 host allowlist. The worker performs DNS resolution inside the actual HTTPS
@@ -599,17 +628,22 @@ platform supports it; application checks do not replace network controls.
 
 - Claims use PostgreSQL row locks with `SKIP LOCKED`; duplicate delivery is
   still possible if the receiver succeeds and the worker crashes before
-  marking the row. The event ID is therefore the correctness boundary.
+  marking the row. The event ID plus its stable exact-body digest is therefore
+  the correctness boundary.
 - Each event is claimed immediately before its own request. A batch never
   shares one lock deadline across sequential network calls, and the five-minute
   default lock remains greater than twice the maximum request timeout.
 - The default request timeout is 10 seconds. Failures retry from 30 seconds
   with exponential backoff capped at one hour, for eight attempts by default.
-  HTTP 408/409/425/429/5xx and network/timeout failures retry; other 4xx
-  responses are treated as permanent configuration/contract rejection.
+  HTTP 408/425/429/5xx and network/timeout failures retry; HTTP 409 is a
+  permanent event-ID/body conflict, and other 4xx responses are permanent
+  configuration/contract rejection.
   Bounded `Retry-After` values are honored up to one hour.
 - A stale claim can be recovered after five minutes. An exhausted stale claim
   is explicitly dead-lettered rather than becoming permanently stuck.
+- Stale-claim retirement, stale-pending disposal, and outbox cleanup each lock
+  and process at most 250 allowed-facility rows per cycle with `SKIP LOCKED`,
+  preventing an old backlog from creating one unbounded maintenance transaction.
 - Invalid payloads fail closed and are dead-lettered without an outbound call.
   Logs contain event/facility IDs and bounded error codes, never response bodies
   or integration secrets.
@@ -634,31 +668,44 @@ do not enable it until legal/privacy review confirms region, retention,
 subprocessors, breach terms, access controls, and deletion procedures. n8n
 workflow execution logs must not persist the full event longer than approved.
 
-The configured webhook is a cross-facility privileged recipient because a
-single worker can deliver events for every facility. Restrict receiver access,
-workflow editing, and event inspection accordingly. Give n8n only the webhook
-verification secret: never provide it with Health Credential Hub administrator
-credentials, application sessions, database credentials, storage access, or
-document URLs. Rotate the HMAC secret through an overlap procedure that keeps
-verification available while the worker and receiver move to the new value.
+The configured webhook is a privileged recipient. The checked-in pilot receiver
+accepts facility `1` only; expanding that list requires a reviewed source and
+receiver change plus cross-tenant tests. Restrict workflow editing and event
+inspection accordingly. Do not store the HMAC secret in an n8n credential or
+its main database. Store decoded key bytes only in the private schema of the
+separate receipt database, whose owner is NOLOGIN; the n8n PostgreSQL credential
+uses a separate workflow login that can execute only the verifier wrapper.
+Never provide n8n with Health Credential Hub administrator credentials,
+application sessions, application/main-n8n database credentials, storage
+access, or document URLs. Rotate the HMAC secret during a paused-delivery
+maintenance window unless a reviewed dual-key receiver is implemented.
 
 ### Operator sequence
 
-1. Apply migration `0005_automation_outbox.sql`.
-2. Provision the receiver and HMAC secret. Test signature rejection, replay,
-   duplicate ID, timeout, 5xx retry, and dead-letter alerting with synthetic
-   data.
-3. Rerun the bootstrap, or update the provisioned
+1. Apply all reviewed Drizzle migrations in journal order. Migration `0005`
+   creates the outbox; the current later automation migration expands the
+   event contract and non-credential reference rules.
+2. Provision `wathaiqi_n8n_receipts` as a separate database owned by a
+   dedicated NOLOGIN role. Revoke CONNECT from PUBLIC and the main `wathaiqi_n8n`
+   role; give the workflow login only CONNECT, schema USAGE, and EXECUTE on
+   `verify_and_claim_event_receipt`. Provision the canonical Base64 worker
+   secret into the private receiver table with a parameterized query, then
+   remove `CREATEROLE`/`CREATEDB` from the main n8n role. The exact bootstrap
+   and rotation sequence is in `docs/automation/README.md`.
+3. Test signature rejection, stale replay, same-ID/same-body duplicate,
+   same-ID/changed-body 409 conflict, unlisted-facility rejection, timeout, 5xx
+   retry, and dead-letter alerting with synthetic data.
+4. Rerun the bootstrap, or update the provisioned
    `health-credential-hub-automation` job, with the approved HTTPS
    `AUTOMATION_WEBHOOK_URL`, its exact host allowlist,
    `AUTOMATION_WEBHOOK_MODE=SINGLE_CONTROLLER`, the reviewed facility ID list,
    and both automation switches set to `true`. Keep the HMAC secret mounted
    only on that job. Enable event production only when monitoring is ready,
    otherwise pending rows can accumulate until the worker next runs.
-4. Confirm the bootstrap-created Scheduler job resumed at the approved
+5. Confirm the bootstrap-created Scheduler job resumed at the approved
    five-minute cadence, or keep it paused and trigger the worker manually. Its
    identity must retain only Job-level `roles/run.invoker`.
-5. Monitor pending age, attempt count, dead-letter count, delivery latency,
+6. Monitor pending age, attempt count, dead-letter count, delivery latency,
    Cloud SQL load, and receiver failures. The repository does not currently
    ship alert policies or an operator re-drive command for dead-letter rows.
 

@@ -1,12 +1,17 @@
 import type {
   AutomationEventData,
   AutomationEventType,
+  CredentialLifecycleChange,
   CredentialRow,
+  EmployeeInvitationChange,
+  EmployeeLifecycleChange,
+  ScheduleLifecycleChange,
+  ScheduleRequestLifecycleChange,
 } from "@workspace/db/schema";
 
 export interface AutomationOutboxInsert {
   facilityId: number;
-  credentialId: number;
+  credentialId: number | null;
   eventType: AutomationEventType;
   deduplicationKey: string;
   payload: AutomationEventData;
@@ -66,6 +71,122 @@ export function credentialExpiryDueEvent(
       dueInDays,
       thresholdDays,
     },
+  };
+}
+
+type LifecycleMarker = number | string;
+
+function lifecycleDeduplicationKey(
+  eventType: AutomationEventType,
+  resourceId: number,
+  versionOrMarker: LifecycleMarker,
+  change: string,
+): string {
+  return `${eventType}:${resourceId}:${encodeURIComponent(String(versionOrMarker))}:${change}`;
+}
+
+export function credentialLifecycleEvent(
+  facilityId: number,
+  resourceId: number,
+  versionOrMarker: LifecycleMarker,
+  change: CredentialLifecycleChange,
+): AutomationOutboxInsert {
+  const eventType = "credential.lifecycle_changed" as const;
+  return {
+    facilityId,
+    credentialId: resourceId,
+    eventType,
+    deduplicationKey: lifecycleDeduplicationKey(
+      eventType,
+      resourceId,
+      versionOrMarker,
+      change,
+    ),
+    payload: { change },
+  };
+}
+
+export function employeeLifecycleEvent(
+  facilityId: number,
+  resourceId: number,
+  versionOrMarker: LifecycleMarker,
+  change: EmployeeLifecycleChange,
+): AutomationOutboxInsert {
+  const eventType = "employee.lifecycle_changed" as const;
+  return {
+    facilityId,
+    credentialId: null,
+    eventType,
+    deduplicationKey: lifecycleDeduplicationKey(
+      eventType,
+      resourceId,
+      versionOrMarker,
+      change,
+    ),
+    payload: { change },
+  };
+}
+
+export function employeeInvitationLifecycleEvent(
+  facilityId: number,
+  resourceId: number,
+  versionOrMarker: LifecycleMarker,
+  change: EmployeeInvitationChange,
+): AutomationOutboxInsert {
+  const eventType = "employee.invitation_changed" as const;
+  return {
+    facilityId,
+    credentialId: null,
+    eventType,
+    deduplicationKey: lifecycleDeduplicationKey(
+      eventType,
+      resourceId,
+      versionOrMarker,
+      change,
+    ),
+    payload: { change },
+  };
+}
+
+export function scheduleLifecycleEvent(
+  facilityId: number,
+  resourceId: number,
+  versionOrMarker: LifecycleMarker,
+  change: ScheduleLifecycleChange,
+): AutomationOutboxInsert {
+  const eventType = "schedule.lifecycle_changed" as const;
+  return {
+    facilityId,
+    credentialId: null,
+    eventType,
+    deduplicationKey: lifecycleDeduplicationKey(
+      eventType,
+      resourceId,
+      versionOrMarker,
+      change,
+    ),
+    payload: { change },
+  };
+}
+
+export function scheduleRequestLifecycleEvent(
+  facilityId: number,
+  resourceId: number,
+  versionOrMarker: LifecycleMarker,
+  change: ScheduleRequestLifecycleChange,
+): AutomationOutboxInsert {
+  const eventType = "schedule_request.lifecycle_changed" as const;
+  return {
+    facilityId,
+    credentialId: null,
+    eventType,
+    deduplicationKey: lifecycleDeduplicationKey(
+      eventType,
+      resourceId,
+      versionOrMarker,
+      change,
+    ),
+    payload: { change },
   };
 }
 
