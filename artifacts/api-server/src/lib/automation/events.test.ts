@@ -14,6 +14,7 @@ import {
   scheduleRequestLifecycleEvent,
 } from "./events";
 import {
+  AUTOMATION_WEBHOOK_AUTH_HEADER,
   buildAutomationEnvelope,
   deliverAutomationWebhook,
   signAutomationWebhook,
@@ -21,6 +22,8 @@ import {
 
 const dnsMocks = vi.hoisted(() => ({ lookup: vi.fn() }));
 vi.mock("node:dns/promises", () => ({ lookup: dnsMocks.lookup }));
+
+const headerAuthSecret = Buffer.alloc(32, 8).toString("base64");
 
 const credential = {
   id: 42,
@@ -237,7 +240,9 @@ describe("automation event minimization and idempotency", () => {
     expect(lifecycle?.data).toEqual({ change: "deleted" });
 
     const bodies = [created, verification, expiry, lifecycle].map(
-      (envelope) => signAutomationWebhook(envelope!, Buffer.alloc(32, 8)).body,
+      (envelope) =>
+        signAutomationWebhook(envelope!, Buffer.alloc(32, 8), headerAuthSecret)
+          .body,
     );
     for (const body of bodies) {
       expect(body).not.toContain("credentialId");
@@ -252,7 +257,12 @@ describe("automation event minimization and idempotency", () => {
     const envelope = buildAutomationEnvelope(outbox());
     expect(envelope).not.toBeNull();
     const key = Buffer.alloc(32, 3);
-    const request = signAutomationWebhook(envelope!, key, 1_787_130_000);
+    const request = signAutomationWebhook(
+      envelope!,
+      key,
+      headerAuthSecret,
+      1_787_130_000,
+    );
     const expected = createHmac("sha256", key)
       .update(`1787130000.${request.body}`)
       .digest("hex");
@@ -261,6 +271,7 @@ describe("automation event minimization and idempotency", () => {
       "Idempotency-Key": envelope!.id,
       "X-Health-Credential-Timestamp": "1787130000",
       "X-Health-Credential-Signature": `sha256=${expected}`,
+      [AUTOMATION_WEBHOOK_AUTH_HEADER]: headerAuthSecret,
     });
     expect(JSON.parse(request.body).data).toEqual({});
     expect(request.body).not.toContain("fileUrl");
@@ -268,10 +279,10 @@ describe("automation event minimization and idempotency", () => {
   });
 
   it("does not treat non-2xx webhook responses as delivered", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(null, { status: 503 })),
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response(null, { status: 503 }),
     );
+    vi.stubGlobal("fetch", fetchMock);
     const envelope = buildAutomationEnvelope(outbox())!;
     const result = await deliverAutomationWebhook(envelope, {
       enabled: true,
@@ -279,6 +290,7 @@ describe("automation event minimization and idempotency", () => {
       requirePublicAddress: false,
       webhookUrl: new URL("https://n8n.example.sa/webhook"),
       secret: Buffer.alloc(32, 4),
+      headerAuthSecret,
       timeoutMs: 1000,
       maxAttempts: 3,
       batchSize: 10,
@@ -293,9 +305,40 @@ describe("automation event minimization and idempotency", () => {
       permanent: false,
       retryAfterMs: undefined,
     });
+    const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(
+      new Headers(requestInit.headers).get(AUTOMATION_WEBHOOK_AUTH_HEADER),
+    ).toBe(headerAuthSecret);
   });
 
-  it("honors bounded Retry-After, retries 401, and permanently rejects other ordinary 4xx", async () => {
+  it("fails closed without the independent Header Auth secret", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const envelope = buildAutomationEnvelope(outbox())!;
+
+    await expect(
+      deliverAutomationWebhook(envelope, {
+        enabled: true,
+        facilityAllowlist: [9],
+        requirePublicAddress: false,
+        webhookUrl: new URL("https://n8n.example.sa/webhook"),
+        secret: Buffer.alloc(32, 4),
+        timeoutMs: 1000,
+        maxAttempts: 3,
+        batchSize: 10,
+        pollIntervalMs: 5000,
+        lockTimeoutMs: 60000,
+        retentionDays: 30,
+        pendingMaxAgeDays: 7,
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      errorCode: "integration_disabled",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("honors Retry-After, bounds auth retries, and permanently rejects other ordinary 4xx", async () => {
     const envelope = buildAutomationEnvelope(outbox())!;
     const config = {
       enabled: true,
@@ -303,6 +346,7 @@ describe("automation event minimization and idempotency", () => {
       requirePublicAddress: false,
       webhookUrl: new URL("https://n8n.example.sa/webhook"),
       secret: Buffer.alloc(32, 4),
+      headerAuthSecret,
       timeoutMs: 1000,
       maxAttempts: 3,
       batchSize: 10,
@@ -351,6 +395,17 @@ describe("automation event minimization and idempotency", () => {
 
     vi.stubGlobal(
       "fetch",
+      vi.fn(async () => new Response(null, { status: 403 })),
+    );
+    await expect(deliverAutomationWebhook(envelope, config)).resolves.toEqual({
+      ok: false,
+      errorCode: "http_403",
+      permanent: false,
+      retryAfterMs: undefined,
+    });
+
+    vi.stubGlobal(
+      "fetch",
       vi.fn(async () => new Response(null, { status: 409 })),
     );
     await expect(deliverAutomationWebhook(envelope, config)).resolves.toEqual({
@@ -387,6 +442,7 @@ describe("automation event minimization and idempotency", () => {
         requirePublicAddress: false,
         webhookUrl: new URL("https://n8n.example.sa/webhook"),
         secret: Buffer.alloc(32, 4),
+        headerAuthSecret,
         timeoutMs: 1000,
         maxAttempts: 3,
         batchSize: 10,
@@ -411,6 +467,7 @@ describe("automation event minimization and idempotency", () => {
       requirePublicAddress: true,
       webhookUrl: new URL("https://n8n.example.sa/webhook"),
       secret: Buffer.alloc(32, 4),
+      headerAuthSecret,
       timeoutMs: 1000,
       maxAttempts: 3,
       batchSize: 10,

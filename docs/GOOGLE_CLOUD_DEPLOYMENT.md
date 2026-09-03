@@ -64,11 +64,15 @@ Run charges before accepting the provider's creation prompts.
 
 The first run also provisions or updates a disabled-by-default one-shot
 `health-credential-hub-automation` Cloud Run Job. It uses a dedicated service
-account with Cloud SQL and its own regional HMAC secret, but no GCS, session,
-or TOTP-secret access. A separate scheduler identity receives Job-level
-`roles/run.invoker` only; its five-minute `me-central2` schedule is created
-paused and remains paused unless automation is explicitly enabled. The
-bootstrap does not create a webhook receiver. See
+account with Cloud SQL, its own regional HMAC secret, and a different regional
+pre-workflow Header Auth secret, but no GCS, session, or TOTP-secret access.
+The bootstrap maps both secrets only into the automation Job. Configure the
+Header Auth value in the approved n8n receiver under the fixed
+`X-Health-Credential-Webhook-Key` name, while the HMAC value stays in the
+receiver's private database table. A separate scheduler identity receives
+Job-level `roles/run.invoker` only; its five-minute `me-central2` schedule is
+created paused and remains paused unless automation is explicitly enabled. The
+bootstrap does not create the n8n credential or webhook receiver. See
 [`INTEGRATIONS.md`](./INTEGRATIONS.md) before enabling it.
 
 ## Create the first production administrator

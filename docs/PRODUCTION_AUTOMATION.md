@@ -14,11 +14,13 @@ include a document body, signed object URL, password/reset token, TOTP secret,
 OCR Base64, or provider credential.
 
 For sensitive production use, prefer an organization-controlled n8n instance
-in an approved region and private network. The receiver must verify the HMAC
-signature and timestamp before processing, reject replays, use the event ID as
-an idempotency key, and return a non-2xx status on failure so the API can apply
-bounded retries. Treat a public hosted workflow service as a new subprocessor
-that needs privacy, retention, residency, incident, and deletion approval.
+in an approved region and private network. Require a separate fixed-header
+access secret at the n8n Webhook node before any workflow execution, then
+verify the HMAC signature and timestamp before processing, reject replays, use
+the event ID as an idempotency key, and return a non-2xx status on failure so
+the API can apply bounded retries. Treat a public hosted workflow service as a
+new subprocessor that needs privacy, retention, residency, incident, and
+deletion approval.
 
 An inactive, fail-closed n8n receipt workflow, dedicated inbox SQL, safe
 environment example, and offline verifier are available in

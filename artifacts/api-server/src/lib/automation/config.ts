@@ -4,6 +4,7 @@ export interface AutomationConfig {
   requirePublicAddress: boolean;
   webhookUrl?: URL;
   secret?: Buffer;
+  headerAuthSecret?: string;
   timeoutMs: number;
   maxAttempts: number;
   batchSize: number;
@@ -83,16 +84,16 @@ function boundedInteger(
   return value;
 }
 
-function decodeSecret(raw: string): Buffer {
+function decodeSecret(raw: string, name: string): Buffer {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(raw) || raw.length % 4 !== 0) {
     throw new Error(
-      "AUTOMATION_WEBHOOK_SECRET must be canonical Base64 for at least 32 random bytes",
+      `${name} must be canonical Base64 for at least 32 random bytes`,
     );
   }
   const decoded = Buffer.from(raw, "base64");
   if (decoded.length < 32 || decoded.toString("base64") !== raw) {
     throw new Error(
-      "AUTOMATION_WEBHOOK_SECRET must be canonical Base64 for at least 32 random bytes",
+      `${name} must be canonical Base64 for at least 32 random bytes`,
     );
   }
   return decoded;
@@ -155,9 +156,10 @@ export function readAutomationConfig(
 
   const rawUrl = env.AUTOMATION_WEBHOOK_URL;
   const rawSecret = env.AUTOMATION_WEBHOOK_SECRET;
-  if (!rawUrl || !rawSecret) {
+  const rawHeaderAuthSecret = env.AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET;
+  if (!rawUrl || !rawSecret || !rawHeaderAuthSecret) {
     throw new Error(
-      "Enabled automation requires AUTOMATION_WEBHOOK_URL and AUTOMATION_WEBHOOK_SECRET",
+      "Enabled automation requires AUTOMATION_WEBHOOK_URL, AUTOMATION_WEBHOOK_SECRET, and AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET",
     );
   }
   const webhookUrl = new URL(rawUrl);
@@ -181,6 +183,17 @@ export function readAutomationConfig(
   if (webhookUrl.protocol !== "https:" && !localHttp) {
     throw new Error(
       "AUTOMATION_WEBHOOK_URL must use HTTPS (HTTP is allowed only on localhost outside production)",
+    );
+  }
+
+  const secret = decodeSecret(rawSecret, "AUTOMATION_WEBHOOK_SECRET");
+  const headerAuthSecret = decodeSecret(
+    rawHeaderAuthSecret,
+    "AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET",
+  );
+  if (secret.equals(headerAuthSecret)) {
+    throw new Error(
+      "AUTOMATION_WEBHOOK_SECRET and AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET must be independent secrets",
     );
   }
 
@@ -209,7 +222,8 @@ export function readAutomationConfig(
     facilityAllowlist,
     requirePublicAddress: production,
     webhookUrl,
-    secret: decodeSecret(rawSecret),
+    secret,
+    headerAuthSecret: rawHeaderAuthSecret,
     timeoutMs,
     lockTimeoutMs,
     maxAttempts: boundedInteger(

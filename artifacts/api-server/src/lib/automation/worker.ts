@@ -53,6 +53,7 @@ interface ContinuousAutomationWorkerOptions {
 
 const receiverAlertErrorCodes = new Set([
   "http_401",
+  "http_403",
   "invalid_acknowledgement",
 ]);
 

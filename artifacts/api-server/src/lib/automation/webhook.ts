@@ -47,6 +47,13 @@ export interface SignedWebhookRequest {
   headers: Record<string, string>;
 }
 
+/**
+ * Fixed n8n Header Auth boundary. The header name is intentionally not
+ * configurable so a deployment cannot silently drift from the reviewed
+ * receiver credential.
+ */
+export const AUTOMATION_WEBHOOK_AUTH_HEADER = "X-Health-Credential-Webhook-Key";
+
 function exactKeys(
   value: Record<string, unknown>,
   expected: string[],
@@ -199,6 +206,7 @@ export function buildAutomationEnvelope(
 export function signAutomationWebhook(
   envelope: AutomationWebhookEnvelope,
   secret: Buffer,
+  headerAuthSecret: string,
   timestampSeconds = Math.floor(Date.now() / 1000),
 ): SignedWebhookRequest {
   const body = JSON.stringify(envelope);
@@ -215,6 +223,7 @@ export function signAutomationWebhook(
       "X-Health-Credential-Event-Type": envelope.type,
       "X-Health-Credential-Timestamp": timestamp,
       "X-Health-Credential-Signature": `sha256=${signature}`,
+      [AUTOMATION_WEBHOOK_AUTH_HEADER]: headerAuthSecret,
     },
   };
 }
@@ -410,12 +419,12 @@ function responseFailure(
   status: number,
   retryAfter?: string | null,
 ): DeliveryResult {
-  // A 401 can be caused by a brief secret/config rollout mismatch. Keep the
-  // durable event pending for a small, worker-enforced retry window so the
-  // operator can repair the receiver without losing the first delivery. A
-  // 409 is deliberately excluded: the receiver reserves it for conflicting
-  // content under an existing idempotency key, which can never self-heal.
-  const retryable = [401, 408, 425, 429].includes(status) || status >= 500;
+  // n8n versions can use 401 or 403 for a Header Auth mismatch, and either can
+  // occur briefly during coordinated credential rotation. Keep the durable
+  // event pending for the worker's smaller contract-retry window. A 409 is
+  // deliberately excluded: the receiver reserves it for conflicting content
+  // under an existing idempotency key, which can never self-heal.
+  const retryable = [401, 403, 408, 425, 429].includes(status) || status >= 500;
   return {
     ok: false,
     errorCode: `http_${status}`,
@@ -537,10 +546,19 @@ export async function deliverAutomationWebhook(
   envelope: AutomationWebhookEnvelope,
   config: AutomationConfig,
 ): Promise<DeliveryResult> {
-  if (!config.enabled || !config.webhookUrl || !config.secret) {
+  if (
+    !config.enabled ||
+    !config.webhookUrl ||
+    !config.secret ||
+    !config.headerAuthSecret
+  ) {
     return { ok: false, errorCode: "integration_disabled" };
   }
-  const request = signAutomationWebhook(envelope, config.secret);
+  const request = signAutomationWebhook(
+    envelope,
+    config.secret,
+    config.headerAuthSecret,
+  );
   // Production uses the same validated lookup for the actual TLS connection,
   // eliminating the DNS pre-check/fetch rebinding gap while retaining the
   // configured hostname for TLS SNI and Host verification.

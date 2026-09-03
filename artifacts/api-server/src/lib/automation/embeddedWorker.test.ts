@@ -11,6 +11,7 @@ const enabledConfig: AutomationConfig = {
   requirePublicAddress: true,
   webhookUrl: new URL("https://n8n.example.sa/webhook/healthdocs"),
   secret: Buffer.alloc(32, 7),
+  headerAuthSecret: Buffer.alloc(32, 8).toString("base64"),
   timeoutMs: 5_000,
   maxAttempts: 8,
   batchSize: 25,

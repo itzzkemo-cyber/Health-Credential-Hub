@@ -9,6 +9,8 @@ Render, Supabase, or the outbox feature flags.
 
 The receiver gives the workflow layer a small, durable security boundary:
 
+- it rejects callers without a separate n8n Header Auth secret before a Code
+  or PostgreSQL node can run;
 - it verifies the HMAC over the timestamp and the exact raw request body;
 - it rejects requests more than five minutes old;
 - it validates the minimized event contract and an explicit facility list;
@@ -109,7 +111,8 @@ activate the imported workflow, or change production environment variables.
    ```
 
    The verifier intentionally expects an inactive workflow, facility `1` only,
-   no embedded credentials, and no n8n Crypto node. Stop if it fails.
+   one secret-free Header Auth credential placeholder, and no n8n Crypto node.
+   Stop if it fails.
 
 2. Suspend n8n and keep it stopped through this entire maintenance sequence.
    From the provider secret view, retrieve the managed `wathaiqi_n8n` connection
@@ -360,18 +363,26 @@ OWNER` statements only; do not use `REASSIGN OWNED`, because it can touch
    set `WEBHOOK_URL` and `N8N_EDITOR_BASE_URL` to the approved public HTTPS
    origin. Re-check the variable names during a v2 upgrade. Generate a stable
    `N8N_ENCRYPTION_KEY` in a password manager and back it up securely.
-6. Generate 32 random bytes once and encode them as canonical Base64 on an
-   isolated administrator workstation:
+6. Generate two independent 32-byte values once and encode each as canonical
+   Base64 on an isolated administrator workstation:
 
    ```powershell
    $randomBytes = [byte[]]::new(32)
    [Security.Cryptography.RandomNumberGenerator]::Fill($randomBytes)
    $automationSecret = [Convert]::ToBase64String($randomBytes)
+   $headerAuthBytes = [byte[]]::new(32)
+   [Security.Cryptography.RandomNumberGenerator]::Fill($headerAuthBytes)
+   $headerAuthSecret = [Convert]::ToBase64String($headerAuthBytes)
+   if ($automationSecret -ceq $headerAuthSecret) { throw "Regenerate independent secrets" }
    ```
 
    Store this exact Base64 value as `AUTOMATION_WEBHOOK_SECRET` in the worker's
-   secret manager. Do not put it in n8n credentials. Using the receiver operator
-   connection to `wathaiqi_n8n_receipts`, bind the same value as `$1` in this
+   secret manager. Do not put that HMAC value in n8n credentials. Store the
+   second value as `AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET` in the worker's
+   secret manager and as the value of an n8n **Header Auth** credential whose
+   exact header name is `X-Health-Credential-Webhook-Key`. Never reuse one value
+   for both controls. Using the receiver operator connection to
+   `wathaiqi_n8n_receipts`, bind only `$automationSecret` as `$1` in this
    parameterized statement:
 
    ```sql
@@ -390,17 +401,24 @@ OWNER` statements only; do not use `REASSIGN OWNED`, because it can touch
    Do not interpolate the secret into SQL text. The receiver function reads it
    under a separate NOLOGIN owner; the workflow login cannot select that table.
 
-7. Import `wathaiqi-n8n-receiver.workflow.json`. Attach one PostgreSQL
-   credential to `Verify and claim in PostgreSQL`, using
+7. Import `wathaiqi-n8n-receiver.workflow.json`. Replace its placeholder by
+   attaching the Header Auth credential to `Receive exact raw body`. n8n checks
+   this credential before starting the workflow, so a missing or wrong header
+   cannot reach a Code or PostgreSQL node. Attach one PostgreSQL credential to
+   `Verify and claim in PostgreSQL`, using
    `wathaiqi_n8n_receiver_login`, database `wathaiqi_n8n_receipts`, and TLS.
    Never attach the main n8n DB owner or receiver operator credential.
 8. Keep the checked-in allowlist at `[1]`. It must match
    `AUTOMATION_FACILITY_ALLOWLIST=1`; adding another facility requires a
    separate reviewed source and receiver change plus two-tenant isolation tests.
 9. In a non-production environment, publish the workflow and test a synthetic
-   signed event. Confirm valid=202, same UUID plus same body=200, same UUID plus
-   changed body=409, invalid signature=401, stale timestamp=401, unlisted
-   facility=403, and database failure=5xx. The 202/200 JSON acknowledgement
+   signed event. Confirm missing/wrong Header Auth returns a non-2xx response
+   with no workflow execution or receipt row, valid=202, same UUID plus same
+   body=200, same UUID plus changed body=409, invalid signature=401, stale
+   timestamp=401, unlisted facility=403, and database failure=5xx. The exact
+   Header Auth rejection status is n8n-version dependent (commonly 401 or 403),
+   so gate on non-2xx plus absence of an execution/row rather than one status.
+   The 202/200 JSON acknowledgement
    must include the exact `eventId`; the worker rejects a mismatched or missing
    event ID even when an intermediary returns a successful HTTP status.
 10. Review the n8n execution-retention configuration and verify that successful,
@@ -458,10 +476,12 @@ AUTOMATION_FACILITY_ALLOWLIST=1
 AUTOMATION_WEBHOOK_URL=https://wathaiqi-n8n.onrender.com/webhook/health-credential-events-v1
 AUTOMATION_WEBHOOK_HOST_ALLOWLIST=wathaiqi-n8n.onrender.com
 AUTOMATION_WEBHOOK_SECRET=<same canonical Base64 secret stored by the receiver>
+AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET=<different canonical Base64 value stored in n8n Header Auth>
 ```
 
-Provision `DATABASE_URL` and `AUTOMATION_WEBHOOK_SECRET` through Render's
-secret prompts; never commit either value. Deploy the worker from the exact
+Provision `DATABASE_URL`, `AUTOMATION_WEBHOOK_SECRET`, and
+`AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET` through Render's secret prompts; never
+commit any value. Deploy the worker from the exact
 same reviewed commit as the API after migrations complete. Confirm `/readyz`
 returns 200, then verify one safe event reaches the receipt database before
 disabling the previous embedded worker. Render's free plan does not support a
@@ -525,10 +545,14 @@ details.
 
 ## Rotation
 
-The current sender supports one HMAC secret. Rotation therefore requires a
-planned maintenance window or a reviewed dual-key receiver extension: pause
-delivery, update the private receiver secret with the parameterized operator
-statement, update the worker's `AUTOMATION_WEBHOOK_SECRET` to that exact
-canonical Base64 value, send a synthetic event, then resume. Never give the
-workflow login secret-table access and never delete inbox receipts during
-rotation.
+The current sender supports one HMAC secret and one independent Header Auth
+secret. Rotation therefore requires a planned maintenance window. For HMAC,
+pause delivery, update the private receiver secret with the parameterized
+operator statement, update the worker's `AUTOMATION_WEBHOOK_SECRET`, send a
+synthetic event, then resume. For Header Auth, pause delivery, update the n8n
+credential and worker `AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET` as one change,
+confirm missing/wrong headers still fail before workflow execution, send a
+synthetic event, then resume. n8n may return either 401 or 403 for a gate
+mismatch depending on version; the worker gives both a separate three-attempt
+contract retry budget. Never give the workflow login secret-table access and
+never delete inbox receipts during either rotation.

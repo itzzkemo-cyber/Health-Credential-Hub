@@ -302,6 +302,7 @@ ensure_secret_value healthdocs-migrator-database-url "${MIGRATOR_DATABASE_URL}"
 ensure_secret healthdocs-session-secret "$(openssl rand -hex 48)"
 ensure_secret healthdocs-totp-key "$(openssl rand -base64 32 | tr -d '\n')"
 ensure_secret healthdocs-automation-webhook-secret "$(openssl rand -base64 32 | tr -d '\n')"
+ensure_secret healthdocs-automation-webhook-header-auth-secret "$(openssl rand -base64 32 | tr -d '\n')"
 unset APP_DB_PASSWORD MIGRATOR_DB_PASSWORD APP_DATABASE_URL MIGRATOR_DATABASE_URL
 
 # Grant the runtime access only to the secrets this service consumes. Avoid a
@@ -312,9 +313,9 @@ for secret in healthdocs-database-url healthdocs-session-secret healthdocs-totp-
     --role=roles/secretmanager.secretAccessor >/dev/null
 done
 
-# The webhook secret is available only to the dedicated worker identity; the
-# public API runtime cannot fetch or mount it.
-for secret in healthdocs-database-url healthdocs-automation-webhook-secret; do
+# Both independent webhook secrets are available only to the dedicated worker
+# identity; the public API runtime cannot fetch or mount either one.
+for secret in healthdocs-database-url healthdocs-automation-webhook-secret healthdocs-automation-webhook-header-auth-secret; do
   gcloud secrets add-iam-policy-binding "${secret}" \
     --member="serviceAccount:${AUTOMATION_SERVICE_ACCOUNT_EMAIL}" \
     --role=roles/secretmanager.secretAccessor >/dev/null
@@ -467,7 +468,7 @@ gcloud run jobs deploy "${SERVICE}-automation" \
   --region="${REGION}" \
   --service-account="${AUTOMATION_SERVICE_ACCOUNT_EMAIL}" \
   --set-cloudsql-instances="${CONNECTION_NAME}" \
-  --set-secrets="DATABASE_URL=healthdocs-database-url:latest,AUTOMATION_WEBHOOK_SECRET=healthdocs-automation-webhook-secret:latest" \
+  --set-secrets="DATABASE_URL=healthdocs-database-url:latest,AUTOMATION_WEBHOOK_SECRET=healthdocs-automation-webhook-secret:latest,AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET=healthdocs-automation-webhook-header-auth-secret:latest" \
   --set-env-vars="^|^NODE_ENV=production|DB_POOL_MAX=2|AUTOMATION_OUTBOX_ENABLED=${AUTOMATION_OUTBOX_ENABLED}|AUTOMATION_WEBHOOK_ENABLED=${AUTOMATION_WEBHOOK_ENABLED}|AUTOMATION_WEBHOOK_MODE=${AUTOMATION_WEBHOOK_MODE}|AUTOMATION_FACILITY_ALLOWLIST=${AUTOMATION_FACILITY_ALLOWLIST}|AUTOMATION_WEBHOOK_URL=${AUTOMATION_WEBHOOK_URL}|AUTOMATION_WEBHOOK_HOST_ALLOWLIST=${AUTOMATION_WEBHOOK_HOST_ALLOWLIST}|AUTOMATION_WORKER_MODE=once" \
   --command=node \
   --args=dist/automation-worker.mjs \

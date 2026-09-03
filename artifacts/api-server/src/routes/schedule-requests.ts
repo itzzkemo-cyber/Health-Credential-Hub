@@ -559,11 +559,7 @@ async function writeAudit(
   action: string,
   actionAr: string,
   change:
-    | "submitted"
-    | "withdrawn"
-    | "approved"
-    | "rejected"
-    | "approval_revoked",
+    "submitted" | "withdrawn" | "approved" | "rejected" | "approval_revoked",
   ipAddress?: string,
 ) {
   await tx.insert(auditLogsTable).values({
@@ -667,7 +663,15 @@ router.use("/schedule-requests", requireAuth, (_req, res, next) => {
 
 router.post(
   "/schedule-requests",
-  rateLimit({ name: "schedule-request-create", max: 20, windowMs: 60_000 }),
+  rateLimit({
+    name: "schedule-request-create",
+    max: 20,
+    windowMs: 60_000,
+    keyGenerator: (req) => {
+      const actor = getUser(req);
+      return `facility:${actor.facilityId}:actor:${actor.id}`;
+    },
+  }),
   async (req, res) => {
     const parsed = createBody.safeParse(req.body);
     if (!parsed.success) return failure(400, "invalid_schedule_request");

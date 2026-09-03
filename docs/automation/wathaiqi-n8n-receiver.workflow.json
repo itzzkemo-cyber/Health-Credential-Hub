@@ -4,6 +4,7 @@
     {
       "parameters": {
         "httpMethod": "POST",
+        "authentication": "headerAuth",
         "path": "health-credential-events-v1",
         "responseMode": "responseNode",
         "options": {
@@ -15,6 +16,12 @@
       "position": [-1320, 80],
       "id": "a139e65f-d268-472b-b868-a3707def0ce2",
       "name": "Receive exact raw body",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_N8N_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "Wathaiqi receiver header auth"
+        }
+      },
       "webhookId": "01e32dde-105a-4ab8-b563-77d7997c01a9"
     },
     {
@@ -137,7 +144,7 @@
     },
     {
       "parameters": {
-        "content": "## Inactive security template\n\n1. Apply n8n-inbox.sql to the dedicated receipt database.\n2. Provision the HMAC bytes with the documented parameterized operator query; never store the secret in this workflow.\n3. Attach only the least-privilege PostgreSQL credential to Verify and claim in PostgreSQL.\n4. Run the synthetic signature, replay, facility, duplicate, and conflict matrix before publishing.\n\nNever add documents, URLs, employee contact data, OCR output, tokens, or provider credentials to this workflow.",
+        "content": "## Inactive security template\n\n1. Apply n8n-inbox.sql to the dedicated receipt database.\n2. Provision the HMAC bytes with the documented parameterized operator query; never store the HMAC secret in this workflow.\n3. Create a separate Header Auth credential named Wathaiqi receiver header auth with header X-Health-Credential-Webhook-Key, then attach it to Receive exact raw body.\n4. Attach only the least-privilege PostgreSQL credential to Verify and claim in PostgreSQL.\n5. Confirm a missing or wrong gate header is rejected before any Code or PostgreSQL node, then run the synthetic signature, replay, facility, duplicate, and conflict matrix before publishing.\n\nNever add documents, URLs, employee contact data, OCR output, tokens, or provider credentials to this workflow.",
         "height": 330,
         "width": 520,
         "color": 7

@@ -198,6 +198,7 @@ const config: AutomationConfig = {
   batchSize: 5,
   enabled: true,
   facilityAllowlist: [7],
+  headerAuthSecret: Buffer.alloc(32, 8).toString("base64"),
   lockTimeoutMs: 60_000,
   maxAttempts: 3,
   pendingMaxAgeDays: 7,
@@ -450,7 +451,7 @@ describe("automation worker tenant boundary", () => {
     expect(expirySnapshotQueries).toHaveLength(2);
   });
 
-  it.each(["http_401", "invalid_acknowledgement"])(
+  it.each(["http_401", "http_403", "invalid_acknowledgement"])(
     "keeps a receiver contract failure %s pending after its first attempt",
     async (errorCode) => {
       queueCredentialLifecycleClaim(1);
@@ -592,8 +593,9 @@ describe("automation worker tenant boundary", () => {
 
     expect(runCycle).toHaveBeenCalledTimes(6);
     expect(
-      loggerMocks.error.mock.calls.map(([fields]) =>
-        (fields as { consecutiveFailures: number }).consecutiveFailures,
+      loggerMocks.error.mock.calls.map(
+        ([fields]) =>
+          (fields as { consecutiveFailures: number }).consecutiveFailures,
       ),
     ).toEqual([1, 2, 1, 2, 3]);
     expect(loggerMocks.error).toHaveBeenLastCalledWith(

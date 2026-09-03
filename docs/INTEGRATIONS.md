@@ -19,7 +19,7 @@ Every enabled integration below must use the reviewed production controls.
 | Oracle Object Storage (OCI)        | The same direct-upload/read/ACL/OCR flow is implemented through OCI's S3-compatible API with exact Riyadh endpoint validation.                                                                                        | Operator setup is documented for `me-riyadh-1`; account, bucket, customer secret key, database, and container deployment are not created without an approved OCI tenancy.                                               | **No-go for real documents in this release.** Keep disabled until the same bounded-ingress, AV/quarantine, lifecycle, tenancy, IAM/CORS, and synthetic restore gates pass.                                                                                                                                                                     |
 | Gemini OCR                         | Authenticated users can send an authorized stored JPEG/PNG image to `gemini-2.5-flash` as inline Base64 and receive structured extracted fields. PDF suggestions use the separate local worker and never call Gemini. | No. The bootstrap does not create or bind Gemini credentials or select an approved Gemini endpoint.                                                                                                                     | Optional and off when its endpoint/key are absent. Provider/region/retention approval and reliability controls are incomplete.                                                                                                                                                                                                                 |
 | Resend email                       | Password resets, invitations, employee activation email OTP, expiry alerts, and weekly manager digests are implemented against Resend's HTTPS API.                                                                    | The Render manifest declares operator-supplied `EMAIL_FROM` and `RESEND_API_KEY`; it cannot create or verify the sender domain.                                                                                         | **Required for employee invitation and activation.** Fail-closed until configured. Approve Resend retention, region/subprocessors, tracking, bounce handling, delivery reconciliation, quotas and incident handling.                                                                                                                           |
-| Signed automation webhook          | A transactional outbox and optional HMAC-signed worker emit eight minimized credential, employee, invitation, schedule, and request lifecycle events.                                                                 | Partly. The bootstrap provisions or updates an inert one-shot Cloud Run Job, dedicated worker/scheduler identities, a regional HMAC secret, and a paused five-minute Scheduler job. It does not provision the receiver. | Disabled by default. Supports explicit facility routing, exact-host/public-IP enforcement, digest-bound idempotency, bounded timeout, retry/backoff, stale-claim recovery, dead-letter retention, and no document/token/resource-ID fields. The recipient remains an operator-approved subprocessor and must verify signatures/replay windows. |
+| Signed automation webhook          | A transactional outbox and optional dual-gated worker emit eight minimized credential, employee, invitation, schedule, and request lifecycle events.                                                                  | Partly. The bootstrap provisions or updates an inert one-shot Cloud Run Job, dedicated worker/scheduler identities, independent regional HMAC/Header Auth secrets, and a paused five-minute Scheduler job. It does not provision the receiver. | Disabled by default. Supports pre-workflow Header Auth, HMAC/replay verification, explicit facility routing, exact-host/public-IP enforcement, digest-bound idempotency, bounded timeout/retry, stale-claim recovery, dead-letter retention, and no document/token/resource-ID fields. The recipient remains an operator-approved subprocessor. |
 
 "Implemented" does not mean that the provider has been enabled in a deployed
 environment. No FHIR, HL7, SMART on FHIR, regulator API, or other health-data
@@ -512,11 +512,14 @@ Workflow automation has two independent, disabled-by-default switches:
 - `AUTOMATION_OUTBOX_ENABLED=true` makes supported credential, employee,
   invitation, schedule, and schedule-request lifecycle mutations write an
   outbox row in the same PostgreSQL transaction as the source record. The API
-  does not need the webhook secret.
+  does not need either delivery secret.
 - `AUTOMATION_WEBHOOK_ENABLED=true` enables the separate worker. It requires an
   HTTPS `AUTOMATION_WEBHOOK_URL` and a canonical Base64 HMAC secret containing
-  at least 32 random bytes. HTTP is accepted only for localhost outside
-  production. The worker refuses to start unless
+  at least 32 random bytes, plus a different canonical Base64
+  `AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET` of the same minimum strength. HTTP is
+  accepted only for localhost outside production. Reusing one value for both
+  controls is rejected at startup without logging either value. The worker
+  refuses to start unless
   `AUTOMATION_OUTBOX_ENABLED=true` is also set, so expiry scanning cannot bypass
   the common feature gate.
 - `AUTOMATION_FACILITY_ALLOWLIST` is a required comma-separated list of
@@ -538,12 +541,12 @@ the API starts; it remains disabled by default, shares API resource/lifecycle
 limits, exits the API after its bounded retry budget is exhausted, and is not a
 production topology. The shipped Google Cloud bootstrap provisions or updates
 the one-shot job with its own identity,
-Cloud SQL access, and the HMAC secret while keeping both switches false by
-default. It also provisions a five-minute Cloud Scheduler invocation in
-`me-central2` under a separate identity with `roles/run.invoker` only on this
-job; the schedule is paused by default. It resumes and runs one initial worker
-cycle only when an operator explicitly supplies all reviewed automation
-settings.
+Cloud SQL access and independent HMAC/Header Auth secrets while keeping both
+switches false by default. It also provisions a five-minute Cloud Scheduler
+invocation in `me-central2` under a separate identity with `roles/run.invoker`
+only on this job; the schedule is paused by default. It resumes and runs one
+initial worker cycle only when an operator explicitly supplies all reviewed
+automation settings.
 
 ### Event contract and data minimization
 
@@ -591,15 +594,19 @@ value derived from a cross-facility actor.
 
 The worker serializes the exact body once and sends:
 
+- `X-Health-Credential-Webhook-Key`: an independent pre-workflow access secret
+  checked by n8n Header Auth before any Code or PostgreSQL node runs. The name
+  is fixed and not configurable.
 - `Idempotency-Key` and `X-Health-Credential-Event-Id`: the outbox UUID.
 - `X-Health-Credential-Event-Type`: the event type.
 - `X-Health-Credential-Timestamp`: Unix seconds.
 - `X-Health-Credential-Signature`: `sha256=<hex HMAC>`, calculated over
   `<timestamp>.<exact raw request body>`.
 
-The supplied n8n compatibility receiver preserves the raw bytes, limits and
-validates the envelope and facility, then passes only timestamp, signature, and
-exact-body Base64 to a SECURITY DEFINER function in a separate
+The supplied n8n compatibility receiver first applies n8n Header Auth, then
+preserves the raw bytes, limits and validates the envelope and facility, and
+passes only timestamp, signature, and exact-body Base64 to a SECURITY DEFINER
+function in a separate
 `wathaiqi_n8n_receipts` database. That function calculates HMAC-SHA256 with a
 private-table secret, performs a best-effort fixed-work 32-byte XOR comparison,
 rejects timestamps outside five minutes, revalidates the exact minimized event
@@ -635,9 +642,11 @@ platform supports it; application checks do not replace network controls.
   default lock remains greater than twice the maximum request timeout.
 - The default request timeout is 10 seconds. Failures retry from 30 seconds
   with exponential backoff capped at one hour, for eight attempts by default.
-  HTTP 408/425/429/5xx and network/timeout failures retry; HTTP 409 is a
-  permanent event-ID/body conflict, and other 4xx responses are permanent
-  configuration/contract rejection.
+  HTTP 408/425/429/5xx and network/timeout failures retry. HTTP 401 and 403 can
+  represent a brief n8n Header Auth/HMAC rollout mismatch and receive a smaller
+  three-attempt contract retry budget. HTTP 409 is a permanent event-ID/body
+  conflict, and other 4xx responses are permanent configuration/contract
+  rejection.
   Bounded `Retry-After` values are honored up to one hour.
 - A stale claim can be recovered after five minutes. An exhausted stale claim
   is explicitly dead-lettered rather than becoming permanently stuck.
@@ -671,14 +680,18 @@ workflow execution logs must not persist the full event longer than approved.
 The configured webhook is a privileged recipient. The checked-in pilot receiver
 accepts facility `1` only; expanding that list requires a reviewed source and
 receiver change plus cross-tenant tests. Restrict workflow editing and event
-inspection accordingly. Do not store the HMAC secret in an n8n credential or
-its main database. Store decoded key bytes only in the private schema of the
-separate receipt database, whose owner is NOLOGIN; the n8n PostgreSQL credential
-uses a separate workflow login that can execute only the verifier wrapper.
+inspection accordingly. Store the independent access secret only in the
+worker secret manager and n8n Header Auth credential. Do not store the HMAC
+secret in an n8n credential or its main database. Store decoded HMAC key bytes
+only in the private schema of the separate receipt database, whose owner is
+NOLOGIN; the n8n PostgreSQL credential uses a separate workflow login that can
+execute only the verifier wrapper.
 Never provide n8n with Health Credential Hub administrator credentials,
 application sessions, application/main-n8n database credentials, storage
 access, or document URLs. Rotate the HMAC secret during a paused-delivery
-maintenance window unless a reviewed dual-key receiver is implemented.
+maintenance window unless a reviewed dual-key receiver is implemented. Rotate
+the independent Header Auth credential and its worker value during the same
+kind of paused, synthetic-tested change; never reuse it as the HMAC key.
 
 ### Operator sequence
 
@@ -689,17 +702,20 @@ maintenance window unless a reviewed dual-key receiver is implemented.
    dedicated NOLOGIN role. Revoke CONNECT from PUBLIC and the main `wathaiqi_n8n`
    role; give the workflow login only CONNECT, schema USAGE, and EXECUTE on
    `verify_and_claim_event_receipt`. Provision the canonical Base64 worker
-   secret into the private receiver table with a parameterized query, then
-   remove `CREATEROLE`/`CREATEDB` from the main n8n role. The exact bootstrap
-   and rotation sequence is in `docs/automation/README.md`.
-3. Test signature rejection, stale replay, same-ID/same-body duplicate,
+   HMAC secret into the private receiver table with a parameterized query.
+   Create a separate n8n Header Auth credential with the fixed
+   `X-Health-Credential-Webhook-Key` name and a different secret, then remove
+   `CREATEROLE`/`CREATEDB` from the main n8n role. The exact bootstrap and
+   rotation sequence is in `docs/automation/README.md`.
+3. Test missing/wrong Header Auth rejection before workflow execution,
+   signature rejection, stale replay, same-ID/same-body duplicate,
    same-ID/changed-body 409 conflict, unlisted-facility rejection, timeout, 5xx
    retry, and dead-letter alerting with synthetic data.
 4. Rerun the bootstrap, or update the provisioned
    `health-credential-hub-automation` job, with the approved HTTPS
    `AUTOMATION_WEBHOOK_URL`, its exact host allowlist,
    `AUTOMATION_WEBHOOK_MODE=SINGLE_CONTROLLER`, the reviewed facility ID list,
-   and both automation switches set to `true`. Keep the HMAC secret mounted
+   and both automation switches set to `true`. Keep both worker secrets mounted
    only on that job. Enable event production only when monitoring is ready,
    otherwise pending rows can accumulate until the worker next runs.
 5. Confirm the bootstrap-created Scheduler job resumed at the approved
@@ -711,7 +727,7 @@ maintenance window unless a reviewed dual-key receiver is implemented.
 
 For the supported Google Cloud layout, the bootstrap-created job already uses
 the reviewed application image, its own least-privilege identity, Cloud SQL,
-`DATABASE_URL`, and the HMAC secret; the public API cannot access that HMAC
+`DATABASE_URL`, and both webhook secrets; the public API cannot access either
 secret. Set the non-secret worker variables explicitly on every bootstrap or
 release update. Run a one-shot cycle with:
 
@@ -724,7 +740,7 @@ The bootstrap-created Scheduler job uses an authenticated invocation and is
 paused whenever webhook delivery is disabled. An operator may keep it paused
 and deploy the same entry point as a dedicated worker service using
 `AUTOMATION_WORKER_MODE=continuous`. The public API service must not receive the
-webhook HMAC secret.
+webhook HMAC or Header Auth secret.
 
 ## Cross-integration production gate
 

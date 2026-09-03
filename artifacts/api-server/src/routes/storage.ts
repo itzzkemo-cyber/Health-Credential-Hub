@@ -64,15 +64,23 @@ import {
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
+
+function actorFacilityRateLimitKey(req: Request): string {
+  const actor = getUser(req);
+  return `facility:${actor.facilityId}:actor:${actor.id}`;
+}
+
 const uploadUrlRateLimit = rateLimit({
   name: "upload-url",
   max: 30,
   windowMs: 10 * 60_000,
+  keyGenerator: actorFacilityRateLimitKey,
 });
 const localUploadRateLimit = rateLimit({
   name: "local-object-upload",
   max: 30,
   windowMs: 10 * 60_000,
+  keyGenerator: actorFacilityRateLimitKey,
 });
 export const MAX_ACTIVE_LOCAL_UPLOADS = 1;
 const UPLOAD_CLEANUP_DISPOSITION_HEADER = "X-Upload-Cleanup-Disposition";

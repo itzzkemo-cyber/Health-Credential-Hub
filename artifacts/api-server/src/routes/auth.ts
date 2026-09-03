@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import {
   db,
   auditLogsTable,
@@ -85,15 +85,73 @@ function readSecondFactorCode(value: unknown): string {
   const trimmed = value.trim();
   return trimmed.length > 0 && trimmed.length <= 128 ? trimmed : "";
 }
+
+function actorFacilityRateLimitKey(req: Request): string {
+  const actor = getUser(req);
+  return `facility:${actor.facilityId}:actor:${actor.id}`;
+}
+
+function publicAuthBodyDigestKey(
+  req: Request,
+  field: string,
+  purpose: string,
+  normalizeAccount = false,
+): string | undefined {
+  const body =
+    typeof req.body === "object" && req.body !== null
+      ? (req.body as Record<string, unknown>)
+      : {};
+  const value = body[field];
+  if (typeof value !== "string") return undefined;
+  const normalized = normalizeAccount
+    ? value.trim().toLowerCase()
+    : value.trim();
+  if (!normalized) return undefined;
+  const secret = process.env.SESSION_SECRET;
+  if (!secret) {
+    // lib/auth already requires this at startup. Keep this guard local so a
+    // future isolated import cannot silently downgrade keyed account privacy.
+    throw new Error("SESSION_SECRET is required for public auth rate limits");
+  }
+  return `${purpose}:${createHmac("sha256", secret)
+    .update(normalized)
+    .digest("base64url")}`;
+}
+
 const loginRateLimit = rateLimit({
   name: "login",
   max: 10,
   windowMs: 10 * 60_000,
 });
+const loginAccountRateLimit = rateLimit({
+  name: "login-account",
+  max: 10,
+  windowMs: 10 * 60_000,
+  keyGenerator: (req) => publicAuthBodyDigestKey(req, "email", "account", true),
+});
+const loginChallengeRateLimit = rateLimit({
+  name: "login-challenge",
+  max: 10,
+  windowMs: 10 * 60_000,
+  keyGenerator: (req) =>
+    publicAuthBodyDigestKey(req, "challengeToken", "challenge"),
+});
 const recoveryRateLimit = rateLimit({
   name: "recovery",
   max: 5,
   windowMs: 60 * 60_000,
+});
+const recoveryAccountRateLimit = rateLimit({
+  name: "recovery-account",
+  max: 5,
+  windowMs: 60 * 60_000,
+  keyGenerator: (req) => publicAuthBodyDigestKey(req, "email", "account", true),
+});
+const recoveryTokenRateLimit = rateLimit({
+  name: "recovery-token",
+  max: 5,
+  windowMs: 60 * 60_000,
+  keyGenerator: (req) => publicAuthBodyDigestKey(req, "token", "reset-token"),
 });
 const invitationAcceptanceRateLimit = rateLimit({
   name: "accept-invitation",
@@ -112,11 +170,13 @@ const changePasswordRateLimit = rateLimit({
   name: "change-password",
   max: 5,
   windowMs: 15 * 60_000,
+  keyGenerator: actorFacilityRateLimitKey,
 });
 const totpSensitiveRateLimit = rateLimit({
   name: "totp-sensitive",
   max: 10,
   windowMs: 10 * 60_000,
+  keyGenerator: actorFacilityRateLimitKey,
 });
 
 // A real bcrypt hash keeps nonexistent-account login attempts on the same
@@ -191,6 +251,7 @@ async function issueSession(
 router.post(
   "/auth/login",
   loginRateLimit,
+  loginAccountRateLimit,
   sessionIssuanceCsrfGuard,
   async (req, res) => {
     const body =
@@ -429,7 +490,8 @@ router.post(
     if (!isProtectedMfaUser(user)) {
       res.status(403).json({
         code: "mfa_not_required",
-        message: "Two-factor authentication is reserved for the protected administrator account",
+        message:
+          "Two-factor authentication is reserved for the protected administrator account",
         messageAr: "المصادقة الثنائية مخصصة لحساب المسؤول المحمي",
       });
       return;
@@ -506,7 +568,8 @@ router.post(
     if (!isProtectedMfaUser(user)) {
       res.status(403).json({
         code: "mfa_not_required",
-        message: "Two-factor authentication is reserved for the protected administrator account",
+        message:
+          "Two-factor authentication is reserved for the protected administrator account",
         messageAr: "المصادقة الثنائية مخصصة لحساب المسؤول المحمي",
       });
       return;
@@ -614,6 +677,7 @@ router.post(
 router.post(
   "/auth/totp/challenge",
   loginRateLimit,
+  loginChallengeRateLimit,
   sessionIssuanceCsrfGuard,
   async (req, res) => {
     pruneChallengeState();
@@ -732,7 +796,8 @@ router.delete(
     if (isProtectedMfaUser(user)) {
       res.status(403).json({
         code: "protected_mfa_cannot_be_disabled",
-        message: "Two-factor authentication cannot be disabled for this protected account",
+        message:
+          "Two-factor authentication cannot be disabled for this protected account",
         messageAr: "لا يمكن إلغاء المصادقة الثنائية لهذا الحساب المحمي",
       });
       return;
@@ -1067,7 +1132,8 @@ router.post(
     if (result.kind === "protected_target") {
       res.status(403).json({
         code: "protected_mfa_cannot_be_disabled",
-        message: "Two-factor authentication cannot be disabled for this protected account",
+        message:
+          "Two-factor authentication cannot be disabled for this protected account",
         messageAr: "لا يمكن إلغاء المصادقة الثنائية لهذا الحساب المحمي",
       });
       return;
@@ -2107,90 +2173,96 @@ router.post(
 
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // reset links are valid for 1 hour
 
-router.post("/auth/forgot-password", recoveryRateLimit, async (req, res) => {
-  const body = req.body as { email?: unknown };
-  const email =
-    typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-  // Uniform 200 regardless of outcome (no account enumeration) — and respond
-  // *before* the lookup/email work so response timing is uniform too.
-  res.json({});
-  if (!email) return;
-  try {
-    const rawToken = randomBytes(32).toString("hex");
-    const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-    const user = await db.transaction(async (tx) => {
-      const locked = (
+router.post(
+  "/auth/forgot-password",
+  recoveryRateLimit,
+  recoveryAccountRateLimit,
+  async (req, res) => {
+    const body = req.body as { email?: unknown };
+    const email =
+      typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    // Uniform 200 regardless of outcome (no account enumeration) — and respond
+    // *before* the lookup/email work so response timing is uniform too.
+    res.json({});
+    if (!email) return;
+    try {
+      const rawToken = randomBytes(32).toString("hex");
+      const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+      const user = await db.transaction(async (tx) => {
+        const locked = (
+          await tx
+            .select()
+            .from(usersTable)
+            .where(eq(usersTable.email, email))
+            .for("update")
+        )[0];
+        if (!locked || !locked.isActive) return null;
+        // Single-active-link policy: requesting a new link voids older unused
+        // ones in the same transaction that creates and audits the replacement.
         await tx
-          .select()
-          .from(usersTable)
-          .where(eq(usersTable.email, email))
-          .for("update")
-      )[0];
-      if (!locked || !locked.isActive) return null;
-      // Single-active-link policy: requesting a new link voids older unused
-      // ones in the same transaction that creates and audits the replacement.
-      await tx
-        .update(passwordResetTokensTable)
-        .set({ usedAt: new Date() })
-        .where(
-          and(
-            eq(passwordResetTokensTable.userId, locked.id),
-            isNull(passwordResetTokensTable.usedAt),
-          ),
-        );
-      await tx.insert(passwordResetTokensTable).values({
-        userId: locked.id,
-        tokenHash,
-        expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+          .update(passwordResetTokensTable)
+          .set({ usedAt: new Date() })
+          .where(
+            and(
+              eq(passwordResetTokensTable.userId, locked.id),
+              isNull(passwordResetTokensTable.usedAt),
+            ),
+          );
+        await tx.insert(passwordResetTokensTable).values({
+          userId: locked.id,
+          tokenHash,
+          expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+        });
+        await tx
+          .insert(auditLogsTable)
+          .values(
+            auditEntry(
+              locked,
+              "Requested password reset",
+              "طلب إعادة تعيين كلمة المرور",
+              "Account",
+              "الحساب",
+              req.ip,
+            ),
+          );
+        return locked;
       });
-      await tx
-        .insert(auditLogsTable)
-        .values(
-          auditEntry(
-            locked,
-            "Requested password reset",
-            "طلب إعادة تعيين كلمة المرور",
-            "Account",
-            "الحساب",
-            req.ip,
-          ),
-        );
-      return locked;
-    });
-    if (!user) return;
+      if (!user) return;
 
-    const resetUrl = getPasswordResetUrl(rawToken);
-    if (!resetUrl || !isEmailConfigured() || isFixtureRecipient(user.email)) {
-      logger.warn(
-        { userId: user.id },
-        "Password reset link created but not emailed (provider unavailable or fixture recipient)",
-      );
-      return;
+      const resetUrl = getPasswordResetUrl(rawToken);
+      if (!resetUrl || !isEmailConfigured() || isFixtureRecipient(user.email)) {
+        logger.warn(
+          { userId: user.id },
+          "Password reset link created but not emailed (provider unavailable or fixture recipient)",
+        );
+        return;
+      }
+      await sendEmail({
+        to: user.email,
+        subject: "إعادة تعيين كلمة المرور | Reset your HealthDocs password",
+        html: passwordResetEmail({
+          nameAr: user.nameAr,
+          name: user.name,
+          resetUrl,
+        }),
+        idempotencyKey: createEmailIdempotencyKey("password-reset", tokenHash),
+      });
+      logger.info({ userId: user.id }, "Password reset email sent");
+    } catch (err) {
+      if (err instanceof EmailNotConfiguredError) {
+        logger.warn("Password reset email skipped — provider not configured");
+        return;
+      }
+      // Response already sent; log for operators, never leak to the caller.
+      logger.error(safeErrorLogFields(err), "Password reset processing failed");
     }
-    await sendEmail({
-      to: user.email,
-      subject: "إعادة تعيين كلمة المرور | Reset your HealthDocs password",
-      html: passwordResetEmail({
-        nameAr: user.nameAr,
-        name: user.name,
-        resetUrl,
-      }),
-      idempotencyKey: createEmailIdempotencyKey("password-reset", tokenHash),
-    });
-    logger.info({ userId: user.id }, "Password reset email sent");
-  } catch (err) {
-    if (err instanceof EmailNotConfiguredError) {
-      logger.warn("Password reset email skipped — provider not configured");
-      return;
-    }
-    // Response already sent; log for operators, never leak to the caller.
-    logger.error(safeErrorLogFields(err), "Password reset processing failed");
-  }
-});
+  },
+);
 
 router.post(
   "/auth/reset-password",
   recoveryRateLimit,
+  recoveryTokenRateLimit,
   sessionIssuanceCsrfGuard,
   async (req, res) => {
     const body = req.body as { token?: unknown; newPassword?: unknown };

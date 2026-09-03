@@ -388,12 +388,7 @@ async function audit(
   });
   await enqueueAutomationEvent(
     tx,
-    scheduleLifecycleEvent(
-      row.facilityId,
-      row.id,
-      row.rowVersion,
-      change,
-    ),
+    scheduleLifecycleEvent(row.facilityId, row.id, row.rowVersion, change),
   );
 }
 function isUniqueViolation(error: unknown): boolean {
@@ -509,7 +504,15 @@ router.get("/schedules", requireRole(...MANAGER_ROLES), async (req, res) => {
 router.post(
   "/schedules",
   requireRole(...MANAGER_ROLES),
-  rateLimit({ name: "schedule-generate", max: 20, windowMs: 60_000 }),
+  rateLimit({
+    name: "schedule-generate",
+    max: 20,
+    windowMs: 60_000,
+    keyGenerator: (req) => {
+      const actor = getUser(req);
+      return `facility:${actor.facilityId}:actor:${actor.id}`;
+    },
+  }),
   async (req, res) => {
     const parsed = createBody.safeParse(req.body);
     if (!parsed.success) return failure(400, "invalid_schedule_configuration");

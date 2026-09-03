@@ -89,14 +89,20 @@ const ACCOUNT_AUDIT_FIELDS = [
   "isActive",
 ] as const;
 
+function actorFacilityRateLimitKey(req: Request): string {
+  const actor = getUser(req);
+  return `facility:${actor.facilityId}:actor:${actor.id}`;
+}
+
 // This is an authenticated, single-instance safety net for repeated password
 // and second-factor guesses across every employee account-state endpoint. The
-// shared name makes PATCH, DELETE, activate, and deactivate consume one budget
-// per source IP instead of granting a separate brute-force budget per route.
+// shared handler makes PATCH, DELETE, activate, and deactivate consume one
+// budget per facility-scoped actor instead of separate budgets per route.
 const employeeStepUpRateLimit = rateLimit({
   name: "employee-step-up",
   max: 10,
   windowMs: 10 * 60_000,
+  keyGenerator: actorFacilityRateLimitKey,
 });
 
 const EMPLOYEE_INVITATION_TTL_MS = 24 * 60 * 60 * 1000;

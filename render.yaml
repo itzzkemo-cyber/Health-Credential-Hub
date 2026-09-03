@@ -158,3 +158,7 @@ services:
         value: wathaiqi-n8n.onrender.com
       - key: AUTOMATION_WEBHOOK_SECRET
         sync: false
+      # Independent pre-workflow gate consumed by n8n Header Auth. It must not
+      # equal AUTOMATION_WEBHOOK_SECRET and is never mounted on the public API.
+      - key: AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET
+        sync: false

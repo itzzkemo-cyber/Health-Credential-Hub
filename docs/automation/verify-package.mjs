@@ -18,6 +18,9 @@ const [
   integrations,
   provisionScript,
   inspectionScript,
+  gcpBootstrap,
+  renderManifest,
+  environmentExample,
 ] = await Promise.all([
   readFile(workflowPath, "utf8"),
   readFile(path.join(directory, "n8n-inbox.sql"), "utf8"),
@@ -36,7 +39,13 @@ const [
   readFile(path.join(directory, "README.md"), "utf8"),
   readFile(path.join(repositoryRoot, "docs", "INTEGRATIONS.md"), "utf8"),
   readFile(path.join(repositoryRoot, ".local", "provision-n8n-db.cjs"), "utf8"),
-  readFile(path.join(repositoryRoot, ".local", "inspect-n8n-bootstrap.cjs"), "utf8"),
+  readFile(
+    path.join(repositoryRoot, ".local", "inspect-n8n-bootstrap.cjs"),
+    "utf8",
+  ),
+  readFile(path.join(repositoryRoot, "infra", "gcp", "bootstrap.sh"), "utf8"),
+  readFile(path.join(repositoryRoot, "render.yaml"), "utf8"),
+  readFile(path.join(repositoryRoot, ".env.example"), "utf8"),
 ]);
 const workflow = JSON.parse(workflowText);
 const node = (name) => {
@@ -82,8 +91,15 @@ await check(
     const webhook = node("Receive exact raw body");
     assert.equal(webhook.type, "n8n-nodes-base.webhook");
     assert.equal(webhook.parameters.httpMethod, "POST");
+    assert.equal(webhook.parameters.authentication, "headerAuth");
     assert.equal(webhook.parameters.responseMode, "responseNode");
     assert.equal(webhook.parameters.options.rawBody, true);
+    assert.deepEqual(webhook.credentials, {
+      httpHeaderAuth: {
+        id: "REPLACE_WITH_N8N_HEADER_AUTH_CREDENTIAL_ID",
+        name: "Wathaiqi receiver header auth",
+      },
+    });
   },
 );
 
@@ -100,8 +116,20 @@ await check(
     ]);
     for (const candidate of workflow.nodes) {
       assert.ok(allowedNodeTypes.has(candidate.type), candidate.type);
-      assert.equal(candidate.credentials, undefined);
+      if (candidate.name === "Receive exact raw body") {
+        assert.deepEqual(Object.keys(candidate.credentials ?? {}), [
+          "httpHeaderAuth",
+        ]);
+        assert.deepEqual(
+          Object.keys(candidate.credentials.httpHeaderAuth).sort(),
+          ["id", "name"],
+        );
+      } else {
+        assert.equal(candidate.credentials, undefined);
+      }
     }
+    assert.doesNotMatch(workflowText, /AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET/);
+    assert.doesNotMatch(workflowText, /[A-Za-z0-9+/]{43}=/);
     assert.equal(workflowText.includes("n8n-nodes-base.crypto"), false);
     assert.equal(workflowText.includes("n8n-nodes-base.httpRequest"), false);
     assert.equal(workflowText.includes("https://"), false);
@@ -110,36 +138,31 @@ await check(
   },
 );
 
-await check(
-  "only a shape-valid request can reach the DB verifier",
-  () => {
-    assert.deepEqual(targets("Receive exact raw body"), [
-      "Validate exact request",
-    ]);
-    assert.deepEqual(targets("Validate exact request"), [
-      "Request shape valid?",
-    ]);
-    assert.deepEqual(targets("Request shape valid?", 0), [
-      "Verify and claim in PostgreSQL",
-    ]);
-    assert.deepEqual(targets("Request shape valid?", 1), [
-      "Reject malformed request",
-    ]);
-    assert.deepEqual(targets("Verify and claim in PostgreSQL"), [
-      "Map safe receipt response",
-    ]);
-    assert.deepEqual(targets("Map safe receipt response"), [
-      "Return verified result",
-    ]);
-    const postgresNodes = workflow.nodes.filter(
-      (candidate) => candidate.type === "n8n-nodes-base.postgres",
-    );
-    assert.deepEqual(
-      postgresNodes.map((candidate) => candidate.name),
-      ["Verify and claim in PostgreSQL"],
-    );
-  },
-);
+await check("only a shape-valid request can reach the DB verifier", () => {
+  assert.deepEqual(targets("Receive exact raw body"), [
+    "Validate exact request",
+  ]);
+  assert.deepEqual(targets("Validate exact request"), ["Request shape valid?"]);
+  assert.deepEqual(targets("Request shape valid?", 0), [
+    "Verify and claim in PostgreSQL",
+  ]);
+  assert.deepEqual(targets("Request shape valid?", 1), [
+    "Reject malformed request",
+  ]);
+  assert.deepEqual(targets("Verify and claim in PostgreSQL"), [
+    "Map safe receipt response",
+  ]);
+  assert.deepEqual(targets("Map safe receipt response"), [
+    "Return verified result",
+  ]);
+  const postgresNodes = workflow.nodes.filter(
+    (candidate) => candidate.type === "n8n-nodes-base.postgres",
+  );
+  assert.deepEqual(
+    postgresNodes.map((candidate) => candidate.name),
+    ["Verify and claim in PostgreSQL"],
+  );
+});
 
 const validateNode = node("Validate exact request");
 const validateCode = validateNode.parameters.jsCode;
@@ -286,7 +309,9 @@ await check("every minimized lifecycle event shape is accepted", async () => {
     ]);
     assert.equal(prepared.json.precheckOk, true, JSON.stringify(event));
     assert.equal(
-      Buffer.from(prepared.json.rawBodyBase64, "base64").equals(request.rawBody),
+      Buffer.from(prepared.json.rawBodyBase64, "base64").equals(
+        request.rawBody,
+      ),
       true,
     );
   }
@@ -396,10 +421,7 @@ await check(
       automationReadme,
       /Keep `wathaiqi_n8n` as the main database owner/i,
     );
-    assert.match(
-      automationReadme,
-      /do not use `REASSIGN OWNED`/i,
-    );
+    assert.match(automationReadme, /do not use `REASSIGN OWNED`/i);
     assert.doesNotMatch(
       automationReadme,
       /^\s*REASSIGN OWNED BY wathaiqi_n8n TO wathaiqi_n8n_app;/m,
@@ -455,10 +477,7 @@ await check(
     );
     assert.match(provisionScript, /namespace\.nspname = 'public'/);
     assert.match(inspectionScript, /publicForeignOwnerCounts/);
-    assert.match(
-      inboxSql,
-      /GRANTED BY CURRENT_USER;/,
-    );
+    assert.match(inboxSql, /GRANTED BY CURRENT_USER;/);
     assert.match(
       inboxSql,
       /member_role\.rolname = 'wathaiqi_n8n'[\s\S]*?membership\.inherit_option[\s\S]*?membership\.set_option[\s\S]*?NOT membership\.admin_option/,
@@ -494,10 +513,7 @@ await check(
       /TO wathaiqi_n8n_receiver_operator[\s\S]*?WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;/,
     );
     assert.doesNotMatch(workflowText, /wathaiqi_n8n_receiver_operator/);
-    assert.match(
-      inboxSql,
-      /current_database\(\) <> 'wathaiqi_n8n_receipts'/,
-    );
+    assert.match(inboxSql, /current_database\(\) <> 'wathaiqi_n8n_receipts'/);
     assert.match(
       inboxSql,
       /actual_database_owner <> 'wathaiqi_n8n_receipts_owner'/,
@@ -659,10 +675,7 @@ await check(
     assert.match(inboxSql, /RETURN QUERY SELECT parsed_event_id, 'inserted'/);
     assert.match(inboxSql, /RETURN QUERY SELECT parsed_event_id, 'duplicate'/);
     assert.match(inboxSql, /RETURN QUERY SELECT parsed_event_id, 'conflict'/);
-    assert.match(
-      inboxSql,
-      /VALUES \(1, pg_catalog\.decode\(\$1, 'base64'\)/,
-    );
+    assert.match(inboxSql, /VALUES \(1, pg_catalog\.decode\(\$1, 'base64'\)/);
     assert.doesNotMatch(
       inboxSql,
       /VALUES \(1, pg_catalog\.decode\('[A-Za-z0-9+/=]{20,}'/,
@@ -727,9 +740,56 @@ await check(
     assert.match(n8nEnv, /^WEBHOOK_URL=https:\/\//m);
     assert.match(n8nEnv, /^N8N_EDITOR_BASE_URL=https:\/\//m);
     assert.doesNotMatch(n8nEnv, /^N8N_WEBHOOK_URL=/m);
+    assert.match(n8nEnv, /^NODES_EXCLUDE=.*"n8n-nodes-base\.crypto".*$/m);
+  },
+);
+
+await check(
+  "Render and Google workers mount an independent pre-workflow Header Auth secret",
+  () => {
     assert.match(
-      n8nEnv,
-      /^NODES_EXCLUDE=.*"n8n-nodes-base\.crypto".*$/m,
+      automationReadme,
+      /X-Health-Credential-Webhook-Key[\s\S]*?Never reuse one value\s+for both controls/,
+    );
+    assert.match(
+      automationReadme,
+      /missing or wrong header[\s\S]*?cannot reach a Code or PostgreSQL node/i,
+    );
+    assert.match(environmentExample, /^AUTOMATION_WEBHOOK_ENABLED=false$/m);
+    assert.match(
+      environmentExample,
+      /^AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET=$/m,
+    );
+    const publicRenderService = renderManifest.split(
+      "name: wathaiqi-automation-worker",
+    )[0];
+    const workerRenderService = renderManifest.split(
+      "name: wathaiqi-automation-worker",
+    )[1];
+    assert.ok(workerRenderService, "missing Render automation worker");
+    assert.doesNotMatch(
+      publicRenderService,
+      /AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET/,
+    );
+    assert.match(
+      workerRenderService,
+      /AUTOMATION_WEBHOOK_SECRET[\s\S]*AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET/,
+    );
+    assert.match(
+      gcpBootstrap,
+      /AUTOMATION_WEBHOOK_ENABLED="\$\{AUTOMATION_WEBHOOK_ENABLED:-false\}"/,
+    );
+    assert.match(
+      gcpBootstrap,
+      /ensure_secret healthdocs-automation-webhook-header-auth-secret "\$\(openssl rand -base64 32 \| tr -d '\\n'\)"/,
+    );
+    assert.match(
+      gcpBootstrap,
+      /AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET=healthdocs-automation-webhook-header-auth-secret:latest/,
+    );
+    assert.match(
+      gcpBootstrap,
+      /healthdocs-automation-webhook-secret healthdocs-automation-webhook-header-auth-secret/,
     );
   },
 );

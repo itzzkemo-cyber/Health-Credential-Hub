@@ -6,6 +6,7 @@ import {
 } from "./config";
 
 const secret = Buffer.alloc(32, 7).toString("base64");
+const headerAuthSecret = Buffer.alloc(32, 8).toString("base64");
 
 describe("automation webhook configuration", () => {
   it("keeps transactional event production off until explicitly enabled", () => {
@@ -23,6 +24,7 @@ describe("automation webhook configuration", () => {
       readAutomationConfig({
         AUTOMATION_WEBHOOK_URL: "not a url",
         AUTOMATION_WEBHOOK_SECRET: "weak",
+        AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET: "also-weak",
       }),
     ).toMatchObject({ enabled: false });
   });
@@ -47,6 +49,17 @@ describe("automation webhook configuration", () => {
         AUTOMATION_WEBHOOK_MODE: "SINGLE_CONTROLLER",
       }),
     ).toThrow(/AUTOMATION_FACILITY_ALLOWLIST/);
+    expect(() =>
+      readAutomationConfig({
+        AUTOMATION_WEBHOOK_ENABLED: "true",
+        AUTOMATION_OUTBOX_ENABLED: "true",
+        AUTOMATION_WEBHOOK_MODE: "SINGLE_CONTROLLER",
+        AUTOMATION_FACILITY_ALLOWLIST: "17",
+        AUTOMATION_WEBHOOK_HOST_ALLOWLIST: "n8n.example.sa",
+        AUTOMATION_WEBHOOK_URL: "https://n8n.example.sa/webhook",
+        AUTOMATION_WEBHOOK_SECRET: secret,
+      }),
+    ).toThrow(/AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET/);
   });
 
   it("requires and strictly validates the tenant allowlist", () => {
@@ -81,6 +94,7 @@ describe("automation webhook configuration", () => {
         AUTOMATION_WEBHOOK_HOST_ALLOWLIST: "n8n.internal",
         AUTOMATION_WEBHOOK_URL: "http://n8n.internal/webhook",
         AUTOMATION_WEBHOOK_SECRET: secret,
+        AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET: headerAuthSecret,
       }),
     ).toThrow(/HTTPS/);
     expect(() =>
@@ -93,8 +107,39 @@ describe("automation webhook configuration", () => {
         AUTOMATION_WEBHOOK_HOST_ALLOWLIST: "n8n.example.sa",
         AUTOMATION_WEBHOOK_URL: "https://n8n.example.sa/webhook",
         AUTOMATION_WEBHOOK_SECRET: Buffer.alloc(16).toString("base64"),
+        AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET: headerAuthSecret,
       }),
     ).toThrow(/at least 32 random bytes/);
+
+    expect(() =>
+      readAutomationConfig({
+        NODE_ENV: "production",
+        AUTOMATION_WEBHOOK_ENABLED: "true",
+        AUTOMATION_OUTBOX_ENABLED: "true",
+        AUTOMATION_WEBHOOK_MODE: "SINGLE_CONTROLLER",
+        AUTOMATION_FACILITY_ALLOWLIST: "17",
+        AUTOMATION_WEBHOOK_HOST_ALLOWLIST: "n8n.example.sa",
+        AUTOMATION_WEBHOOK_URL: "https://n8n.example.sa/webhook",
+        AUTOMATION_WEBHOOK_SECRET: secret,
+        AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET: "not-base64",
+      }),
+    ).toThrow(
+      /AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET.*at least 32 random bytes/,
+    );
+
+    expect(() =>
+      readAutomationConfig({
+        NODE_ENV: "production",
+        AUTOMATION_WEBHOOK_ENABLED: "true",
+        AUTOMATION_OUTBOX_ENABLED: "true",
+        AUTOMATION_WEBHOOK_MODE: "SINGLE_CONTROLLER",
+        AUTOMATION_FACILITY_ALLOWLIST: "17",
+        AUTOMATION_WEBHOOK_HOST_ALLOWLIST: "n8n.example.sa",
+        AUTOMATION_WEBHOOK_URL: "https://n8n.example.sa/webhook",
+        AUTOMATION_WEBHOOK_SECRET: secret,
+        AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET: secret,
+      }),
+    ).toThrow(/must be independent secrets/);
   });
 
   it("accepts bounded production settings", () => {
@@ -107,6 +152,7 @@ describe("automation webhook configuration", () => {
       AUTOMATION_WEBHOOK_HOST_ALLOWLIST: "n8n.example.sa",
       AUTOMATION_WEBHOOK_URL: "https://n8n.example.sa/webhook/credentials",
       AUTOMATION_WEBHOOK_SECRET: secret,
+      AUTOMATION_WEBHOOK_HEADER_AUTH_SECRET: headerAuthSecret,
       AUTOMATION_WEBHOOK_TIMEOUT_MS: "5000",
       AUTOMATION_OUTBOX_LOCK_TIMEOUT_MS: "60000",
       AUTOMATION_OUTBOX_MAX_ATTEMPTS: "5",
@@ -123,5 +169,6 @@ describe("automation webhook configuration", () => {
     });
     expect(config.webhookUrl?.protocol).toBe("https:");
     expect(config.secret).toEqual(Buffer.alloc(32, 7));
+    expect(config.headerAuthSecret).toBe(headerAuthSecret);
   });
 });
