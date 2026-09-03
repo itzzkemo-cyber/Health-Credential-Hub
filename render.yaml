@@ -136,6 +136,10 @@ services:
         value: managed
       - key: DATABASE_BLOCKED_ROLES
         value: anon,authenticated,service_role
+      # Required by the shared production helper bundle; this is an integer
+      # identifier only, not a session or MFA secret.
+      - key: PROTECTED_MFA_USER_ID
+        sync: false
       - key: AUTOMATION_WORKER_MODE
         value: continuous
       - key: AUTOMATION_OUTBOX_ENABLED
