@@ -1,16 +1,21 @@
 services:
   - type: web
-    name: wathaiqi-health
-    runtime: docker
+    name: wathaiqi-health-release
+    runtime: node
     plan: free
     region: frankfurt
     repo: https://github.com/wathaiqihealth/Health-Credential-Hub.git
     branch: main
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
+    # Keep this identical to the reviewed command on the live Node service.
+    # Development dependencies are present only while building; the deployed
+    # API bundle is pruned to production dependencies under release/api.
+    buildCommand: >-
+      set -eu; export NODE_ENV=development; unset NODE_EXTRA_CA_CERTS; rm -rf release; mkdir -p release; corepack enable; corepack prepare pnpm@11.19.0 --activate; pnpm install --frozen-lockfile; pnpm run build:production; pnpm --filter @workspace/api-server deploy --prod --legacy release/api; mkdir -p release/api/dist release/web release/migrations release/certs; cp -R artifacts/api-server/dist/. release/api/dist/; cp -R artifacts/health-docs/dist/public/. release/web/; cp -R lib/db/migrations/. release/migrations/; cp config/supabase-prod-ca-2021.crt release/certs/supabase-prod-ca-2021.crt; node release/api/dist/check-pdf-security.mjs
+    startCommand: >-
+      set -eu; cd release/api; export WEB_DIST_DIR="$PWD/../web"; export MIGRATIONS_DIR="$PWD/../migrations"; export NODE_EXTRA_CA_CERTS="$PWD/../certs/supabase-prod-ca-2021.crt"; exec node --enable-source-maps dist/index.mjs
     healthCheckPath: /api/readyz
     # The free plan has no isolated pre-deploy job. Keep deploys manual so the
-    # reviewed migration command can finish before a new image is released.
+    # reviewed migration command can finish before a new revision is released.
     autoDeployTrigger: off
     envVars:
       - key: NODE_ENV
@@ -26,8 +31,6 @@ services:
       # RELEASE_SHA here because it would become stale on a later manual deploy.
       - key: DB_POOL_MAX
         value: "5"
-      - key: NODE_EXTRA_CA_CERTS
-        value: /app/certs/supabase-prod-ca-2021.crt
       - key: DATABASE_URL
         sync: false
       - key: APP_DATABASE_USER
@@ -97,14 +100,17 @@ services:
   # from the public API. It does not serve the product UI or business data.
   - type: web
     name: wathaiqi-automation-worker
-    runtime: docker
+    runtime: node
     plan: free
     region: frankfurt
     repo: https://github.com/wathaiqihealth/Health-Credential-Hub.git
     branch: main
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    dockerCommand: node --enable-source-maps dist/automation-worker.mjs
+    # Build only the API/worker package; this service never serves the product
+    # UI. The same frozen lockfile and production dependency pruning apply.
+    buildCommand: >-
+      set -eu; export NODE_ENV=development; unset NODE_EXTRA_CA_CERTS; rm -rf release; mkdir -p release; corepack enable; corepack prepare pnpm@11.19.0 --activate; pnpm install --frozen-lockfile; pnpm --filter @workspace/api-server run build; pnpm --filter @workspace/api-server deploy --prod --legacy release/api; mkdir -p release/api/dist release/certs; cp -R artifacts/api-server/dist/. release/api/dist/; cp config/supabase-prod-ca-2021.crt release/certs/supabase-prod-ca-2021.crt
+    startCommand: >-
+      set -eu; cd release/api; export NODE_EXTRA_CA_CERTS="$PWD/../certs/supabase-prod-ca-2021.crt"; exec node --enable-source-maps dist/automation-worker.mjs
     healthCheckPath: /readyz
     autoDeployTrigger: off
     envVars:
@@ -118,8 +124,6 @@ services:
         value: info
       - key: DB_POOL_MAX
         value: "2"
-      - key: NODE_EXTRA_CA_CERTS
-        value: /app/certs/supabase-prod-ca-2021.crt
       - key: DATABASE_URL
         sync: false
       - key: APP_DATABASE_USER

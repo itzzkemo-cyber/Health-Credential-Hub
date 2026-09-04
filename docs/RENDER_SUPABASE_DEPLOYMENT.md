@@ -1,11 +1,14 @@
 # Render + Supabase deployment
 
 This runbook deploys the production-code responsive web application and API as
-one Docker web service on Render, backed by a persistent Supabase PostgreSQL
-database and a private Supabase Storage bucket. It does not enable public
-registration, test login, seed data, OCR, email, or automation. "Production
-code" means the release has no Demo bypasses; it does not mean this free hosting
-profile is production-ready or approved for health data.
+one Node web service on Render, with a second narrow Node service for the
+durable automation worker. Both use the same reviewed Git revision and are
+backed by a persistent Supabase PostgreSQL database and a private Supabase
+Storage bucket. It does not enable public registration, test login, seed data,
+or OCR. Email and automation remain fail-closed until their complete operator
+configuration is present. "Production code" means the release has no Demo
+bypasses; it does not mean this free hosting profile is production-ready or
+approved for health data.
 
 ## Release status
 
@@ -44,19 +47,31 @@ mobile/desktop browser
         |
         | HTTPS, same origin
         v
-Render Docker web service (React + Express)
+Render Node web service (React + Express)
         |                         |
         | TLS PostgreSQL          | HTTPS S3 API, server-only keys
         v                         v
 Supabase session pooler      private Supabase Storage bucket
+
+Render Node automation worker
+        |
+        | signed, minimized HTTPS events
+        v
+approved n8n webhook
 ```
 
-The Docker build runs the repository's real `build:production` script. The
-container starts the real API `start` output with the Dockerfile's command:
+The web-service build runs the repository's real `build:production` script,
+copies only the production API package, compiled API, web bundle, reviewed
+migrations, and pinned Supabase CA into `release/`, and executes the PDF
+security self-test. It starts the compiled API with:
 
 ```text
 node --enable-source-maps dist/index.mjs
 ```
+
+The worker builds only `@workspace/api-server`, deploys its production
+dependencies under `release/api`, and starts
+`dist/automation-worker.mjs`. Neither service runs migrations automatically.
 
 Render probes `GET /api/readyz`. That endpoint verifies the dependencies needed
 for the configured mode. With document intake enabled this includes PostgreSQL,
@@ -75,17 +90,18 @@ Use the existing project in `eu-central-1` (Frankfurt):
 3. Keep one **private** Storage bucket. Set an 8 MiB (8388608 byte) file limit
    and allow only `image/jpeg`, `image/png`, and `application/pdf`. Do not alter
    public access, anonymous/authenticated policies or RLS when adding PDF.
-   Confirm the deployed image passed its PDF worker test before release.
+   Confirm the deployed revision passed its PDF worker test before release.
 4. Create an S3 access-key pair for the private bucket. Store it only in the
    Render secret environment. Supabase S3 access keys bypass Storage RLS and
    must never be placed in browser code, Git, screenshots, CI output, or chat.
 5. Record the S3 endpoint in this form:
    `https://PROJECT_REF.storage.supabase.co/storage/v1/s3`.
 6. Use the session-pooler connection on port `5432` with
-   `sslmode=verify-full`. The image loads Supabase's published production CA
-   through `NODE_EXTRA_CA_CERTS`; hostname and certificate verification must
-   remain enabled. Do not use the transaction pooler on port `6543` for
-   migrations because migrations use session-scoped advisory locks.
+   `sslmode=verify-full`. Each Node service's checked-in start command loads
+   Supabase's published production CA from its own `release/certs` directory;
+   hostname and certificate verification must remain enabled. Do not use the
+   transaction pooler on port `6543` for migrations because migrations use
+   session-scoped advisory locks.
 
 ### Required database identities
 
@@ -232,17 +248,19 @@ Never add `BOOTSTRAP_*` variables to the Render web service.
 ## 4. Create the Render Blueprint
 
 In Render, create a Blueprint from the repository root and branch `main`.
-Render builds [`Dockerfile`](../Dockerfile); there is no separate invented
-build or start command. Provide these prompted secret values:
+The checked-in manifest names the live `wathaiqi-health-release` and
+`wathaiqi-automation-worker` services and records their reviewed Node build,
+start, and readiness commands. Keep automatic deploys off and provide the
+prompted secret values in Render; do not commit them:
 
 If the Render workspace is not connected to GitHub, create a **Web Service**
 from the public Git repository
 `https://github.com/wathaiqihealth/Health-Credential-Hub.git` instead. Select
-Docker, branch `main`, Frankfurt, and the Free plan; leave Dockerfile as
-`./Dockerfile`, build context as `.`, Docker command empty, health-check path as
-`/api/readyz`, and automatic deploys off. Then copy the non-secret values and
-secret prompts from `render.yaml` into the service environment. This produces
-the same runtime without granting Render write access to GitHub.
+Node, branch `main`, Frankfurt, and the Free plan; copy the matching
+`buildCommand`, `startCommand`, health-check path, non-secret values, and secret
+prompts from `render.yaml`, with automatic deploys off. Create both services;
+the worker uses `/readyz`, while the public application uses `/api/readyz`.
+This produces the same runtime without granting Render write access to GitHub.
 
 | Render variable                       | Value                                                          |
 | ------------------------------------- | -------------------------------------------------------------- |
@@ -252,24 +270,37 @@ the same runtime without granting Render write access to GitHub.
 | `S3_OBJECT_STORAGE_ENDPOINT`          | Supabase project S3 endpoint                                   |
 | `S3_OBJECT_STORAGE_ACCESS_KEY_ID`     | server-only S3 access key                                      |
 | `S3_OBJECT_STORAGE_SECRET_ACCESS_KEY` | server-only S3 secret key                                      |
-| `EMAIL_FROM`                          | verified dedicated Resend sender                              |
-| `RESEND_API_KEY`                      | restricted server-only Resend sending key                     |
+| `EMAIL_FROM`                          | verified dedicated Resend sender                               |
+| `RESEND_API_KEY`                      | restricted server-only Resend sending key                      |
 
 The non-secret runtime boundary must remain exactly:
 
 ```dotenv
-NODE_EXTRA_CA_CERTS=/app/certs/supabase-prod-ca-2021.crt
 DATABASE_OWNERSHIP_MODE=managed
 DATABASE_BLOCKED_ROLES=anon,authenticated,service_role
 DOCUMENT_UPLOADS_ENABLED=true
 UPLOAD_SECURITY_PROVIDER=raster-sanitizer
 ```
 
-The Blueprint generates independent 256-bit `SESSION_SECRET` and
-`TOTP_ENCRYPTION_KEY` values. Preserve those values across redeploys; rotating
-the first invalidates sessions and rotating the second requires a controlled
-TOTP migration. Rotating `SESSION_SECRET` also invalidates pending employee
-email OTP codes, whose maximum lifetime is ten minutes.
+Each checked-in `startCommand` exports `NODE_EXTRA_CA_CERTS` to the CA copied
+under that service's `release/certs` directory. Do not reuse the old Docker-only
+`/app/certs/...` path on the Node services. The build commands unset any
+inherited CA path before installing dependencies and fail if their real build
+or PDF-security check fails.
+
+For a new service, the Blueprint generates independent 256-bit
+`SESSION_SECRET` and `TOTP_ENCRYPTION_KEY` values. On an existing service,
+Render's `generateValue` behavior retains an environment variable that already
+exists; it generates a value only when the variable is absent. Do not delete
+either variable before attaching or syncing the Blueprint. Variables marked
+`sync: false` are ignored on later Blueprint updates and must be changed
+manually by an authorized operator. Rotating `SESSION_SECRET` invalidates
+sessions and pending employee email OTP codes; rotating `TOTP_ENCRYPTION_KEY`
+requires a controlled TOTP migration.
+
+Custom domains are intentionally omitted from `render.yaml`. Render retains an
+existing service's domains when that field is omitted, so attaching this
+Blueprint does not replace `app.wathaiqihealth.com` or its certificate setup.
 
 After the dedicated Resend sending domain is verified and its click/open
 tracking is disabled, add

@@ -103,8 +103,8 @@ outbox وعاملًا منفصلًا يوقع أحداثًا مصغرة قبل �
 SaudiNIC وSAIP موثقة في
 [docs/BRAND_AND_DOMAIN.md](docs/BRAND_AND_DOMAIN.md).
 
-For the no-card external acceptance path, use the Docker-based Render service
-and the existing Supabase project only through the guarded runbook in
+For the no-card external acceptance path, use the two Node services declared in
+the Render Blueprint and the existing Supabase project only through the guarded runbook in
 [docs/RENDER_SUPABASE_DEPLOYMENT.md](docs/RENDER_SUPABASE_DEPLOYMENT.md).
 The checked-in `render.yaml` deliberately keeps deploys manual: migrations run
 with a separate database identity before the web service is released, and the
