@@ -75,6 +75,7 @@
     "zod": "catalog:"
   },
   "dependencies": {
+    "pdf-lib": "1.17.1",
     "qrcode.react": "^4.2.0"
   }
 }

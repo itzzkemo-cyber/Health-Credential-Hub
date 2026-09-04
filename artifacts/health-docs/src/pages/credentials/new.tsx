@@ -44,11 +44,13 @@ import { getAuthUser } from "@/lib/auth";
 import { useLanguage } from "@/lib/language-context";
 import {
   buildUploadRequestHeaders,
-  isSupportedUploadFile,
+  InvalidPdfError,
+  PdfPageLimitError,
   prepareUploadFile,
   UnsupportedUploadTypeError,
   UPLOAD_ACCEPT_ATTRIBUTE,
   UploadTooLargeError,
+  validateUploadFile,
 } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 import { getDocumentUploadAvailability } from "@/lib/document-upload-availability";
@@ -139,7 +141,7 @@ export default function CredentialNew() {
   >("idle");
   const [cleanupUnconfirmed, setCleanupUnconfirmed] = useState(false);
   const [ocrStage, setOcrStage] = useState<
-    "idle" | "upload" | "read" | "cleanup"
+    "idle" | "validate" | "upload" | "read" | "cleanup"
   >("idle");
   const [ocrUploadedFile, setOcrUploadedFile] = useState<{
     objectPath: string;
@@ -190,6 +192,29 @@ export default function CredentialNew() {
     requestUploadUrl.reset();
     deleteUnlinkedUpload.reset();
     extractCredentialOcr.reset();
+  };
+
+  const notifyUploadValidationError = (
+    error: unknown,
+    isPdf: boolean,
+  ): boolean => {
+    if (error instanceof UploadTooLargeError) {
+      toast.error(t("credential.file_too_large"));
+      return true;
+    }
+    if (error instanceof PdfPageLimitError) {
+      toast.error(t("credential.pdf_page_limit_exceeded"));
+      return true;
+    }
+    if (error instanceof UnsupportedUploadTypeError) {
+      toast.error(t("credential.file_type_unsupported"));
+      return true;
+    }
+    if (isPdf && error instanceof InvalidPdfError) {
+      toast.error(t("credential.pdf_invalid"));
+      return true;
+    }
+    return false;
   };
 
   const putPreparedUpload = async (
@@ -273,15 +298,27 @@ export default function CredentialNew() {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    if (!isSupportedUploadFile(file)) {
-      toast.error(t("credential.file_type_unsupported"));
-      return;
+    const isPdf = file.type === "application/pdf";
+    ocrLock.current = true;
+    if (isPdf) setOcrStage("validate");
+    let fileIsValid = false;
+    try {
+      await validateUploadFile(file);
+      fileIsValid = true;
+    } catch (error) {
+      if (!notifyUploadValidationError(error, isPdf)) {
+        toast.error(t("credential.upload_failed"));
+      }
+    } finally {
+      ocrLock.current = false;
+      if (isPdf) setOcrStage("idle");
     }
+    if (!fileIsValid) return;
     if (!(await deleteUploadedOcrFile())) return;
     setSelectedFile(file);
     setOcrResult(null);
     setPdfReviewStatus("idle");
-    if (file.type === "application/pdf") {
+    if (isPdf) {
       void readSelectedDocument(file, false);
     }
   };
@@ -334,11 +371,7 @@ export default function CredentialNew() {
         });
         grantedObjectPath = grant.objectPath;
         if (isPdf) setOcrStage("read");
-        const uploadResult = await putPreparedUpload(
-          grant,
-          prepared,
-          isPdf,
-        );
+        const uploadResult = await putPreparedUpload(grant, prepared, isPdf);
 
         if (isPdf && uploadResult.ephemeralPdfReview) {
           // The review request never persists bytes or its grant. Saving later
@@ -381,10 +414,8 @@ export default function CredentialNew() {
         setOcrUploadedFile(null);
       }
 
-      if (error instanceof UploadTooLargeError) {
-        toast.error(t("credential.file_too_large"));
-      } else if (error instanceof UnsupportedUploadTypeError) {
-        toast.error(t("credential.file_type_unsupported"));
+      if (notifyUploadValidationError(error, isPdf)) {
+        // The rejected file never leaves the device.
       } else if (
         isPdf &&
         error instanceof CredentialUploadError &&
@@ -470,14 +501,12 @@ export default function CredentialNew() {
       const underlyingError = submissionError?.originalError ?? error;
       if (
         submissionError?.stage === "upload" &&
-        underlyingError instanceof UploadTooLargeError
+        notifyUploadValidationError(
+          underlyingError,
+          selectedFile?.type === "application/pdf",
+        )
       ) {
-        toast.error(t("credential.file_too_large"));
-      } else if (
-        submissionError?.stage === "upload" &&
-        underlyingError instanceof UnsupportedUploadTypeError
-      ) {
-        toast.error(t("credential.file_type_unsupported"));
+        // Client-side document constraints already have a localized message.
       } else if (
         submissionError?.stage === "upload" &&
         selectedFile?.type === "application/pdf" &&
@@ -657,9 +686,20 @@ export default function CredentialNew() {
                   <DocumentPicker
                     id="manual-document-upload"
                     busy={
+                      ocrStage === "validate" ||
                       submissionStage === "upload" ||
                       ocrStage === "upload" ||
                       ocrStage === "cleanup"
+                    }
+                    busyTitle={
+                      ocrStage === "validate"
+                        ? t("credential.file_validating")
+                        : undefined
+                    }
+                    busyHint={
+                      ocrStage === "validate"
+                        ? t("credential.file_validating_hint")
+                        : undefined
                     }
                     disabled={controlsDisabled || !documentUploadsEnabled}
                     fileName={selectedFile?.name ?? ""}
@@ -1016,9 +1056,11 @@ function OcrReviewCard({
   );
 }
 
-function DocumentPicker({
+export function DocumentPicker({
   id,
   busy,
+  busyTitle,
+  busyHint,
   disabled = false,
   fileName,
   compact = false,
@@ -1028,6 +1070,8 @@ function DocumentPicker({
 }: {
   id: string;
   busy: boolean;
+  busyTitle?: string;
+  busyHint?: string;
   disabled?: boolean;
   fileName: string;
   compact?: boolean;
@@ -1084,14 +1128,15 @@ function DocumentPicker({
             className={cn("font-semibold", compact ? "truncate" : "text-lg")}
             role="status"
             aria-live="polite"
+            dir={!busy && fileName ? "auto" : undefined}
           >
             {busy
-              ? t("credential.uploading_title")
+              ? busyTitle || t("credential.uploading_title")
               : fileName || t("credential.choose_file")}
           </p>
           <p className="mt-1 text-sm leading-5 text-muted-foreground">
             {busy
-              ? t("credential.uploading_hint")
+              ? busyHint || t("credential.uploading_hint")
               : fileName
                 ? t("credential.file_ready")
                 : t("credential.manual_upload_hint")}

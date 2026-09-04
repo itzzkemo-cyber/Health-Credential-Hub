@@ -545,6 +545,13 @@ export const en = {
       "The document is too large — the maximum is 8 MiB. Choose a smaller file or reduce the image resolution, then try again.",
     file_type_unsupported:
       "Choose a JPG or PNG photo, or a PDF of up to 5 pages and 8 MiB.",
+    pdf_page_limit_exceeded:
+      "This PDF has more than 5 pages. Choose a PDF with 5 pages or fewer and try again.",
+    pdf_invalid:
+      "This PDF could not be read on your device. Choose a valid, unencrypted PDF and try again.",
+    file_validating: "Checking PDF…",
+    file_validating_hint:
+      "Checking the file size and page count on your device before upload.",
     document_preview: "Document Preview",
     open_file: "Open File",
     no_document: "No document attached",

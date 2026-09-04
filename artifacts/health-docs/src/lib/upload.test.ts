@@ -1,13 +1,27 @@
 import { describe, expect, it } from "vitest";
+import { PDFDocument } from "pdf-lib";
 import {
   buildUploadRequestHeaders,
+  InvalidPdfError,
   isSupportedUploadFile,
+  MAX_PDF_PAGES,
   MAX_UPLOAD_BYTES,
+  PdfPageLimitError,
   prepareUploadFile,
   UnsupportedUploadTypeError,
   UploadTooLargeError,
   UPLOAD_ACCEPT_ATTRIBUTE,
+  validateUploadFile,
 } from "./upload";
+
+async function makePdf(pageCount: number): Promise<File> {
+  const document = await PDFDocument.create();
+  for (let index = 0; index < pageCount; index += 1) document.addPage();
+  const bytes = await document.save();
+  return new File([bytes], `credential-${pageCount}-pages.pdf`, {
+    type: "application/pdf",
+  });
+}
 
 describe("buildUploadRequestHeaders", () => {
   it("adds the CSRF marker to authenticated same-origin filesystem uploads", () => {
@@ -54,9 +68,7 @@ describe("controlled document uploads", () => {
   });
 
   it("sends PDF only to controlled server processing without image decoding", async () => {
-    const pdf = new File(["document"], "license.pdf", {
-      type: "application/pdf",
-    });
+    const pdf = await makePdf(1);
 
     await expect(prepareUploadFile(pdf)).resolves.toEqual({
       blob: pdf,
@@ -71,6 +83,31 @@ describe("controlled document uploads", () => {
     });
     await expect(prepareUploadFile(pdf)).rejects.toBeInstanceOf(
       UploadTooLargeError,
+    );
+  });
+
+  it("accepts a PDF at the five-page client limit", async () => {
+    const pdf = await makePdf(MAX_PDF_PAGES);
+
+    await expect(validateUploadFile(pdf)).resolves.toBeUndefined();
+  });
+
+  it("rejects a PDF over five pages before network upload", async () => {
+    const pdf = await makePdf(MAX_PDF_PAGES + 1);
+
+    await expect(validateUploadFile(pdf)).rejects.toMatchObject({
+      name: PdfPageLimitError.name,
+      pageCount: MAX_PDF_PAGES + 1,
+    });
+  });
+
+  it("rejects a malformed PDF during client-side validation", async () => {
+    const pdf = new File(["not-a-pdf"], "broken.pdf", {
+      type: "application/pdf",
+    });
+
+    await expect(validateUploadFile(pdf)).rejects.toBeInstanceOf(
+      InvalidPdfError,
     );
   });
 

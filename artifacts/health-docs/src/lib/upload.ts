@@ -9,6 +9,9 @@
 /** Max prepared file size accepted by private document storage (8 MB). */
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
+/** Max page count accepted for an employee PDF credential. */
+export const MAX_PDF_PAGES = 5;
+
 export const ACCEPTED_UPLOAD_MIME_TYPES = [
   "image/jpeg",
   "image/png",
@@ -38,6 +41,23 @@ export class UnsupportedUploadTypeError extends Error {
   }
 }
 
+export class PdfPageLimitError extends Error {
+  readonly pageCount: number;
+
+  constructor(pageCount: number) {
+    super(`PDF exceeds the ${MAX_PDF_PAGES}-page limit`);
+    this.name = "PdfPageLimitError";
+    this.pageCount = pageCount;
+  }
+}
+
+export class InvalidPdfError extends Error {
+  constructor() {
+    super("PDF could not be parsed safely in the browser");
+    this.name = "InvalidPdfError";
+  }
+}
+
 export interface PreparedUpload {
   blob: Blob;
   contentType: AcceptedUploadMimeType;
@@ -48,6 +68,52 @@ export function isSupportedUploadFile(file: Pick<File, "type">): boolean {
   return ACCEPTED_UPLOAD_MIME_TYPES.includes(
     file.type as (typeof ACCEPTED_UPLOAD_MIME_TYPES)[number],
   );
+}
+
+const pdfValidationCache = new WeakMap<File, Promise<void>>();
+
+async function validatePdf(file: File): Promise<void> {
+  if (file.size > MAX_UPLOAD_BYTES) throw new UploadTooLargeError();
+
+  let validation = pdfValidationCache.get(file);
+  if (!validation) {
+    validation = (async () => {
+      try {
+        // Loaded only after a PDF is selected so image uploads and the initial
+        // mobile bundle do not pay the parser cost.
+        const { PDFDocument } = await import("pdf-lib");
+        const document = await PDFDocument.load(await file.arrayBuffer(), {
+          updateMetadata: false,
+        });
+        const pageCount = document.getPageCount();
+        if (pageCount < 1) throw new InvalidPdfError();
+        if (pageCount > MAX_PDF_PAGES) {
+          throw new PdfPageLimitError(pageCount);
+        }
+      } catch (error) {
+        if (
+          error instanceof PdfPageLimitError ||
+          error instanceof InvalidPdfError
+        ) {
+          throw error;
+        }
+        throw new InvalidPdfError();
+      }
+    })();
+    pdfValidationCache.set(file, validation);
+  }
+
+  await validation;
+}
+
+/**
+ * Validate a browser-selected document before it can update form state or
+ * trigger a private upload request. The API repeats these checks and remains
+ * the authorization and upload-policy boundary.
+ */
+export async function validateUploadFile(file: File): Promise<void> {
+  if (!isSupportedUploadFile(file)) throw new UnsupportedUploadTypeError();
+  if (file.type === "application/pdf") await validatePdf(file);
 }
 
 /**
@@ -120,10 +186,9 @@ async function downscaleImage(file: File): Promise<Blob> {
  * UploadTooLargeError is thrown when the prepared image exceeds the size cap.
  */
 export async function prepareUploadFile(file: File): Promise<PreparedUpload> {
-  if (!isSupportedUploadFile(file)) throw new UnsupportedUploadTypeError();
+  await validateUploadFile(file);
 
   if (file.type === "application/pdf") {
-    if (file.size > MAX_UPLOAD_BYTES) throw new UploadTooLargeError();
     return { blob: file, contentType: "application/pdf", kind: "pdf" };
   }
 
